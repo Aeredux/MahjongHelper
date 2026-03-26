@@ -2,6 +2,8 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Text;
 using System.Text.Json;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 
@@ -9,6 +11,14 @@ namespace SamplePlugin.Mahjong;
 
 public sealed unsafe class MahjongIconMap
 {
+    private static readonly string[] ExpectedTileCodes =
+    {
+        "M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9",
+        "P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8", "P9",
+        "S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "S9",
+        "EAST", "SOUTH", "WEST", "NORTH", "WHITE", "GREEN", "RED",
+    };
+
     private static readonly string CacheDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MahjongHelper");
     private static readonly string CacheFilePath = Path.Combine(CacheDirectory, "icon_name_cache.json");
     private static readonly IReadOnlyDictionary<uint, string> BuiltInMappings = new Dictionary<uint, string>
@@ -62,6 +72,49 @@ public sealed unsafe class MahjongIconMap
     public IReadOnlyDictionary<uint, string> Snapshot()
         => new Dictionary<uint, string>(_iconIdToTileCode);
 
+    public string BuildProgressReport(IEnumerable<uint>? observedIconIds = null)
+    {
+        var sb = new StringBuilder();
+        var snapshot = Snapshot();
+
+        var knownTileCodes = new HashSet<string>(snapshot.Values, StringComparer.OrdinalIgnoreCase);
+        var missingTileCodes = ExpectedTileCodes
+            .Where(code => !knownTileCodes.Contains(code))
+            .ToList();
+
+        var unknownObserved = (observedIconIds ?? Array.Empty<uint>())
+            .Distinct()
+            .Where(IsLikelyMahjongIconId)
+            .Where(iconId => !snapshot.ContainsKey(iconId))
+            .OrderBy(iconId => iconId)
+            .ToList();
+
+        sb.AppendLine("Mahjong Icon Mapping Progress");
+        sb.AppendLine($"Known icon mappings: {snapshot.Count}");
+        sb.AppendLine($"Known tile codes: {ExpectedTileCodes.Length - missingTileCodes.Count}/{ExpectedTileCodes.Length}");
+        sb.AppendLine();
+
+        sb.AppendLine("Missing tile codes:");
+        if (missingTileCodes.Count == 0)
+            sb.AppendLine("  (none)");
+        else
+            sb.AppendLine($"  {string.Join(" ", missingTileCodes)}");
+
+        sb.AppendLine();
+        sb.AppendLine("Unknown observed icon IDs (likely Mahjong range):");
+        if (unknownObserved.Count == 0)
+            sb.AppendLine("  (none)");
+        else
+            sb.AppendLine($"  {string.Join(", ", unknownObserved)}");
+
+        sb.AppendLine();
+        sb.AppendLine("Known icon -> tile mappings:");
+        foreach (var pair in snapshot.OrderBy(pair => pair.Key))
+            sb.AppendLine($"  {pair.Key} -> {pair.Value}");
+
+        return sb.ToString();
+    }
+
     private void LoadCache()
     {
         try
@@ -99,6 +152,9 @@ public sealed unsafe class MahjongIconMap
         foreach (var pair in BuiltInMappings)
             _iconIdToTileCode[pair.Key] = pair.Value;
     }
+
+    private static bool IsLikelyMahjongIconId(uint iconId)
+        => iconId >= 76041 && iconId <= 76150;
 
     private static string? TryParseTileCode(string rawName)
     {

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Textures;
@@ -13,6 +13,10 @@ public class MainWindow : Window, IDisposable
 {
     private readonly string goatImagePath;
     private readonly Plugin plugin;
+    public static String text = "default";
+    public static String text2 = "default";
+    public static String mappingReport = "Mapping report pending...";
+    public bool RequestTileDump;
 
     // We give this window a hidden ID using ##.
     // The user will see "My Amazing Window" as window title,
@@ -34,7 +38,50 @@ public class MainWindow : Window, IDisposable
 
     public override void Draw()
     {
+        if (ImGui.Button("Dump Likely Tiles"))
+        {
+            ImGui.SetClipboardText(text2 ?? "");
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Copy to Clipboard"))
+        {
+            ImGui.SetClipboardText(text ?? "");
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Copy Mapping Report"))
+        {
+            ImGui.SetClipboardText(mappingReport ?? "");
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Export Mapping Report"))
+        {
+            plugin.ExportMappingReport();
+        }
+
         ImGui.Text($"The random config bool is {plugin.Configuration.SomePropertyToBeSavedAndWithADefault}");
+
+        ImGui.Separator();
+        ImGui.Text("Mapping Progress");
+        ImGui.InputTextMultiline(
+            "##mappingProgress",
+            ref mappingReport,
+            200_000,
+            new System.Numerics.Vector2(-1, 180),
+            ImGuiInputTextFlags.ReadOnly
+        );
+
+        ImGui.Separator();
+        ImGui.Text("Raw Dump");
+        ImGui.InputTextMultiline(
+            "##mahjongDump",
+            ref text,
+            2_000_000, // max chars
+            new System.Numerics.Vector2(-1, 220),
+            ImGuiInputTextFlags.ReadOnly
+        );
 
         if (ImGui.Button("Show Settings"))
         {
@@ -42,7 +89,6 @@ public class MainWindow : Window, IDisposable
         }
 
         ImGui.Spacing();
-
         // Normally a BeginChild() would have to be followed by an unconditional EndChild(),
         // ImRaii takes care of this after the scope ends.
         // This works for all ImGui functions that require specific handling, examples are BeginTable() or Indent().

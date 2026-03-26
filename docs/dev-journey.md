@@ -83,3 +83,25 @@
 - `MahjongIconMap` now seeds a conservative built-in mapping baseline (`76069->P4`, `76070->S9`, `76071->S9`) before loading learned cache.
 
 **Result:** Phase 1 reader behavior is more stable during cold start and rebuild windows, while still converging to live captured data once icon loads occur.
+
+## 2026-03-26: Phase 1 UX acceleration — mapping progress panel + export
+
+**What:** Added a dedicated mapping-progress report in the main plugin window, with copy and export actions.
+
+**Why:** Hover-based learning works but was inefficient because users had no clear view of what was still missing. The new report makes progress explicit and reduces unnecessary hovering.
+
+**Changes made:**
+- `MahjongIconMap` now builds a progress report including:
+	- known mapping count,
+	- discovered tile-code coverage out of 34 expected tile codes,
+	- missing tile codes,
+	- unknown observed icon IDs in likely Mahjong icon range,
+	- full known `iconId -> tileCode` table.
+- `Plugin` now refreshes this report during normal EmjL draw updates and startup dump path.
+- Added `Plugin.ExportMappingReport()` to write `%APPDATA%/MahjongHelper/mapping_progress_report.txt`.
+- `MainWindow` now includes:
+	- `Copy Mapping Report` button,
+	- `Export Mapping Report` button,
+	- a read-only mapping progress panel.
+
+**Result:** The mapping workflow is now checklist-driven. Export uses current cached state directly and does not require unhovering before save.

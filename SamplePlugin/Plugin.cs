@@ -1,15 +1,25 @@
-﻿using Dalamud.Game.Command;
+using Dalamud.Game.Command;
 using Dalamud.IoC;
 using Dalamud.Plugin;
 using System.IO;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
 using SamplePlugin.Windows;
+using Dalamud.Game.Addon.Lifecycle;
+using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
+using Dalamud.Game.Gui;
+using FFXIVClientStructs.FFXIV.Component.GUI;
+using SamplePlugin.Mahjong;
+using System;
+using System.Linq;
 
 namespace SamplePlugin;
 
 public sealed class Plugin : IDalamudPlugin
 {
+    private static readonly string CacheDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MahjongHelper");
+    private static readonly string MappingReportPath = Path.Combine(CacheDirectory, "mapping_progress_report.txt");
+
     [PluginService] internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
     [PluginService] internal static ITextureProvider TextureProvider { get; private set; } = null!;
     [PluginService] internal static ICommandManager CommandManager { get; private set; } = null!;
@@ -18,16 +28,35 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IDataManager DataManager { get; private set; } = null!;
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
 
-    private const string CommandName = "/pmycommand";
+    [PluginService]
+    private static IGameInteropProvider GameInterop { get; set; } = null!;
 
+    private const string CommandName = "/mj";
+    [PluginService]
+    private static IAddonLifecycle AddonLifecycle { get; set; } = null!;
+
+    [PluginService]
+    private static IGameGui GameGui { get; set; } = null!;
     public Configuration Configuration { get; init; }
 
     public readonly WindowSystem WindowSystem = new("SamplePlugin");
     private ConfigWindow ConfigWindow { get; init; }
     private MainWindow MainWindow { get; init; }
+    private DateTime _nextDumpAtUtc = DateTime.MinValue;
+    private bool _startupDumpDone = false;
+    private IconIdCapture _iconCapture = null!;
+    private MahjongIconMap _iconMap = null!;
 
     public Plugin()
     {
+        _iconCapture = new IconIdCapture(GameInterop);
+        _iconMap = new MahjongIconMap();
+
+        AddonLifecycle.RegisterListener(
+            AddonEvent.PreDraw,
+            "EmjL", // temporary, we’ll fix name later
+            OnMahjongDraw
+        );
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
 
         // You might normally want to embed resources and load them from the manifest stream
@@ -58,10 +87,101 @@ public sealed class Plugin : IDalamudPlugin
         // Use /xllog to open the log window in-game
         // Example Output: 00:57:54.959 | INF | [SamplePlugin] ===A cool log message from Sample Plugin===
         Log.Information($"===A cool log message from {PluginInterface.Manifest.Name}===");
+
+        // If EmjL addon is already open (player is in a mahjong game), dump immediately on load
+        TryImmediateDump();
+    }
+
+    private unsafe void TryImmediateDump()
+    {
+        try
+        {
+            var addonPtr = GameGui.GetAddonByName("EmjL");
+            if (addonPtr.IsNull) return;
+
+            var addon = (AtkUnitBase*)addonPtr.Address;
+            if (addon == null || addon->RootNode == null) return;
+
+            _iconMap.ObserveHover(addon);
+            var handSnapshot = MahjongHandReader.Read(addon, _iconCapture, _iconMap);
+            MainWindow.mappingReport = _iconMap.BuildProgressReport(_iconCapture.IconMap.Values);
+
+            Log.Information("EmjL already open on plugin load — dumping immediately");
+            var dumpContent = TileDataDumper.DumpAndSave(addon, _iconCapture, _iconMap);
+            MainWindow.text = dumpContent;
+            MainWindow.text2 = handSnapshot.ToDisplayText();
+            _startupDumpDone = true;
+            _nextDumpAtUtc = DateTime.UtcNow.AddSeconds(3);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Startup dump failed: {ex.Message}");
+        }
+    }
+
+    private unsafe void OnMahjongDraw(AddonEvent type, AddonArgs args)
+    {
+        var addonPtr = args.Addon; // AtkUnitBasePtr
+        if (addonPtr.IsNull)
+        {
+            MainWindow.text = "EmjL addonPtr is null";
+            return;
+        }
+
+        var addon = (AtkUnitBase*)addonPtr.Address;
+
+        // (Optional) quick safety checks
+        if (addon == null || addon->RootNode == null)
+        {
+            MainWindow.text = "addon/root is null";
+            return;
+        }
+
+        _iconMap.ObserveHover(addon);
+
+        // IMPORTANT: throttle so you don’t dump every frame
+        // But always dump on first draw after plugin load
+        var now = DateTime.UtcNow;
+        if (_startupDumpDone && now < _nextDumpAtUtc)
+            return;
+
+        _startupDumpDone = true;
+        _nextDumpAtUtc = now.AddSeconds(3); // dump every 3 seconds
+
+        // Write structured tile data to file + display in UI
+        try
+        {
+            var handSnapshot = MahjongHandReader.Read(addon, _iconCapture, _iconMap);
+            var dumpContent = TileDataDumper.DumpAndSave(addon, _iconCapture, _iconMap);
+            MainWindow.text = dumpContent;
+            MainWindow.text2 = handSnapshot.ToDisplayText();
+            MainWindow.mappingReport = _iconMap.BuildProgressReport(_iconCapture.IconMap.Values);
+        }
+        catch (Exception ex)
+        {
+            MainWindow.text = $"Dump failed: {ex.Message}";
+        }
+    }
+
+    public void ExportMappingReport()
+    {
+        try
+        {
+            Directory.CreateDirectory(CacheDirectory);
+            var report = _iconMap.BuildProgressReport(_iconCapture.IconMap.Values);
+            File.WriteAllText(MappingReportPath, report);
+            MainWindow.mappingReport = report + Environment.NewLine + $"Exported to: {MappingReportPath}";
+        }
+        catch (Exception ex)
+        {
+            MainWindow.mappingReport = $"Export failed: {ex.Message}";
+        }
     }
 
     public void Dispose()
     {
+        _iconCapture.Dispose();
+        AddonLifecycle.UnregisterListener(OnMahjongDraw);
         // Unregister all actions to not leak anything during disposal of plugin
         PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
         PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
