@@ -115,6 +115,30 @@ public sealed unsafe class MahjongIconMap
     public IReadOnlyDictionary<uint, string> Snapshot()
         => new Dictionary<uint, string>(_iconIdToTileCode);
 
+    public void ResetLearnedMappings()
+    {
+        _iconIdToTileCode.Clear();
+        _conflictingMappings.Clear();
+        _pendingIconId = 0;
+        _pendingTileCode = null;
+        _pendingPairCount = 0;
+        SeedBuiltInMappings();
+        SaveCache();
+    }
+
+    public bool ResetLearnedMapping(uint iconId)
+    {
+        if (LockedBuiltInIconIds.Contains(iconId))
+            return false;
+
+        var removed = _iconIdToTileCode.TryRemove(iconId, out _);
+        _conflictingMappings.TryRemove(iconId, out _);
+        if (removed)
+            SaveCache();
+
+        return removed;
+    }
+
     public string BuildProgressReport(IEnumerable<uint>? observedIconIds = null)
     {
         var sb = new StringBuilder();

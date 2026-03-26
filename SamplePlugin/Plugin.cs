@@ -180,6 +180,19 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
+    public void ResetLearnedMappings()
+    {
+        _iconMap.ResetLearnedMappings();
+        MainWindow.mappingReport = _iconMap.BuildProgressReport(_iconCapture.IconMap.Values);
+    }
+
+    public bool ResetLearnedMapping(uint iconId)
+    {
+        var removed = _iconMap.ResetLearnedMapping(iconId);
+        MainWindow.mappingReport = _iconMap.BuildProgressReport(_iconCapture.IconMap.Values);
+        return removed;
+    }
+
     private static HashSet<uint> BuildEligibleIconSet(MahjongHandReader.MahjongHandSnapshot snapshot)
     {
         var set = new HashSet<uint>();

@@ -4,6 +4,12 @@
 
 A Dalamud plugin for FFXIV's Doman Mahjong (Gold Saucer) that reads in-game state from the "EmjL" addon, sends it to a local Riichi Mahjong solver server (`localhost:8080`), and displays/executes suggested moves.
 
+## Build / Deploy Note
+
+- For in-game testing and deployment, always update the Release x64 build output.
+- Target artifact: `SamplePlugin/bin/x64/Release/SamplePlugin.dll`
+- Do not assume the Debug build output is the correct DLL for user testing.
+
 ## Architecture
 
 ```

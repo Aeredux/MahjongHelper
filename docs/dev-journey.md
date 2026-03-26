@@ -120,3 +120,19 @@
 - Locked built-in icon IDs so cached values cannot override baseline mappings on load.
 
 **Result:** Mapping flips from unrelated hover contexts are blocked, and noisy observations are filtered before they can mutate learned map state.
+
+## 2026-03-26: Mapping recovery controls — reset learned cache from UI
+
+**What:** Added UI controls to clear corrupted learned icon mappings without manually editing cache files.
+
+**Why:** Earlier hover-learning bugs could leave bad persisted mappings in `%APPDATA%/MahjongHelper/icon_name_cache.json`. Users needed a safe recovery path before resuming mapping work.
+
+**Changes made:**
+- `MahjongIconMap.ResetLearnedMappings()` clears learned mappings and conflicts, then restores locked built-in baseline mappings.
+- `MahjongIconMap.ResetLearnedMapping(iconId)` removes one non-locked icon mapping.
+- `Plugin` now exposes reset actions for the main window.
+- `MainWindow` now includes:
+	- `Reset Learned Mappings` button,
+	- text input + `Reset Icon ID` button for targeted cleanup.
+
+**Result:** Bad learned cache entries can now be removed in-game before continuing Phase 1 mapping verification.

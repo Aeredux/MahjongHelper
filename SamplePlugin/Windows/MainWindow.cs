@@ -16,6 +16,7 @@ public class MainWindow : Window, IDisposable
     public static String text = "default";
     public static String text2 = "default";
     public static String mappingReport = "Mapping report pending...";
+    private string resetIconIdInput = "";
     public bool RequestTileDump;
 
     // We give this window a hidden ID using ##.
@@ -61,10 +62,26 @@ public class MainWindow : Window, IDisposable
             plugin.ExportMappingReport();
         }
 
+        ImGui.SameLine();
+        if (ImGui.Button("Reset Learned Mappings"))
+        {
+            plugin.ResetLearnedMappings();
+        }
+
         ImGui.Text($"The random config bool is {plugin.Configuration.SomePropertyToBeSavedAndWithADefault}");
 
         ImGui.Separator();
         ImGui.Text("Mapping Progress");
+        ImGui.SetNextItemWidth(160 * ImGuiHelpers.GlobalScale);
+        ImGui.InputText("##resetIconIdInput", ref resetIconIdInput, 32);
+        ImGui.SameLine();
+        if (ImGui.Button("Reset Icon ID") && uint.TryParse(resetIconIdInput, out var iconId))
+        {
+            if (!plugin.ResetLearnedMapping(iconId))
+                mappingReport = $"Reset failed for icon {iconId}. It may be locked or unknown." + Environment.NewLine + Environment.NewLine + mappingReport;
+            else
+                resetIconIdInput = "";
+        }
         ImGui.InputTextMultiline(
             "##mappingProgress",
             ref mappingReport,
