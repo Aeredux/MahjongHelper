@@ -28,6 +28,7 @@ public sealed unsafe class MahjongIconMap
         [76070] = "S9",
         [76071] = "S9",
     };
+    private static readonly HashSet<uint> LockedBuiltInIconIds = new(BuiltInMappings.Keys);
 
     private readonly ConcurrentDictionary<uint, string> _iconIdToTileCode = new();
     private readonly ConcurrentDictionary<uint, string> _conflictingMappings = new();
@@ -41,7 +42,7 @@ public sealed unsafe class MahjongIconMap
         LoadCache();
     }
 
-    public void ObserveHover(AtkUnitBase* addon)
+    public void ObserveHover(AtkUnitBase* addon, IReadOnlySet<uint>? eligibleIconIds = null)
     {
         try
         {
@@ -66,6 +67,16 @@ public sealed unsafe class MahjongIconMap
             if (!IsLikelyMahjongIconId(iconId))
                 return;
 
+            // Only learn when the icon ID is currently present in visible hand/drawn tiles.
+            // This filters out stale or unrelated tooltip values.
+            if (eligibleIconIds != null && eligibleIconIds.Count > 0 && !eligibleIconIds.Contains(iconId))
+                return;
+
+            // Avoid learning honor names from unstable hover contexts for now.
+            // Suit tiles (with numeric rank) are significantly more reliable.
+            if (!IsSuitTileCode(tileCode))
+                return;
+
             // Require the same (iconId, tileCode) pair to be observed repeatedly
             // before learning. This avoids transient/stale hover value mismatches.
             if (_pendingIconId == iconId && string.Equals(_pendingTileCode, tileCode, StringComparison.Ordinal))
@@ -77,7 +88,7 @@ public sealed unsafe class MahjongIconMap
                 _pendingPairCount = 1;
             }
 
-            if (_pendingPairCount < 2)
+            if (_pendingPairCount < 3)
                 return;
 
             if (_iconIdToTileCode.TryGetValue(iconId, out var existingTileCode))
@@ -170,7 +181,13 @@ public sealed unsafe class MahjongIconMap
                 return;
 
             foreach (var pair in entries)
+            {
+                // Never let cached values replace locked built-in icon IDs.
+                if (LockedBuiltInIconIds.Contains(pair.Key))
+                    continue;
+
                 _iconIdToTileCode[pair.Key] = pair.Value;
+            }
         }
         catch
         {
@@ -197,6 +214,9 @@ public sealed unsafe class MahjongIconMap
 
     private static bool IsLikelyMahjongIconId(uint iconId)
         => iconId >= 76041 && iconId <= 76150;
+
+    private static bool IsSuitTileCode(string tileCode)
+        => tileCode.Length == 2 && (tileCode[0] == 'M' || tileCode[0] == 'P' || tileCode[0] == 'S') && tileCode[1] >= '1' && tileCode[1] <= '9';
 
     private static string? TryParseTileCode(string rawName)
     {

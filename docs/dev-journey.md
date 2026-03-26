@@ -105,3 +105,18 @@
 	- a read-only mapping progress panel.
 
 **Result:** The mapping workflow is now checklist-driven. Export uses current cached state directly and does not require unhovering before save.
+
+## 2026-03-26: Hover-learning regression fix — context-gated mapping updates
+
+**What:** Fixed unstable icon learning where the same icon ID could appear to map to unrelated tile names depending on hover context.
+
+**Why:** User reports showed conflicts like `76071 -> P2` with observations such as `76071 observed NORTH`, indicating stale/unrelated tooltip values were being mixed into learning.
+
+**Changes made:**
+- `MahjongIconMap.ObserveHover` now accepts eligible icon IDs and only learns when hovered icon ID is currently visible in live hand/drawn snapshot.
+- `Plugin` now computes eligible icon IDs from `MahjongHandSnapshot` and passes them into hover learning.
+- Increased confirmation requirement from 2 to 3 consecutive observations for a pair before learning.
+- Restricted auto-learning to suit tile codes (`M1-9`, `P1-9`, `S1-9`) to avoid honor-tile tooltip noise for now.
+- Locked built-in icon IDs so cached values cannot override baseline mappings on load.
+
+**Result:** Mapping flips from unrelated hover contexts are blocked, and noisy observations are filtered before they can mutate learned map state.

@@ -12,6 +12,7 @@ using FFXIVClientStructs.FFXIV.Component.GUI;
 using SamplePlugin.Mahjong;
 using System;
 using System.Linq;
+using System.Collections.Generic;
 
 namespace SamplePlugin;
 
@@ -102,8 +103,9 @@ public sealed class Plugin : IDalamudPlugin
             var addon = (AtkUnitBase*)addonPtr.Address;
             if (addon == null || addon->RootNode == null) return;
 
-            _iconMap.ObserveHover(addon);
             var handSnapshot = MahjongHandReader.Read(addon, _iconCapture, _iconMap);
+            var eligibleIconIds = BuildEligibleIconSet(handSnapshot);
+            _iconMap.ObserveHover(addon, eligibleIconIds);
             MainWindow.mappingReport = _iconMap.BuildProgressReport(_iconCapture.IconMap.Values);
 
             Log.Information("EmjL already open on plugin load — dumping immediately");
@@ -137,8 +139,6 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
 
-        _iconMap.ObserveHover(addon);
-
         // IMPORTANT: throttle so you don’t dump every frame
         // But always dump on first draw after plugin load
         var now = DateTime.UtcNow;
@@ -152,6 +152,8 @@ public sealed class Plugin : IDalamudPlugin
         try
         {
             var handSnapshot = MahjongHandReader.Read(addon, _iconCapture, _iconMap);
+            var eligibleIconIds = BuildEligibleIconSet(handSnapshot);
+            _iconMap.ObserveHover(addon, eligibleIconIds);
             var dumpContent = TileDataDumper.DumpAndSave(addon, _iconCapture, _iconMap);
             MainWindow.text = dumpContent;
             MainWindow.text2 = handSnapshot.ToDisplayText();
@@ -176,6 +178,21 @@ public sealed class Plugin : IDalamudPlugin
         {
             MainWindow.mappingReport = $"Export failed: {ex.Message}";
         }
+    }
+
+    private static HashSet<uint> BuildEligibleIconSet(MahjongHandReader.MahjongHandSnapshot snapshot)
+    {
+        var set = new HashSet<uint>();
+        foreach (var tile in snapshot.HandTiles)
+        {
+            if (tile.IconId > 0)
+                set.Add(tile.IconId);
+        }
+
+        if (snapshot.DrawnTile != null && snapshot.DrawnTile.IconId > 0)
+            set.Add(snapshot.DrawnTile.IconId);
+
+        return set;
     }
 
     public void Dispose()
