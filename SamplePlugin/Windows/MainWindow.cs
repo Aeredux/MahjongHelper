@@ -68,6 +68,12 @@ public class MainWindow : Window, IDisposable
             plugin.ResetLearnedMappings();
         }
 
+        ImGui.SameLine();
+        if (ImGui.Button("Reset All Data"))
+        {
+            plugin.ResetAllData();
+        }
+
         ImGui.Text($"The random config bool is {plugin.Configuration.SomePropertyToBeSavedAndWithADefault}");
 
         ImGui.Separator();

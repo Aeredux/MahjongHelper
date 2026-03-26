@@ -138,6 +138,18 @@ public static unsafe class MahjongHandReader
             : new MahjongHandSnapshot(handTiles, drawnTile);
     }
 
+    public static void ResetCachedSnapshot()
+    {
+        try
+        {
+            if (File.Exists(SnapshotCachePath))
+                File.Delete(SnapshotCachePath);
+        }
+        catch
+        {
+        }
+    }
+
     private static void SaveSnapshot(MahjongHandSnapshot snapshot)
     {
         try

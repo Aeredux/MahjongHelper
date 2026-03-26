@@ -47,6 +47,7 @@ public sealed class Plugin : IDalamudPlugin
     private bool _startupDumpDone = false;
     private IconIdCapture _iconCapture = null!;
     private MahjongIconMap _iconMap = null!;
+    private HashSet<uint> _lastEligibleIconIds = new();
 
     public Plugin()
     {
@@ -105,6 +106,7 @@ public sealed class Plugin : IDalamudPlugin
 
             var handSnapshot = MahjongHandReader.Read(addon, _iconCapture, _iconMap);
             var eligibleIconIds = BuildEligibleIconSet(handSnapshot);
+            _lastEligibleIconIds = eligibleIconIds;
             _iconMap.ObserveHover(addon, eligibleIconIds);
             MainWindow.mappingReport = _iconMap.BuildProgressReport(_iconCapture.IconMap.Values);
 
@@ -139,6 +141,9 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
 
+        // Learn hover pairs every frame using the latest known eligible icon set.
+        _iconMap.ObserveHover(addon, _lastEligibleIconIds);
+
         // IMPORTANT: throttle so you don’t dump every frame
         // But always dump on first draw after plugin load
         var now = DateTime.UtcNow;
@@ -153,6 +158,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             var handSnapshot = MahjongHandReader.Read(addon, _iconCapture, _iconMap);
             var eligibleIconIds = BuildEligibleIconSet(handSnapshot);
+            _lastEligibleIconIds = eligibleIconIds;
             _iconMap.ObserveHover(addon, eligibleIconIds);
             var dumpContent = TileDataDumper.DumpAndSave(addon, _iconCapture, _iconMap);
             MainWindow.text = dumpContent;
@@ -191,6 +197,27 @@ public sealed class Plugin : IDalamudPlugin
         var removed = _iconMap.ResetLearnedMapping(iconId);
         MainWindow.mappingReport = _iconMap.BuildProgressReport(_iconCapture.IconMap.Values);
         return removed;
+    }
+
+    public void ResetAllData()
+    {
+        _iconMap.ResetLearnedMappings();
+        _iconCapture.ResetCapturedIcons();
+        MahjongHandReader.ResetCachedSnapshot();
+        _lastEligibleIconIds.Clear();
+
+        try
+        {
+            if (File.Exists(MappingReportPath))
+                File.Delete(MappingReportPath);
+        }
+        catch
+        {
+        }
+
+        MainWindow.text = "All MahjongHelper cached data cleared.";
+        MainWindow.text2 = "Mahjong Hand Snapshot\nHand tiles: 0\nDrawn: (none)";
+        MainWindow.mappingReport = _iconMap.BuildProgressReport(Array.Empty<uint>());
     }
 
     private static HashSet<uint> BuildEligibleIconSet(MahjongHandReader.MahjongHandSnapshot snapshot)

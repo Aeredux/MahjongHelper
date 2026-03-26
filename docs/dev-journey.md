@@ -136,3 +136,23 @@
 	- text input + `Reset Icon ID` button for targeted cleanup.
 
 **Result:** Bad learned cache entries can now be removed in-game before continuing Phase 1 mapping verification.
+
+## 2026-03-26: Hover-learning cadence fix + full data reset
+
+**What:** Fixed hover learning so it runs every draw instead of only on the 3-second dump throttle, and added a full data reset path.
+
+**Why:** Requiring 3 consecutive hover confirmations was ineffective when hover observation only happened on throttled refresh. Brief but valid hovers were never recorded. Also, users needed a one-click way to clear all cached state, not only learned mappings.
+
+**Changes made:**
+- `Plugin.OnMahjongDraw` now calls hover learning every draw using the most recent eligible icon-ID set from the last live hand snapshot.
+- `Plugin` now stores `_lastEligibleIconIds` from the latest resolved hand for frame-to-frame hover validation.
+- Added `IconIdCapture.ResetCapturedIcons()` to clear persisted image-node icon capture cache.
+- Added `MahjongHandReader.ResetCachedSnapshot()` to clear persisted last-hand snapshot fallback.
+- Added `Plugin.ResetAllData()` and `Reset All Data` UI button to clear:
+	- learned icon mappings,
+	- conflict history,
+	- captured icon cache,
+	- cached hand snapshot,
+	- exported mapping report file.
+
+**Result:** Hover learning should respond during normal hovering again, and there is now a clean recovery path back to zero cached MahjongHelper state.
