@@ -30,6 +30,10 @@ public sealed unsafe class MahjongIconMap
     };
 
     private readonly ConcurrentDictionary<uint, string> _iconIdToTileCode = new();
+    private readonly ConcurrentDictionary<uint, string> _conflictingMappings = new();
+    private uint _pendingIconId;
+    private string? _pendingTileCode;
+    private int _pendingPairCount;
 
     public MahjongIconMap()
     {
@@ -57,6 +61,34 @@ public sealed unsafe class MahjongIconMap
             var iconId = iconValue.UInt;
             if (tileCode == null || iconId == 0)
                 return;
+
+            // Only learn from likely Mahjong tile icon IDs.
+            if (!IsLikelyMahjongIconId(iconId))
+                return;
+
+            // Require the same (iconId, tileCode) pair to be observed repeatedly
+            // before learning. This avoids transient/stale hover value mismatches.
+            if (_pendingIconId == iconId && string.Equals(_pendingTileCode, tileCode, StringComparison.Ordinal))
+                _pendingPairCount++;
+            else
+            {
+                _pendingIconId = iconId;
+                _pendingTileCode = tileCode;
+                _pendingPairCount = 1;
+            }
+
+            if (_pendingPairCount < 2)
+                return;
+
+            if (_iconIdToTileCode.TryGetValue(iconId, out var existingTileCode))
+            {
+                if (string.Equals(existingTileCode, tileCode, StringComparison.Ordinal))
+                    return;
+
+                // Never overwrite an existing learned mapping automatically.
+                _conflictingMappings[iconId] = $"existing={existingTileCode}, observed={tileCode}";
+                return;
+            }
 
             _iconIdToTileCode[iconId] = tileCode;
             SaveCache();
@@ -111,6 +143,16 @@ public sealed unsafe class MahjongIconMap
         sb.AppendLine("Known icon -> tile mappings:");
         foreach (var pair in snapshot.OrderBy(pair => pair.Key))
             sb.AppendLine($"  {pair.Key} -> {pair.Value}");
+
+        sb.AppendLine();
+        sb.AppendLine("Conflicting hover observations:");
+        if (_conflictingMappings.IsEmpty)
+            sb.AppendLine("  (none)");
+        else
+        {
+            foreach (var pair in _conflictingMappings.OrderBy(pair => pair.Key))
+                sb.AppendLine($"  {pair.Key}: {pair.Value}");
+        }
 
         return sb.ToString();
     }
