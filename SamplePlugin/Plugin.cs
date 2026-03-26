@@ -183,6 +183,7 @@ public sealed class Plugin : IDalamudPlugin
                 var uiStateFast = EmjUiReader.Read(addon, _iconCapture, _iconMap);
                 MainWindow.text3 = uiStateFast.ToDisplayText();
                 TrackUiState(uiStateFast, "realtime");
+                            UpdateHandIconDisplay(uiStateFast);
             }
             catch
             {
@@ -582,7 +583,35 @@ public sealed class Plugin : IDalamudPlugin
                 $"{slot.Kind}|{slot.SlotIndex}|{slot.NodeIndex}|{slot.NodeId}|{slot.NodeType}|{slot.Visible}|{slot.X:F0}|{slot.Y:F0}|{slot.Width}|{slot.Height}|{slot.IconId}|{slot.TileCode ?? string.Empty}");
 
         return string.Join("\n", lines);
+
     }
+
+    private void UpdateHandIconDisplay(EmjUiReader.UiState uiState)
+    {
+        try
+        {
+            // Extract canonical hand icon IDs in order
+            var canonicalHand = uiState.Slots
+                .Where(s => s.Kind == EmjUiReader.SlotKind.CanonicalPlayerHand)
+                .OrderBy(s => s.SlotIndex)
+                .Select(s => s.IconId.ToString())
+                .ToList();
+
+            if (canonicalHand.Count > 0)
+            {
+                MainWindow.handIconIds = string.Join(", ", canonicalHand);
+            }
+            else
+            {
+                MainWindow.handIconIds = "(no hand slots)";
+            }
+        }
+        catch
+        {
+            MainWindow.handIconIds = "(error reading hand)";
+        }
+    }
+
 
     public unsafe void AnnotateComparisonEvent(string eventName, string description)
     {

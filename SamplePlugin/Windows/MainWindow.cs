@@ -13,6 +13,7 @@ public class MainWindow : Window, IDisposable
     public static String text2 = "default";
     public static String text3 = "Captured: (none)\nPlayer hand slots: 0\nPlayer draw slot:\n  (missing)\nVisible tile candidates: 0";
     public static String mappingReport = "Mapping report pending...";
+    public static String handIconIds = "(none)";
     private string resetIconIdInput = "";
     public bool RequestTileDump;
 
@@ -129,7 +130,12 @@ public class MainWindow : Window, IDisposable
             ImGuiInputTextFlags.ReadOnly
         );
 
-        ImGui.Separator();
+        ImGui.SameLine();
+        if (ImGui.Button("Copy Hand Icon IDs"))
+        {
+            ImGui.SetClipboardText(handIconIds ?? "(none)");
+        }
+
         ImGui.Text("Mahjong UI State (slot-based scaffold)");
         ImGui.InputTextMultiline(
             "##mahjongUiState",
