@@ -23,10 +23,9 @@ public sealed unsafe class MahjongIconMap
     private static readonly string CacheFilePath = Path.Combine(CacheDirectory, "icon_name_cache.json");
     private static readonly IReadOnlyDictionary<uint, string> BuiltInMappings = new Dictionary<uint, string>
     {
-        // Conservative baseline from confirmed captures.
+        // Baseline from direct prior captures. Keep this narrow unless reconfirmed.
         [76069] = "P4",
         [76070] = "S9",
-        [76071] = "S9",
     };
     private static readonly HashSet<uint> LockedBuiltInIconIds = new(BuiltInMappings.Keys);
 
@@ -143,6 +142,14 @@ public sealed unsafe class MahjongIconMap
     {
         var sb = new StringBuilder();
         var snapshot = Snapshot();
+        var baselineMappings = snapshot
+            .Where(pair => LockedBuiltInIconIds.Contains(pair.Key))
+            .OrderBy(pair => pair.Key)
+            .ToList();
+        var learnedMappings = snapshot
+            .Where(pair => !LockedBuiltInIconIds.Contains(pair.Key))
+            .OrderBy(pair => pair.Key)
+            .ToList();
 
         var knownTileCodes = new HashSet<string>(snapshot.Values, StringComparer.OrdinalIgnoreCase);
         var missingTileCodes = ExpectedTileCodes
@@ -157,7 +164,9 @@ public sealed unsafe class MahjongIconMap
             .ToList();
 
         sb.AppendLine("Mahjong Icon Mapping Progress");
-        sb.AppendLine($"Known icon mappings: {snapshot.Count}");
+        sb.AppendLine($"Active icon mappings: {snapshot.Count}");
+        sb.AppendLine($"Locked baseline mappings: {baselineMappings.Count}");
+        sb.AppendLine($"Learned mappings: {learnedMappings.Count}");
         sb.AppendLine($"Known tile codes: {ExpectedTileCodes.Length - missingTileCodes.Count}/{ExpectedTileCodes.Length}");
         sb.AppendLine();
 
@@ -175,7 +184,22 @@ public sealed unsafe class MahjongIconMap
             sb.AppendLine($"  {string.Join(", ", unknownObserved)}");
 
         sb.AppendLine();
-        sb.AppendLine("Known icon -> tile mappings:");
+        sb.AppendLine("Locked baseline icon -> tile mappings:");
+        foreach (var pair in baselineMappings)
+            sb.AppendLine($"  {pair.Key} -> {pair.Value}");
+
+        sb.AppendLine();
+        sb.AppendLine("Learned icon -> tile mappings:");
+        if (learnedMappings.Count == 0)
+            sb.AppendLine("  (none)");
+        else
+        {
+            foreach (var pair in learnedMappings)
+                sb.AppendLine($"  {pair.Key} -> {pair.Value}");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("All active icon -> tile mappings:");
         foreach (var pair in snapshot.OrderBy(pair => pair.Key))
             sb.AppendLine($"  {pair.Key} -> {pair.Value}");
 

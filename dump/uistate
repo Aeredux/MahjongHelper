@@ -1,0 +1,36 @@
+Captured: 2026-03-26T08:25:39.9896591Z
+Player hand slots: 13
+  [PlayerHand:0] node=54 id=135 type=1055 vis=True pos=(556,0) size=(42,55) ICON_76065
+  [PlayerHand:1] node=55 id=1340016 type=1055 vis=True pos=(0,0) size=(42,55) (no-icon)
+  [PlayerHand:2] node=56 id=1340015 type=1055 vis=True pos=(0,0) size=(42,55) (no-icon)
+  [PlayerHand:3] node=57 id=1340014 type=1055 vis=True pos=(42,0) size=(42,55) ICON_76043
+  [PlayerHand:4] node=58 id=1340013 type=1055 vis=True pos=(462,0) size=(42,55) S9
+  [PlayerHand:5] node=59 id=1340012 type=1055 vis=True pos=(504,0) size=(42,55) P9
+  [PlayerHand:6] node=60 id=1340011 type=1055 vis=True pos=(462,0) size=(42,55) S9
+  [PlayerHand:7] node=61 id=1340010 type=1055 vis=True pos=(420,0) size=(42,55) ICON_76068
+  [PlayerHand:8] node=62 id=1340009 type=1055 vis=True pos=(378,0) size=(42,55) ICON_76068
+  [PlayerHand:9] node=63 id=1340008 type=1055 vis=True pos=(336,0) size=(42,55) ICON_76064
+  [PlayerHand:10] node=64 id=1340007 type=1055 vis=True pos=(294,0) size=(42,55) ICON_76062
+  [PlayerHand:11] node=65 id=1340006 type=1055 vis=True pos=(252,0) size=(42,55) ICON_76062
+  [PlayerHand:12] node=66 id=1340005 type=1055 vis=True pos=(210,0) size=(42,55) ICON_76056
+Player draw slot:
+  [PlayerDraw:0] node=107 id=127 type=1022 vis=True pos=(180,0) size=(34,45) S9
+Visible tile candidates: 18
+  [VisibleTileCandidate:1] node=55 id=1340016 type=1055 vis=True pos=(0,0) size=(42,55) (no-icon)
+  [VisibleTileCandidate:2] node=56 id=1340015 type=1055 vis=True pos=(0,0) size=(42,55) (no-icon)
+  [VisibleTileCandidate:17] node=71 id=134 type=1055 vis=True pos=(0,0) size=(42,55) M5
+  [VisibleTileCandidate:3] node=57 id=1340014 type=1055 vis=True pos=(42,0) size=(42,55) ICON_76043
+  [VisibleTileCandidate:16] node=70 id=1340001 type=1055 vis=True pos=(42,0) size=(42,55) ICON_76075
+  [VisibleTileCandidate:15] node=69 id=1340002 type=1055 vis=True pos=(84,0) size=(42,55) ICON_76052
+  [VisibleTileCandidate:14] node=68 id=1340003 type=1055 vis=True pos=(126,0) size=(42,55) ICON_76052
+  [VisibleTileCandidate:13] node=67 id=1340004 type=1055 vis=True pos=(168,0) size=(42,55) ICON_76052
+  [VisibleTileCandidate:12] node=66 id=1340005 type=1055 vis=True pos=(210,0) size=(42,55) ICON_76056
+  [VisibleTileCandidate:11] node=65 id=1340006 type=1055 vis=True pos=(252,0) size=(42,55) ICON_76062
+  [VisibleTileCandidate:10] node=64 id=1340007 type=1055 vis=True pos=(294,0) size=(42,55) ICON_76062
+  [VisibleTileCandidate:9] node=63 id=1340008 type=1055 vis=True pos=(336,0) size=(42,55) ICON_76064
+  [VisibleTileCandidate:8] node=62 id=1340009 type=1055 vis=True pos=(378,0) size=(42,55) ICON_76068
+  [VisibleTileCandidate:7] node=61 id=1340010 type=1055 vis=True pos=(420,0) size=(42,55) ICON_76068
+  [VisibleTileCandidate:4] node=58 id=1340013 type=1055 vis=True pos=(462,0) size=(42,55) S9
+  [VisibleTileCandidate:6] node=60 id=1340011 type=1055 vis=True pos=(462,0) size=(42,55) S9
+  [VisibleTileCandidate:5] node=59 id=1340012 type=1055 vis=True pos=(504,0) size=(42,55) P9
+  [VisibleTileCandidate:0] node=54 id=135 type=1055 vis=True pos=(556,0) size=(42,55) ICON_76065
