@@ -382,3 +382,41 @@
 - Expected result: Authoritative tile mappings without requiring user tile hovering or manual observation loops.
 
 **Result:** Plugin is cleaner and ready for memory-probing approach. Hover-learning is disabled to prevent further cache corruption.
+
+## 2026-03-26: StateComparisonLogger — automated before/after state tracking
+
+**What:** Created automatic byte-level comparison logging of AgentId.Emj+0x28 state across frames, with optional user annotations.
+
+**Why:** Manual membrane inspection and human comparison of probe dumps is tedious. Automated delta logging shows exactly which bytes change when gameplay events occur, enabling correlation of memory changes with tile discovery without manual user intervention.
+
+**Changes made:**
+- Created `StateComparisonLogger.cs`:
+  - Captures 0x200-byte snapshots of `AgentId.Emj+0x28` pointer target
+  - Computes byte-level deltas from previous snapshot
+  - Logs changes grouped by memory region (0x10-byte blocks)
+  - Supports annotated events (e.g., "tile drawn", "tile discarded")
+  - Writes to `%APPDATA%/MahjongHelper/state_comparison.log`
+- Integrated `CaptureSnapshot()` into `OnMahjongDraw()` — captures every frame without user action
+- Added UI buttons in MainWindow:
+  - `Copy Comparison Log` — copy current log to clipboard
+  - `Log: Tile Drawn` — annotate a draw event in the log
+  - `Log: Tile Discarded` — annotate a discard event in the log
+- Added `AnnotateComparisonEvent()` method in Plugin to trigger annotated captures
+
+**Investigation workflow:**
+1. Plugin running during normal gameplay captures every-frame snapshots of AgentId.Emj+0x28 state
+2. User plays normally, no manual intervention needed
+3. When a tile is drawn:
+   - (Optional) user clicks "Log: Tile Drawn" button
+   - Plugin logs the frame delta with annotation "tile drawn"
+4. User reviews `state_comparison.log` afterward:
+   - Looks for ByteGrouped changes at specific offsets
+   - Correlates which offsets change consistently with tile draws/discards
+   - Identifies candidate tile identity fields in the structure
+
+**Result:** 
+- ✅ Fully passive, automatic state capture during gameplay (no user action needed)
+- ✅ Before/after deltas are computed and logged automatically
+- ✅ User can optionally annotate events for correlation analysis
+- ✅ Log is structured and human-readable for manual reverse-engineering
+- **Recommendation:** User should play a few rounds with plugin active, click the annotation buttons at key moments, then analyze the log afterward to identify tile offset patterns.
