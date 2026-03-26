@@ -82,6 +82,33 @@ public class MainWindow : Window, IDisposable
             plugin.ResetAllData();
         }
 
+        ImGui.SameLine();
+        if (ImGui.Button("Copy Comparison Log"))
+        {
+            try
+            {
+                var logPath = SamplePlugin.Mahjong.StateComparisonLogger.GetLogPath();
+                if (System.IO.File.Exists(logPath))
+                {
+                    var content = System.IO.File.ReadAllText(logPath);
+                    ImGui.SetClipboardText(content);
+                }
+            }
+            catch { }
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Log: Tile Drawn"))
+        {
+            plugin.AnnotateComparisonEvent("tile_drawn", "Tile was drawn from wall");
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Log: Tile Discarded"))
+        {
+            plugin.AnnotateComparisonEvent("tile_discarded", "Player discarded a tile");
+        }
+
         ImGui.Separator();
         ImGui.Text("Mapping Progress");
         ImGui.SetNextItemWidth(160 * ImGuiHelpers.GlobalScale);

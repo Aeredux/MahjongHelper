@@ -155,6 +155,24 @@ public sealed class Plugin : IDalamudPlugin
         // Hover-learning disabled: unreliable. Pivoting to memory probing.
         // _iconMap.ObserveHover(addon, _lastEligibleIconIds);
 
+        // Capture AgentId.Emj state for comparison-based tile discovery
+        try
+        {
+            var agentModule = FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentModule.Instance();
+            if (agentModule != null)
+            {
+                var emjAgent = agentModule->GetAgentByInternalId(FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentId.Emj);
+                if (emjAgent != null)
+                {
+                    StateComparisonLogger.CaptureSnapshot((nint)emjAgent);
+                }
+            }
+        }
+        catch
+        {
+            // Never crash from diagnostics
+        }
+
         var now = DateTime.UtcNow;
 
         // Lightweight UI-state sampling can run faster than full dump cadence.
@@ -564,6 +582,26 @@ public sealed class Plugin : IDalamudPlugin
                 $"{slot.Kind}|{slot.SlotIndex}|{slot.NodeIndex}|{slot.NodeId}|{slot.NodeType}|{slot.Visible}|{slot.X:F0}|{slot.Y:F0}|{slot.Width}|{slot.Height}|{slot.IconId}|{slot.TileCode ?? string.Empty}");
 
         return string.Join("\n", lines);
+    }
+
+    public unsafe void AnnotateComparisonEvent(string eventName, string description)
+    {
+        try
+        {
+            var agentModule = FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentModule.Instance();
+            if (agentModule != null)
+            {
+                var emjAgent = agentModule->GetAgentByInternalId(FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentId.Emj);
+                if (emjAgent != null)
+                {
+                    StateComparisonLogger.LogAnnotatedEvent(eventName, description, (nint)emjAgent);
+                }
+            }
+        }
+        catch
+        {
+            // Never crash from UI actions
+        }
     }
 
     public void Dispose()
