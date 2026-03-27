@@ -706,7 +706,6 @@
 - The DomanMahjongStatus plugin navigates the ATK tree by NodeID chains (`GetChild(id, id, ...)`) from the RootNode, NOT by NodeList index.
 
 **Changes made:**
-
 1. **Rewrote `ClassifySmallTiles`** — replaced entire spatial/parent-grouping heuristic with simple NodeType-based mapping. ~100 lines of heuristic code replaced with ~15 lines of direct type checking.
 
 2. **Added ATK child-tree navigation helpers:**
@@ -739,7 +738,6 @@
 **What:** Implemented the full server communication layer for sending game state to the local Mahjong solver server and receiving discard suggestions.
 
 **New files:**
-
 1. **`ServerModels.cs`** — Request/response DTOs:
    - `SuggestMoveRequest` — hand tiles, drawn tile, discard pools, dora, wind/round context
    - `EvaluateCallRequest` — hand tiles, call tile/type, discard context

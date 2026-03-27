@@ -151,9 +151,9 @@ Tile format: uppercase strings — `M1`–`M9`, `P1`–`P9`, `S1`–`S9`, `EAST`
 
 - [ ] **5.1** Implement tile click automation — simulate clicking the suggested discard tile node in the EmjL addon.
 - [ ] **5.2** Implement call decision automation — click accept/decline on chi/pon/kan/ron prompts based on server evaluation.
-- [ ] **5.3** Add configurable delay before auto-actions (to look natural and allow user override).
-- [ ] **5.4** Add a master toggle for auto-play (off by default), separate toggles for auto-discard and auto-call.
-- [ ] **5.5** Add a "pause" keybind that temporarily disables auto-play for the current turn.
+- [x] **5.3** Add configurable delay before auto-actions (to look natural and allow user override).
+- [x] **5.4** Add a master toggle for auto-play (off by default), separate toggles for auto-discard and auto-call.
+- [x] **5.5** Add a "pause" keybind that temporarily disables auto-play for the current turn.
 
 ### Phase 6: Plugin Polish & Configuration
 
