@@ -191,14 +191,16 @@ public sealed class AutoPlayManager
         }
 
         Log($"Executing discard: {tileCode} nodeIndex={matchingSlot.NodeIndex} nodeId={matchingSlot.NodeId}");
-        return AddonClickHelper.TryDiscardTile(addon, matchingSlot.NodeIndex);
+        // Use method 0 (try all methods) for now during discovery
+        return AddonClickHelper.TryClickTileNode(addon, matchingSlot.NodeIndex, true, 0);
     }
 
     private unsafe bool ExecuteCallResponse(AtkUnitBase* addon, int callIndex)
     {
         var action = callIndex == 0 ? "accept" : "pass";
-        Log($"Executing call response: {action}");
-        return AddonClickHelper.TryRespondToCall(addon, callIndex);
+        Log($"[DRY-RUN] Executing call response: {action}");
+        // Call response still in dry-run mode
+        return false;
     }
 
     private static void Log(string message)

@@ -1438,17 +1438,24 @@ public sealed class Plugin : IDalamudPlugin
         }
         else if (lower.StartsWith("clicktile "))
         {
-            // Usage: /mj clicktile <nodeIndex> [run]
+            // Usage: /mj clicktile <nodeIndex> [method] [run]
+            // method: 0=all, 1=comp listener, 2=addon recv, 3=event 0x17, 4=callback, 5=event 0x09
             var parts = lower.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length >= 2 && int.TryParse(parts[1], out var nodeIndex))
             {
-                var execute = parts.Length >= 3 && parts[2] == "run";
+                var method = 0;
+                var execute = false;
+                for (int i = 2; i < parts.Length; i++)
+                {
+                    if (parts[i] == "run") execute = true;
+                    else if (int.TryParse(parts[i], out var m)) method = m;
+                }
                 unsafe
                 {
                     var addonPtr = _lastAddonAddress != 0 ? (AtkUnitBase*)_lastAddonAddress : null;
-                    AddonClickHelper.TryClickTileNode(addonPtr, nodeIndex, execute);
+                    AddonClickHelper.TryClickTileNode(addonPtr, nodeIndex, execute, method);
                 }
-                AppendRecentTransition($"{DateTime.UtcNow:O} click tile node={nodeIndex} execute={execute}");
+                AppendRecentTransition($"{DateTime.UtcNow:O} click tile node={nodeIndex} method={method} execute={execute}");
             }
             else
             {
