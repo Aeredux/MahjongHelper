@@ -316,13 +316,15 @@ public static unsafe class EmjUiReader
         if (tilesWithIcons.Count == 0)
             return;
 
-        // Classify by NodeType — each player's discard pool uses a distinct component type
-        var playerCounts = new Dictionary<SlotKind, int>
+        // Classify by NodeType — each player's discard pool uses a distinct component type.
+        // The game stores discard tiles newest-first in the node list, so we group by
+        // player, reverse each group to get chronological order, then assign slot indices.
+        var groups = new Dictionary<SlotKind, List<UiSlot>>
         {
-            { SlotKind.PlayerDiscard, 0 },
-            { SlotKind.LeftDiscard, 0 },
-            { SlotKind.RightDiscard, 0 },
-            { SlotKind.OppositeDiscard, 0 },
+            { SlotKind.PlayerDiscard, new List<UiSlot>() },
+            { SlotKind.LeftDiscard, new List<UiSlot>() },
+            { SlotKind.RightDiscard, new List<UiSlot>() },
+            { SlotKind.OppositeDiscard, new List<UiSlot>() },
         };
 
         foreach (var tile in tilesWithIcons)
@@ -339,9 +341,14 @@ public static unsafe class EmjUiReader
             if (kind == null)
                 continue;
 
-            var k = kind.Value;
-            var idx = playerCounts[k]++;
-            outputSlots.Add(tile with { Kind = k, SlotIndex = idx });
+            groups[kind.Value].Add(tile);
+        }
+
+        foreach (var (kind, tiles) in groups)
+        {
+            tiles.Reverse();
+            for (int i = 0; i < tiles.Count; i++)
+                outputSlots.Add(tiles[i] with { Kind = kind, SlotIndex = i });
         }
     }
 
