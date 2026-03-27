@@ -984,10 +984,20 @@ public static unsafe class EmjUiReader
                 .ToList();
         }
 
-        if (filtered.Count > 14)
-            filtered = filtered.TakeLast(14).ToList();
+        // Remove duplicate tiles at the same X position (lingering discards).
+        // When multiple tiles appear at the same X, keep only the one with the lowest SlotIndex.
+        // This filters out discards that haven't been moved to the discard pool yet.
+        var deduped = filtered
+            .GroupBy(slot => slot.X)
+            .Select(g => g.OrderBy(s => s.SlotIndex).First())
+            .OrderBy(slot => slot.X)
+            .ThenBy(slot => slot.SlotIndex)
+            .ToList();
 
-        return filtered;
+        if (deduped.Count > 14)
+            deduped = deduped.TakeLast(14).ToList();
+
+        return deduped;
     }
 
     /// <summary>
