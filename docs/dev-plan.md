@@ -84,6 +84,35 @@ Tile format: uppercase strings — `M1`–`M9`, `P1`–`P9`, `S1`–`S9`, `EAST`
 - [ ] **1.3** With a live game session: user reports their hand, compare against dumped image part IDs to build the tile ID mapping table.
 - [ ] **1.4** Validate the mapping across multiple hands/rounds to confirm it's consistent. Store the mapping in a config/data file.
 
+### Phase 1.5: IDataManager-Based Icon ID Discovery
+
+**Goal:** Auto-discover the complete icon-ID-to-tile-code mapping using FFXIV's own game data sheets, replacing manual hover learning and hardcoded guesses.
+
+**Approach:**
+- FFXIV stores Doman Mahjong tile definitions in Excel data sheets accessible via `IDataManager.GetExcelSheet<T>()`.
+- The relevant sheet is likely `DomanMahjongTile` (or similar). Each row should contain:
+  - A tile identifier or ordering index,
+  - An icon ID (the same icon IDs we see loaded via `LoadIconTexture` at runtime: 76041–76077 range),
+  - Possibly a tile name string.
+- By iterating the sheet rows, we can build a complete, authoritative mapping of all 34 tile icon IDs to tile codes without any runtime observation, hover learning, or manual entry.
+
+**Why this is better than previous approaches:**
+1. **Hover-learning** was disabled as unreliable (stale tooltip values, conflicting mappings).
+2. **Hardcoded baseline** mappings were wrong (`76069→P4`, `76070→S9` were incorrect).
+3. **Manual breakpoint inspection** only reveals tiles currently in hand — needs many games to see all 34.
+4. **Sequential icon ID guessing** (76041=M1, 76042=M2, ...) is plausible but unverified.
+5. **IDataManager** reads the game's own source of truth — guaranteed correct, survives tile set changes, and auto-discovers all 34 tiles in one pass.
+
+**Implementation steps:**
+- [ ] **1.5.1** Explore available Excel sheets via `IDataManager` to find the Doman Mahjong tile definition sheet.
+- [ ] **1.5.2** Read all rows from the sheet and extract icon IDs + tile identity data.
+- [ ] **1.5.3** Build the icon-ID-to-tile-code mapping from the sheet data and populate `MahjongIconMap.BuiltInMappings`.
+- [ ] **1.5.4** Log the discovered mappings at plugin startup for verification.
+- [ ] **1.5.5** Remove the old empty `BuiltInMappings` dictionary and `LockedBuiltInIconIds` in favor of the data-driven approach.
+- [ ] **1.5.6** Verify in-game that all 34 tiles now resolve correctly in the UI state display.
+
+**Fallback:** If `IDataManager` does not expose a Mahjong tile sheet, fall back to the `EmjModule.TileSet` field + icon ID range enumeration (76041–76074 sequential mapping). The sequential range is strongly suggested by observed icon IDs in gameplay, but the data manager approach is preferred because it's self-documenting and self-correcting.
+
 ### Phase 2: Game State Reader
 
 **Goal:** Reliably extract the full game state from the EmjL addon.

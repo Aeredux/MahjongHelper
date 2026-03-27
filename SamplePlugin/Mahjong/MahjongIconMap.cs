@@ -21,12 +21,7 @@ public sealed unsafe class MahjongIconMap
 
     private static readonly string CacheDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MahjongHelper");
     private static readonly string CacheFilePath = Path.Combine(CacheDirectory, "icon_name_cache.json");
-    private static readonly IReadOnlyDictionary<uint, string> BuiltInMappings = new Dictionary<uint, string>
-    {
-        // Baseline from direct prior captures. Keep this narrow unless reconfirmed.
-        [76069] = "P4",
-        [76070] = "S9",
-    };
+    private static readonly IReadOnlyDictionary<uint, string> BuiltInMappings = new Dictionary<uint, string>();
     private static readonly HashSet<uint> LockedBuiltInIconIds = new(BuiltInMappings.Keys);
 
     private readonly ConcurrentDictionary<uint, string> _iconIdToTileCode = new();

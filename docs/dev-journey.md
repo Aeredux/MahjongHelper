@@ -420,3 +420,148 @@
 - ✅ User can optionally annotate events for correlation analysis
 - ✅ Log is structured and human-readable for manual reverse-engineering
 - **Recommendation:** User should play a few rounds with plugin active, click the annotation buttons at key moments, then analyze the log afterward to identify tile offset patterns.
+
+## 2026-03-26: External repo research - Saucy minigame state extraction
+
+**What:** Reviewed `PunishXIV/Saucy` and created a local research summary describing how it acquires game state for multiple Gold Saucer minigames.
+
+**Why:** Needed a practical reference of proven extraction strategies (addon polling, unsafe struct overlays, ATK node traversal, agent reads, signature scans/hooks) to inform future Mahjong and minigame reverse-engineering work.
+
+**Changes made:**
+- Added `docs/saucy-state-extraction-summary.md` with per-minigame analysis for:
+	- Triple Triad,
+	- Mini Cactpot,
+	- Out on a Limb,
+	- Cuff-a-cur,
+	- shared results handling and other Gold Saucer modules.
+- Documented cross-cutting Saucy patterns:
+	- `UIReaderScheduler` lifecycle polling model,
+	- `StructLayout` + `FieldOffset` overlays,
+	- `GUINodeUtils` tree traversal,
+	- `FindAgentInterface` + fallback agent access,
+	- `SigScanner` + hook-based fallbacks.
+- Captured reliability tradeoffs (patch fragility hotspots vs. safer patterns).
+
+**Result:** Repo now includes a concrete reference document of real-world FFXIV minigame state acquisition methods that can be reused when designing robust readers for this project.
+
+## 2026-03-26: Saucy adoption checklist + minimal-effort debugging playbook
+
+**What:** Added a second, implementation-focused document translating the Saucy research into concrete adoption steps for MahjongHelper, plus a user debugging contribution guide optimized for minimal effort / maximum return.
+
+**Why:** The first Saucy document summarizes extraction techniques; this follow-up turns those findings into an execution plan and clear guidance for how the user can help collect high-value debugging data without manual heavy lifting.
+
+**Changes made:**
+- Added `docs/saucy-adoption-checklist.md` with:
+	- prioritized adoption phases (reader lifecycle architecture, dual-path acquisition, diagnostics),
+	- concrete task checklist,
+	- "minimal-effort, high-return" debugging actions,
+	- low-ROI tasks to avoid,
+	- a default short debugging routine for normal gameplay.
+
+**Result:** Repo now contains both strategic research and an actionable adoption/debug workflow, reducing ambiguity in next implementation steps and minimizing user burden during reverse-engineering iterations.
+
+## 2026-03-26: Phase A implemented - reader lifecycle scaffolding
+
+**What:** Implemented Phase A scaffolding from the Saucy adoption plan: modular addon reader interface, scheduler-driven lifecycle callbacks, and status reporting in UI.
+
+**Why:** Needed a stable control plane for state extraction that can survive UI/memory path changes and simplify future per-source readers.
+
+**Changes made:**
+- Added reader framework classes under `SamplePlugin/Mahjong/`:
+	- `IAddonStateReader.cs`
+	- `AddonReaderStatus.cs`
+	- `AddonReaderScheduler.cs`
+	- `EmjAddonReader.cs`
+- Wired scheduler into plugin runtime:
+	- added `IFramework` service,
+	- registered `Framework.Update` handler,
+	- scheduler now polls `EmjL` and dispatches `shown/update/lost` callbacks.
+- Surfaced reader state in main UI:
+	- `MainWindow.readerStatus`
+	- `Reader Status: ...` display line for quick diagnostics.
+- Updated `docs/saucy-adoption-checklist.md` Phase A checkboxes to complete.
+
+**Result:** MahjongHelper now has a reusable reader lifecycle architecture (instead of one-off direct reads only), making future readers and diagnostics significantly easier to add and debug.
+
+## 2026-03-26: Phase B implemented - normalized probe/node/cached game state
+
+**What:** Implemented Phase B from the Saucy adoption plan by introducing a normalized `MahjongGameState` that merges probe and node data with cached fallback behavior.
+
+**Why:** Needed one canonical state representation that survives temporary source failures and makes provenance explicit, instead of treating probe text and node snapshots as unrelated outputs.
+
+**Changes made:**
+- Added normalized state model + merge builder:
+	- `SamplePlugin/Mahjong/MahjongGameState.cs`
+	- includes per-field metadata: source (`Probe`/`Node`/`Cached`) and confidence flags (`authoritative`/`fallback`).
+- Integrated merge flow into plugin runtime (`Plugin.cs`):
+	- tracks latest probe numeric state (`AgentId.Emj+0x28/+0x08`),
+	- merges with current `EmjUiReader` output each realtime/periodic update,
+	- retains last-known-good values when current probe/node value is missing.
+- Added UI panel for merged output in `MainWindow.cs`:
+	- `Normalized Mahjong State (probe + node + cache)` multiline display.
+- Updated `docs/saucy-adoption-checklist.md` to mark Phase B checklist items complete.
+
+**Result:** State acquisition now follows a dual-path model with explicit provenance and automatic cached fallback, reducing breakage risk from transient read failures while improving debugging clarity.
+
+## 2026-03-26: Phase C implemented - diagnostics, transition logging, exports
+
+**What:** Implemented Phase C observability and ergonomics features: diagnostics panel, transition-only normalized-state logging, recent transition history, and quick export/copy actions.
+
+**Why:** Needed fast patch-triage visibility and one-click artifact export to keep reverse-engineering low effort while improving reproducibility.
+
+**Changes made:**
+- Extended plugin diagnostics state in `SamplePlugin/Plugin.cs`:
+	- tracks last successful update timestamps (probe/node/merge),
+	- tracks active source path (`Probe`/`Node`/`Cached` combinations),
+	- stores bounded recent failure and recent transition buffers,
+	- records failure reasons on read/log/export exceptions.
+- Added transition-only normalized-state logging:
+	- writes to `%APPDATA%/MahjongHelper/normalized_state_history.log` only when normalized signature changes.
+- Added export helpers:
+	- `ExportNormalizedState()` -> `%APPDATA%/MahjongHelper/normalized_state_export.txt`,
+	- `ExportProbeSnippet(...)` -> `%APPDATA%/MahjongHelper/probe_snippet_export.txt`,
+	- `GetRecentTransitionsText()` for quick copy.
+- Updated `MainWindow` UI with Phase C controls and panes:
+	- buttons: `Export Normalized State`, `Copy Recent Transitions`, `Export Probe Snippet`,
+	- read-only sections: `Diagnostics`, `Recent Normalized Transitions`.
+- Updated `docs/saucy-adoption-checklist.md` to mark all Phase C items complete.
+
+**Result:** All checklist phases (A/B/C) are now implemented in code and reflected in docs; plugin now provides integrated lifecycle status, normalized-state provenance, transition history, and fast export/copy debugging workflow.
+
+## 2026-03-27: Phase 1.5 plan — IDataManager-based icon discovery
+
+**What:** Removed wrong hardcoded baseline mappings and planned a new approach to discover all 34 tile icon IDs using FFXIV's own game data sheets via `IDataManager`.
+
+**Why:** The two hardcoded baseline mappings (`76069→P4`, `76070→S9`) were confirmed incorrect by the user. Hover-learning was already disabled as unreliable. Manual breakpoint inspection only shows tiles currently in hand (subset of 34). Sequential icon ID guessing is plausible but unverified. The correct approach is to read the game's own Mahjong tile data sheet, which contains the authoritative icon-ID-to-tile mapping.
+
+**Changes made:**
+- Cleared `BuiltInMappings` in `MahjongIconMap` to an empty dictionary (wrong baselines removed).
+- Documented Phase 1.5 plan in `docs/dev-plan.md` with full rationale, implementation steps, and fallback strategy.
+- Next step: Explore `IDataManager.GetExcelSheet<T>()` for Doman Mahjong tile definitions, extract icon IDs and tile codes, and populate the mapping automatically at plugin startup.
+
+**Implementation plan (from dev-plan.md Phase 1.5):**
+1. Explore available Excel sheets via `IDataManager` to find the Doman Mahjong tile definition sheet.
+2. Read all rows from the sheet and extract icon IDs + tile identity data.
+3. Build the icon-ID-to-tile-code mapping from the sheet data and populate `MahjongIconMap`.
+4. Log the discovered mappings at plugin startup for verification.
+5. Remove old empty `BuiltInMappings` / `LockedBuiltInIconIds` in favor of data-driven approach.
+6. Verify in-game that all 34 tiles resolve correctly.
+
+**Fallback:** If `IDataManager` does not expose a Mahjong tile sheet, fall back to `EmjModule.TileSet` + sequential icon ID range mapping (76041–76074).
+
+## 2026-03-26: Added end-to-end Mahjong state testing plan
+
+**What:** Created a dedicated execution-order test plan for collecting and validating all remaining Mahjong state information.
+
+**Why:** Needed a repeatable, low-effort workflow to systematically gather evidence, validate reader behavior, and triage failures without ad-hoc manual analysis loops.
+
+**Changes made:**
+- Added `docs/mahjong-state-testing-plan.md` with:
+	- required artifact list,
+	- staged run order (sanity -> passive baseline -> event correlation -> fallback validation -> reload validation -> post-patch smoke),
+	- pass/fail gates per stage,
+	- failure triage decision rules,
+	- minimal-effort default session template,
+	- completion criteria for testing coverage.
+
+**Result:** Team now has a concrete testing playbook that maps directly to existing instrumentation and should maximize signal while minimizing user burden.

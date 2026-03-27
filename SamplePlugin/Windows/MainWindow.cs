@@ -14,6 +14,10 @@ public class MainWindow : Window, IDisposable
     public static String text3 = "Captured: (none)\nPlayer hand slots: 0\nPlayer draw slot:\n  (missing)\nVisible tile candidates: 0";
     public static String mappingReport = "Mapping report pending...";
     public static String handIconIds = "(none)";
+    public static String readerStatus = "AddonNotFound";
+    public static String normalizedStateText = "Captured: (none)\nNormalized Mahjong State\nAgentState: (missing) [src=Unknown, non-authoritative]";
+    public static String diagnosticsText = "Phase C Diagnostics\nReaderStatus: AddonNotFound";
+    public static String recentTransitionsText = "(no normalized transitions yet)";
     private string resetIconIdInput = "";
     public bool RequestTileDump;
 
@@ -66,6 +70,25 @@ public class MainWindow : Window, IDisposable
         }
 
         ImGui.SameLine();
+        if (ImGui.Button("Export Normalized State"))
+        {
+            plugin.ExportNormalizedState();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Copy Recent Transitions"))
+        {
+            ImGui.SetClipboardText(plugin.GetRecentTransitionsText());
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Export Probe Snippet"))
+        {
+            plugin.ExportProbeSnippet(text);
+        }
+
+        // Start a new row to avoid toolbar buttons going off-screen.
+        ImGui.NewLine();
         if (ImGui.Button("Export Mapping Report"))
         {
             plugin.ExportMappingReport();
@@ -110,6 +133,14 @@ public class MainWindow : Window, IDisposable
             plugin.AnnotateComparisonEvent("tile_discarded", "Player discarded a tile");
         }
 
+        ImGui.SameLine();
+        if (ImGui.Button("Copy Hand Icon IDs"))
+        {
+            ImGui.SetClipboardText(handIconIds ?? "(none)");
+        }
+
+        ImGui.Separator();
+        ImGui.Text($"Reader Status: {readerStatus}");
         ImGui.Separator();
         ImGui.Text("Mapping Progress");
         ImGui.SetNextItemWidth(160 * ImGuiHelpers.GlobalScale);
@@ -130,18 +161,39 @@ public class MainWindow : Window, IDisposable
             ImGuiInputTextFlags.ReadOnly
         );
 
-        ImGui.SameLine();
-        if (ImGui.Button("Copy Hand Icon IDs"))
-        {
-            ImGui.SetClipboardText(handIconIds ?? "(none)");
-        }
-
         ImGui.Text("Mahjong UI State (slot-based scaffold)");
         ImGui.InputTextMultiline(
             "##mahjongUiState",
             ref text3,
             400_000,
             new System.Numerics.Vector2(-1, 180),
+            ImGuiInputTextFlags.ReadOnly
+        );
+
+        ImGui.Text("Normalized Mahjong State (probe + node + cache)");
+        ImGui.InputTextMultiline(
+            "##mahjongNormalizedState",
+            ref normalizedStateText,
+            200_000,
+            new System.Numerics.Vector2(-1, 150),
+            ImGuiInputTextFlags.ReadOnly
+        );
+
+        ImGui.Text("Diagnostics");
+        ImGui.InputTextMultiline(
+            "##mahjongDiagnostics",
+            ref diagnosticsText,
+            120_000,
+            new System.Numerics.Vector2(-1, 130),
+            ImGuiInputTextFlags.ReadOnly
+        );
+
+        ImGui.Text("Recent Normalized Transitions");
+        ImGui.InputTextMultiline(
+            "##mahjongRecentTransitions",
+            ref recentTransitionsText,
+            160_000,
+            new System.Numerics.Vector2(-1, 120),
             ImGuiInputTextFlags.ReadOnly
         );
 

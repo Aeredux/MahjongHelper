@@ -13,6 +13,7 @@ using SamplePlugin.Mahjong;
 using System;
 using System.Linq;
 using System.Collections.Generic;
+using System.Text;
 
 namespace SamplePlugin;
 
@@ -24,6 +25,9 @@ public sealed class Plugin : IDalamudPlugin
     private static readonly string ProbeSignalsPath = Path.Combine(CacheDirectory, "probe_signals.log");
     private static readonly string TileCandidatesPath = Path.Combine(CacheDirectory, "tile_candidates.log");
     private static readonly string UiStateHistoryPath = Path.Combine(CacheDirectory, "mahjong_ui_state_history.log");
+    private static readonly string NormalizedStateHistoryPath = Path.Combine(CacheDirectory, "normalized_state_history.log");
+    private static readonly string NormalizedStateExportPath = Path.Combine(CacheDirectory, "normalized_state_export.txt");
+    private static readonly string ProbeSnippetExportPath = Path.Combine(CacheDirectory, "probe_snippet_export.txt");
 
     [PluginService] internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
     [PluginService] internal static ITextureProvider TextureProvider { get; private set; } = null!;
@@ -42,6 +46,10 @@ public sealed class Plugin : IDalamudPlugin
 
     [PluginService]
     private static IGameGui GameGui { get; set; } = null!;
+
+    [PluginService]
+    private static IFramework Framework { get; set; } = null!;
+
     public Configuration Configuration { get; init; }
 
     public readonly WindowSystem WindowSystem = new("SamplePlugin");
@@ -57,11 +65,30 @@ public sealed class Plugin : IDalamudPlugin
     private int? _lastAgentEmj28State;
     private byte[]? _lastAgentEmj28Bytes;
     private string _lastUiStateSignature = string.Empty;
+    private AddonReaderScheduler _readerScheduler = null!;
+    private EmjAddonReader _emjReader = null!;
+    private DateTime _lastSchedulerTickUtc = DateTime.MinValue;
+    private MahjongGameState? _lastMergedState;
+    private int? _latestProbeAgentState;
+    private string _lastNormalizedStateSignature = string.Empty;
+    private DateTime? _lastSuccessfulProbeUpdateUtc;
+    private DateTime? _lastSuccessfulNodeUpdateUtc;
+    private DateTime? _lastSuccessfulMergeUpdateUtc;
+    private string _activeSourcePath = "Unknown";
+    private readonly List<string> _recentFailures = [];
+    private readonly List<string> _recentTransitions = [];
+    private const int MaxRecentFailures = 12;
+    private const int MaxRecentTransitions = 40;
+    private AddonReaderStatus _lastReaderStatus = AddonReaderStatus.AddonNotFound;
 
     public Plugin()
     {
         _iconCapture = new IconIdCapture(GameInterop);
         _iconMap = new MahjongIconMap();
+        _emjReader = new EmjAddonReader();
+        _readerScheduler = new AddonReaderScheduler(GameGui);
+        _readerScheduler.AddObservedAddon(_emjReader);
+        _lastSchedulerTickUtc = DateTime.UtcNow;
 
         AddonLifecycle.RegisterListener(
             AddonEvent.PreDraw,
@@ -90,6 +117,7 @@ public sealed class Plugin : IDalamudPlugin
 
         // Adds another button doing the same but for the main ui of the plugin
         PluginInterface.UiBuilder.OpenMainUi += ToggleMainUi;
+        Framework.Update += OnFrameworkUpdate;
 
         // Add a simple message to the log with level set to information
         // Use /xllog to open the log window in-game
@@ -98,6 +126,27 @@ public sealed class Plugin : IDalamudPlugin
 
         // If EmjL addon is already open (player is in a mahjong game), dump immediately on load
         TryImmediateDump();
+    }
+
+    private void OnFrameworkUpdate(IFramework _)
+    {
+        var now = DateTime.UtcNow;
+        var delta = (float)Math.Max(0.0, (now - _lastSchedulerTickUtc).TotalSeconds);
+        _lastSchedulerTickUtc = now;
+
+        _readerScheduler.Update(delta);
+        MainWindow.readerStatus = _emjReader.Status.ToString();
+
+        if (_emjReader.Status != _lastReaderStatus)
+        {
+            if (_emjReader.Status != AddonReaderStatus.NoErrors)
+                RecordFailure($"Reader status changed to {_emjReader.Status}");
+
+            _lastReaderStatus = _emjReader.Status;
+        }
+
+        MainWindow.diagnosticsText = BuildDiagnosticsText();
+        MainWindow.recentTransitionsText = BuildRecentTransitionsText();
     }
 
     private unsafe void TryImmediateDump()
@@ -124,6 +173,9 @@ public sealed class Plugin : IDalamudPlugin
             MainWindow.text2 = handSnapshot.ToDisplayText();
             MainWindow.text3 = uiState.ToDisplayText();
             TrackProbeState(dumpContent);
+            _lastSuccessfulNodeUpdateUtc = DateTime.UtcNow;
+            var merged = MahjongGameStateBuilder.Merge(_latestProbeAgentState, uiState, _lastMergedState);
+            HandleMergedStateUpdate(merged, "startup");
             TrackUiState(uiState, "startup");
             _startupDumpDone = true;
             _nextDumpAtUtc = DateTime.UtcNow.AddSeconds(3);
@@ -131,6 +183,7 @@ public sealed class Plugin : IDalamudPlugin
         catch (Exception ex)
         {
             Log.Error($"Startup dump failed: {ex.Message}");
+            RecordFailure($"Startup dump failed: {ex.Message}");
         }
     }
 
@@ -140,6 +193,7 @@ public sealed class Plugin : IDalamudPlugin
         if (addonPtr.IsNull)
         {
             MainWindow.text = "EmjL addonPtr is null";
+            RecordFailure("OnMahjongDraw: EmjL addonPtr is null");
             return;
         }
 
@@ -149,6 +203,7 @@ public sealed class Plugin : IDalamudPlugin
         if (addon == null || addon->RootNode == null)
         {
             MainWindow.text = "addon/root is null";
+            RecordFailure("OnMahjongDraw: addon/root is null");
             return;
         }
 
@@ -171,6 +226,7 @@ public sealed class Plugin : IDalamudPlugin
         catch
         {
             // Never crash from diagnostics
+            RecordFailure("OnMahjongDraw: failed to capture AgentId.Emj snapshot");
         }
 
         var now = DateTime.UtcNow;
@@ -182,12 +238,16 @@ public sealed class Plugin : IDalamudPlugin
             {
                 var uiStateFast = EmjUiReader.Read(addon, _iconCapture, _iconMap);
                 MainWindow.text3 = uiStateFast.ToDisplayText();
+                _lastSuccessfulNodeUpdateUtc = DateTime.UtcNow;
                 TrackUiState(uiStateFast, "realtime");
-                            UpdateHandIconDisplay(uiStateFast);
+                var merged = MahjongGameStateBuilder.Merge(_latestProbeAgentState, uiStateFast, _lastMergedState);
+                HandleMergedStateUpdate(merged, "realtime");
+                UpdateHandIconDisplay(uiStateFast);
             }
-            catch
+            catch (Exception ex)
             {
                 // Never disrupt gameplay from diagnostics.
+                RecordFailure($"Realtime uiState capture failed: {ex.Message}");
             }
 
             _nextUiStateCaptureAtUtc = now.AddMilliseconds(250);
@@ -216,11 +276,15 @@ public sealed class Plugin : IDalamudPlugin
             MainWindow.text3 = uiState.ToDisplayText();
             MainWindow.mappingReport = _iconMap.BuildProgressReport(_iconCapture.IconMap.Values);
             TrackProbeState(dumpContent);
+            _lastSuccessfulNodeUpdateUtc = DateTime.UtcNow;
+            var merged = MahjongGameStateBuilder.Merge(_latestProbeAgentState, uiState, _lastMergedState);
+            HandleMergedStateUpdate(merged, "periodic");
             TrackUiState(uiState, "periodic");
         }
         catch (Exception ex)
         {
             MainWindow.text = $"Dump failed: {ex.Message}";
+            RecordFailure($"Periodic dump failed: {ex.Message}");
         }
     }
 
@@ -258,6 +322,15 @@ public sealed class Plugin : IDalamudPlugin
         _iconCapture.ResetCapturedIcons();
         MahjongHandReader.ResetCachedSnapshot();
         _lastEligibleIconIds.Clear();
+        _lastMergedState = null;
+        _latestProbeAgentState = null;
+        _lastNormalizedStateSignature = string.Empty;
+        _activeSourcePath = "Unknown";
+        _recentFailures.Clear();
+        _recentTransitions.Clear();
+        _lastSuccessfulProbeUpdateUtc = null;
+        _lastSuccessfulNodeUpdateUtc = null;
+        _lastSuccessfulMergeUpdateUtc = null;
 
         try
         {
@@ -271,6 +344,9 @@ public sealed class Plugin : IDalamudPlugin
         MainWindow.text = "All MahjongHelper cached data cleared.";
         MainWindow.text2 = "Mahjong Hand Snapshot\nHand tiles: 0\nDrawn: (none)";
         MainWindow.text3 = "Captured: (none)\nCanonical player hand slots: 0\nCanonical player draw slot:\n  (missing)\nPlayer hand slots: 0\nPlayer draw slot:\n  (missing)\nVisible tile candidates: 0";
+        MainWindow.normalizedStateText = "Captured: (none)\nNormalized Mahjong State\nAgentState: (missing) [src=Unknown, non-authoritative]";
+        MainWindow.diagnosticsText = BuildDiagnosticsText();
+        MainWindow.recentTransitionsText = BuildRecentTransitionsText();
         MainWindow.mappingReport = _iconMap.BuildProgressReport(Array.Empty<uint>());
     }
 
@@ -295,6 +371,8 @@ public sealed class Plugin : IDalamudPlugin
         if (string.IsNullOrWhiteSpace(probeSection))
             return;
 
+        _lastSuccessfulProbeUpdateUtc = DateTime.UtcNow;
+
         var signature = NormalizeProbeSection(probeSection);
         if (signature == _lastProbeStateSignature)
             return;
@@ -311,6 +389,7 @@ public sealed class Plugin : IDalamudPlugin
             File.AppendAllText(ProbeHistoryPath, entry);
 
             var emj28State = TryGetAgentEmj28State(probeSection);
+            _latestProbeAgentState = emj28State;
             if (emj28State.HasValue && emj28State != _lastAgentEmj28State)
             {
                 var previous = _lastAgentEmj28State.HasValue ? _lastAgentEmj28State.Value.ToString() : "(none)";
@@ -323,9 +402,10 @@ public sealed class Plugin : IDalamudPlugin
             if (emj28Bytes != null)
                 TrackTileCandidates(emj28Bytes, emj28State);
         }
-        catch
+        catch (Exception ex)
         {
             // Never break gameplay flow due to probe logging.
+            RecordFailure($"TrackProbeState failed: {ex.Message}");
         }
     }
 
@@ -612,6 +692,159 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
+    private void HandleMergedStateUpdate(MahjongGameState merged, string source)
+    {
+        _lastMergedState = merged;
+        MainWindow.normalizedStateText = merged.ToDisplayText();
+        _lastSuccessfulMergeUpdateUtc = DateTime.UtcNow;
+
+        var signature = BuildNormalizedStateSignature(merged);
+        if (signature == _lastNormalizedStateSignature)
+        {
+            _activeSourcePath = BuildActiveSourcePath(merged);
+            return;
+        }
+
+        _lastNormalizedStateSignature = signature;
+        _activeSourcePath = BuildActiveSourcePath(merged);
+
+        var transition =
+            $"{DateTime.UtcNow:O} source={source} active={_activeSourcePath} " +
+            $"agent={SafeFieldValue(merged.AgentState.Value)} handCount={(merged.HandIconIds.Value?.Count ?? 0)} draw={SafeFieldValue(merged.DrawIconId.Value)}";
+
+        AppendRecentTransition(transition);
+
+        try
+        {
+            Directory.CreateDirectory(CacheDirectory);
+            var entry =
+                $"=== Normalized State Change {DateTime.UtcNow:O} source={source} active={_activeSourcePath} ==={Environment.NewLine}" +
+                merged.ToDisplayText() + Environment.NewLine +
+                "=================================================================" + Environment.NewLine + Environment.NewLine;
+            File.AppendAllText(NormalizedStateHistoryPath, entry);
+        }
+        catch (Exception ex)
+        {
+            RecordFailure($"Normalized transition log failed: {ex.Message}");
+        }
+    }
+
+    private static string BuildNormalizedStateSignature(MahjongGameState state)
+    {
+        var handIds = state.HandIconIds.Value == null ? string.Empty : string.Join(",", state.HandIconIds.Value);
+        return string.Join("|",
+            state.AgentState.Value.ToString(),
+            state.AgentState.Source,
+            handIds,
+            state.HandIconIds.Source,
+            state.DrawIconId.Value.ToString(),
+            state.DrawIconId.Source,
+            state.HandDescription.Value ?? string.Empty,
+            state.HandDescription.Source);
+    }
+
+    private static string BuildActiveSourcePath(MahjongGameState state)
+    {
+        var sources = new HashSet<MahjongStateSource>
+        {
+            state.AgentState.Source,
+            state.HandIconIds.Source,
+            state.DrawIconId.Source,
+            state.HandDescription.Source,
+        };
+
+        sources.Remove(MahjongStateSource.Unknown);
+        return sources.Count == 0 ? "Unknown" : string.Join("+", sources.OrderBy(s => s.ToString()));
+    }
+
+    private void RecordFailure(string message)
+    {
+        var line = $"{DateTime.UtcNow:O} {message}";
+        _recentFailures.Add(line);
+        if (_recentFailures.Count > MaxRecentFailures)
+            _recentFailures.RemoveAt(0);
+    }
+
+    private void AppendRecentTransition(string message)
+    {
+        _recentTransitions.Add(message);
+        if (_recentTransitions.Count > MaxRecentTransitions)
+            _recentTransitions.RemoveAt(0);
+    }
+
+    private string BuildDiagnosticsText()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("Phase C Diagnostics");
+        sb.AppendLine($"ReaderStatus: {_emjReader.Status}");
+        sb.AppendLine($"ActiveSourcePath: {_activeSourcePath}");
+        sb.AppendLine($"LastSuccessfulProbeUpdate: {FormatTimestamp(_lastSuccessfulProbeUpdateUtc)}");
+        sb.AppendLine($"LastSuccessfulNodeUpdate: {FormatTimestamp(_lastSuccessfulNodeUpdateUtc)}");
+        sb.AppendLine($"LastSuccessfulMergeUpdate: {FormatTimestamp(_lastSuccessfulMergeUpdateUtc)}");
+        sb.AppendLine("RecentFailures:");
+
+        if (_recentFailures.Count == 0)
+        {
+            sb.AppendLine("  (none)");
+        }
+        else
+        {
+            foreach (var failure in _recentFailures)
+                sb.AppendLine($"  {failure}");
+        }
+
+        return sb.ToString();
+    }
+
+    private string BuildRecentTransitionsText()
+    {
+        if (_recentTransitions.Count == 0)
+            return "(no normalized transitions yet)";
+
+        return string.Join(Environment.NewLine, _recentTransitions);
+    }
+
+    private static string FormatTimestamp(DateTime? timestamp)
+        => timestamp.HasValue ? timestamp.Value.ToString("O") : "(none)";
+
+    private static string SafeFieldValue<T>(T? value)
+        => value == null ? "(none)" : value.ToString() ?? "(none)";
+
+    public void ExportNormalizedState()
+    {
+        try
+        {
+            Directory.CreateDirectory(CacheDirectory);
+            var content = _lastMergedState?.ToDisplayText() ?? "(no normalized state yet)";
+            File.WriteAllText(NormalizedStateExportPath, content);
+            AppendRecentTransition($"{DateTime.UtcNow:O} export normalized state -> {NormalizedStateExportPath}");
+        }
+        catch (Exception ex)
+        {
+            RecordFailure($"ExportNormalizedState failed: {ex.Message}");
+        }
+    }
+
+    public string GetRecentTransitionsText() => BuildRecentTransitionsText();
+
+    public void ExportProbeSnippet(string? dumpText)
+    {
+        try
+        {
+            Directory.CreateDirectory(CacheDirectory);
+            var snippet = ExtractProbeSection(dumpText);
+            if (string.IsNullOrWhiteSpace(snippet))
+                snippet = "(no probe snippet found in current dump)";
+
+            File.WriteAllText(ProbeSnippetExportPath, snippet);
+            AppendRecentTransition($"{DateTime.UtcNow:O} export probe snippet -> {ProbeSnippetExportPath}");
+        }
+        catch (Exception ex)
+        {
+            RecordFailure($"ExportProbeSnippet failed: {ex.Message}");
+        }
+    }
+
 
     public unsafe void AnnotateComparisonEvent(string eventName, string description)
     {
@@ -637,6 +870,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         _iconCapture.Dispose();
         AddonLifecycle.UnregisterListener(OnMahjongDraw);
+        Framework.Update -= OnFrameworkUpdate;
         // Unregister all actions to not leak anything during disposal of plugin
         PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
         PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
