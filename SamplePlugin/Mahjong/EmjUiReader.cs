@@ -121,8 +121,7 @@ public static unsafe class EmjUiReader
                 continue;
 
             uint iconId = 0;
-            if (iconCapture != null)
-                TryFindCapturedIcon(node, iconCapture, out iconId);
+            TryFindIcon(node, iconCapture, out iconId);
 
             var candidate = new UiSlot(
                 SlotKind.VisibleTileCandidate,
@@ -211,8 +210,7 @@ public static unsafe class EmjUiReader
         catch { visible = false; }
 
         uint iconId = 0;
-        if (iconCapture != null)
-            TryFindCapturedIcon(node, iconCapture, out iconId);
+        TryFindIcon(node, iconCapture, out iconId);
 
         slot = new UiSlot(
             kind,
@@ -231,14 +229,14 @@ public static unsafe class EmjUiReader
         return true;
     }
 
-    private static bool TryFindCapturedIcon(AtkResNode* root, IconIdCapture capture, out uint iconId)
+    private static bool TryFindIcon(AtkResNode* root, IconIdCapture? capture, out uint iconId)
     {
         iconId = 0;
         var visited = new HashSet<nint>();
-        return TryFindCapturedIconRecursive(root, capture, visited, 0, out iconId);
+        return TryFindIconRecursive(root, capture, visited, 0, out iconId);
     }
 
-    private static bool TryFindCapturedIconRecursive(AtkResNode* root, IconIdCapture capture, HashSet<nint> visited, int depth, out uint iconId)
+    private static bool TryFindIconRecursive(AtkResNode* root, IconIdCapture? capture, HashSet<nint> visited, int depth, out uint iconId)
     {
         iconId = 0;
         if (root == null || depth > 32)
@@ -253,14 +251,26 @@ public static unsafe class EmjUiReader
             if (root->Type == NodeType.Image)
             {
                 var image = (AtkImageNode*)root;
-                iconId = capture.GetIconId((nint)image);
+
+                // Primary path: hook-based capture (fastest, works when hook has fired)
+                if (capture != null)
+                {
+                    iconId = capture.GetIconId((nint)image);
+                    if (iconId > 0)
+                        return true;
+                }
+
+                // Fallback: read icon ID directly from the texture resource chain.
+                // This works even after mid-game plugin reload when the LoadIconTexture
+                // hook hasn't fired yet for already-loaded tile textures.
+                iconId = TryReadIconIdFromStruct(image);
                 if (iconId > 0)
                     return true;
             }
 
             for (var child = root->ChildNode; child != null; child = child->NextSiblingNode)
             {
-                if (TryFindCapturedIconRecursive(child, capture, visited, depth + 1, out iconId))
+                if (TryFindIconRecursive(child, capture, visited, depth + 1, out iconId))
                     return true;
             }
 
@@ -274,7 +284,7 @@ public static unsafe class EmjUiReader
                     {
                         var child = childUld.NodeList[i];
                         if (child == null) continue;
-                        if (TryFindCapturedIconRecursive(child, capture, visited, depth + 1, out iconId))
+                        if (TryFindIconRecursive(child, capture, visited, depth + 1, out iconId))
                             return true;
                     }
                 }
@@ -285,5 +295,44 @@ public static unsafe class EmjUiReader
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Reads the icon ID directly from the AtkImageNode texture resource chain:
+    /// PartsList → Parts[PartId] → UldAsset → AtkTexture.Resource → IconId.
+    /// Returns 0 if the chain is broken or the node is not icon-mode.
+    /// </summary>
+    private static uint TryReadIconIdFromStruct(AtkImageNode* image)
+    {
+        try
+        {
+            if (image == null)
+                return 0;
+
+            // Icon-mode images have Flags containing 0x80
+            if (((byte)image->Flags & 0x80) == 0)
+                return 0;
+
+            var partsList = image->PartsList;
+            if (partsList == null || partsList->Parts == null)
+                return 0;
+
+            if (image->PartId >= partsList->PartCount)
+                return 0;
+
+            var part = partsList->Parts[image->PartId];
+            if (part.UldAsset == null)
+                return 0;
+
+            var tex = part.UldAsset->AtkTexture;
+            if (tex.Resource == null)
+                return 0;
+
+            return tex.Resource->IconId;
+        }
+        catch
+        {
+            return 0;
+        }
     }
 }

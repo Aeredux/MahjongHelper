@@ -554,7 +554,20 @@
 
 **Verification needed:** User should confirm in-game that tile codes now display correctly in the UI state panel instead of `ICON_XXXXX`.
 
-## 2026-03-26: Added end-to-end Mahjong state testing plan
+## 2026-03-27: Fix — direct AtkImageNode icon ID fallback for mid-game reload
+
+**What:** Added a direct struct-read fallback in `EmjUiReader` to read icon IDs from `AtkImageNode` when the `LoadIconTexture` hook cache is empty.
+
+**Why:** Startup diagnostics (`startup_diag.txt`) revealed the root cause of all-`(missing)` normalized state: after a mid-game plugin reload, `IconIdCapture` has zero Mahjong entries because the `LoadIconTexture` hook only fires when icons are first loaded. Since tiles are already on screen, the hook never fires, every node returns `iconId=0`, canonical hand is empty, and the entire pipeline produces `(missing)`.
+
+**Fix:**
+- Added `TryReadIconIdFromStruct(AtkImageNode*)` in `EmjUiReader` that reads the icon ID via the texture resource chain: `PartsList→Parts[PartId]→UldAsset→AtkTexture.Resource→IconId`.
+- This path was already proven by `TileDataDumper.DumpPointerFingerprints()` which successfully read icon IDs this way.
+- Renamed `TryFindCapturedIcon`/`TryFindCapturedIconRecursive` → `TryFindIcon`/`TryFindIconRecursive` to reflect that icon discovery is no longer hook-only.
+- The recursive icon finder now: (1) tries hook cache first (fastest), (2) falls back to direct struct read if hook returns 0.
+- Both `TryReadNodeSlot` and the visible-candidates loop now use the unified `TryFindIcon` which includes both paths.
+
+**Result:** Icon IDs should now be readable immediately after plugin reload without waiting for new `LoadIconTexture` calls. Combined with the 34-entry sequential mapping, the normalized state should show tile codes like `M8 P6 S4` instead of `(missing)`.
 
 **What:** Created a dedicated execution-order test plan for collecting and validating all remaining Mahjong state information.
 
