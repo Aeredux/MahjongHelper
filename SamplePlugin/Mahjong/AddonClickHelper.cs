@@ -52,6 +52,9 @@ public static unsafe class AddonClickHelper
                 $"isComp={isComponent} hasComp={comp != null} method={method}");
             LogAtkSnapshot(addon, $"pre-click-node{nodeIndex}-m{method}");
 
+            // Calculate hand slot index (nodes 71=slot0, 70=slot1, ... 54=slot17)
+            int slotIndex = nodeIndex <= 71 ? (71 - nodeIndex) : nodeIndex;
+
             if (!execute)
             {
                 Log($"[DRY-RUN] Would click node {nodeIndex} method={method}");
@@ -114,11 +117,8 @@ public static unsafe class AddonClickHelper
                     break;
 
                 case 4:
-                    // Method 4: FireCallback with slot index (0-based hand position)
+                    // FireCallback with [2, slotIndex, 0]
                     {
-                        // Hand tiles are nodes 71(slot0) down to 54(slot17), nodeId pattern: 134, 1340001-1340016
-                        // Try passing the hand slot index as callback value
-                        int slotIndex = nodeIndex <= 71 ? (71 - nodeIndex) : nodeIndex;
                         var values = stackalloc AtkValue[3];
                         values[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 2 };
                         values[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = slotIndex };
@@ -143,13 +143,77 @@ public static unsafe class AddonClickHelper
                     }
                     break;
 
-                default:
-                    // Method 0: try all methods sequentially with logging
-                    for (int m = 1; m <= 5; m++)
+                case 6:
+                    // FireCallback(1, [slotIndex])
                     {
-                        Log($"--- Trying method {m} ---");
-                        TryClickTileNode(addon, nodeIndex, true, m);
+                        var v = stackalloc AtkValue[1];
+                        v[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = slotIndex };
+                        addon->FireCallback(1, v, true);
+                        Log($"[EXECUTE] Method 6: FireCallback(1, [{slotIndex}])");
+                        result = true;
                     }
+                    break;
+
+                case 7:
+                    // FireCallback(2, [0, slotIndex])
+                    {
+                        var v = stackalloc AtkValue[2];
+                        v[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 0 };
+                        v[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = slotIndex };
+                        addon->FireCallback(2, v, true);
+                        Log($"[EXECUTE] Method 7: FireCallback(2, [0, {slotIndex}])");
+                        result = true;
+                    }
+                    break;
+
+                case 8:
+                    // FireCallback(2, [1, slotIndex])
+                    {
+                        var v = stackalloc AtkValue[2];
+                        v[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 1 };
+                        v[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = slotIndex };
+                        addon->FireCallback(2, v, true);
+                        Log($"[EXECUTE] Method 8: FireCallback(2, [1, {slotIndex}])");
+                        result = true;
+                    }
+                    break;
+
+                case 9:
+                    // FireCallback(2, [11, slotIndex]) — Saucy TT pattern
+                    {
+                        var v = stackalloc AtkValue[2];
+                        v[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 11 };
+                        v[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = slotIndex };
+                        addon->FireCallback(2, v, true);
+                        Log($"[EXECUTE] Method 9: FireCallback(2, [11, {slotIndex}])");
+                        result = true;
+                    }
+                    break;
+
+                case 10:
+                    // FireCallback(2, [14, slotIndex]) — another TT pattern
+                    {
+                        var v = stackalloc AtkValue[2];
+                        v[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 14 };
+                        v[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = slotIndex };
+                        addon->FireCallback(2, v, true);
+                        Log($"[EXECUTE] Method 10: FireCallback(2, [14, {slotIndex}])");
+                        result = true;
+                    }
+                    break;
+
+                default:
+                    // Method 0: sweep callback IDs 0-20 with FireCallback(2, [id, slotIndex])
+                    Log($"--- Sweeping callback IDs 0-20 with slotIndex={slotIndex} ---");
+                    for (int cbId = 0; cbId <= 20; cbId++)
+                    {
+                        var v = stackalloc AtkValue[2];
+                        v[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = cbId };
+                        v[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = slotIndex };
+                        addon->FireCallback(2, v, true);
+                    }
+                    Log($"[EXECUTE] Swept callback IDs 0-20");
+                    LogAtkSnapshot(addon, $"post-sweep-node{nodeIndex}");
                     result = true;
                     break;
             }
