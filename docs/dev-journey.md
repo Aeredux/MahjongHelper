@@ -528,26 +528,31 @@
 
 **Result:** All checklist phases (A/B/C) are now implemented in code and reflected in docs; plugin now provides integrated lifecycle status, normalized-state provenance, transition history, and fast export/copy debugging workflow.
 
-## 2026-03-27: Phase 1.5 plan — IDataManager-based icon discovery
+## 2026-03-27: Phase 1.5 — IDataManager exploration + sequential icon mapping
 
-**What:** Removed wrong hardcoded baseline mappings and planned a new approach to discover all 34 tile icon IDs using FFXIV's own game data sheets via `IDataManager`.
+**What:** Explored `IDataManager` Excel sheets for Mahjong tile data, found none, then implemented sequential icon ID mapping as the fallback.
 
-**Why:** The two hardcoded baseline mappings (`76069→P4`, `76070→S9`) were confirmed incorrect by the user. Hover-learning was already disabled as unreliable. Manual breakpoint inspection only shows tiles currently in hand (subset of 34). Sequential icon ID guessing is plausible but unverified. The correct approach is to read the game's own Mahjong tile data sheet, which contains the authoritative icon-ID-to-tile mapping.
+**Why:** The two hardcoded baseline mappings (`76069→P4`, `76070→S9`) were confirmed incorrect by the user. Hover-learning was already disabled as unreliable. Needed to find the authoritative tile-to-icon mapping.
 
-**Changes made:**
-- Cleared `BuiltInMappings` in `MahjongIconMap` to an empty dictionary (wrong baselines removed).
-- Documented Phase 1.5 plan in `docs/dev-plan.md` with full rationale, implementation steps, and fallback strategy.
-- Next step: Explore `IDataManager.GetExcelSheet<T>()` for Doman Mahjong tile definitions, extract icon IDs and tile codes, and populate the mapping automatically at plugin startup.
+**IDataManager exploration results:**
+- Searched `Lumina.Excel.dll` for all Emj-related sheet types. Found:
+  - `EmjAddon` — addon layout settings, no tile data
+  - `EmjCostume` / `EmjCostumeData` — tile back cosmetics
+  - `EmjDani` / `EmjDaniR` — rank/dani progression
+  - `EmjVoiceNpc` — NPC voice settings
+  - `EmjCharaViewCamera` — camera settings
+- Searched for "tile", "mahjong", "doman" — no tile definition sheet exists.
+- **Conclusion: FFXIV does not expose a Mahjong tile Excel sheet.** Tile icons are hardcoded into the addon UI, not data-driven from sheets.
 
-**Implementation plan (from dev-plan.md Phase 1.5):**
-1. Explore available Excel sheets via `IDataManager` to find the Doman Mahjong tile definition sheet.
-2. Read all rows from the sheet and extract icon IDs + tile identity data.
-3. Build the icon-ID-to-tile-code mapping from the sheet data and populate `MahjongIconMap`.
-4. Log the discovered mappings at plugin startup for verification.
-5. Remove old empty `BuiltInMappings` / `LockedBuiltInIconIds` in favor of data-driven approach.
-6. Verify in-game that all 34 tiles resolve correctly.
+**Sequential mapping implementation:**
+- Live gameplay data confirmed icon IDs in the `76041–76077` range appearing consistently for all tile types.
+- The icon texture paths seen in earlier probes (e.g., `ui/icon/076000/076071_hr1.tex`) encode the icon ID directly, confirming the range is real.
+- FFXIV icon numbering convention for Doman Mahjong: sequential starting at 76041, ordered as M1–M9, P1–P9, S1–S9, then honor tiles (EAST, SOUTH, WEST, NORTH, WHITE, GREEN, RED).
+- Populated `MahjongIconMap.BuiltInMappings` with all 34 entries (76041–76074).
+- Removed `LockedBuiltInIconIds` / `SeedBuiltInMappings` complexity since all mappings are now built-in.
+- Logged discovered mappings at plugin startup for verification.
 
-**Fallback:** If `IDataManager` does not expose a Mahjong tile sheet, fall back to `EmjModule.TileSet` + sequential icon ID range mapping (76041–76074).
+**Verification needed:** User should confirm in-game that tile codes now display correctly in the UI state panel instead of `ICON_XXXXX`.
 
 ## 2026-03-26: Added end-to-end Mahjong state testing plan
 

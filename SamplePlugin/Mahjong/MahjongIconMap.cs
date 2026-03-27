@@ -21,7 +21,22 @@ public sealed unsafe class MahjongIconMap
 
     private static readonly string CacheDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MahjongHelper");
     private static readonly string CacheFilePath = Path.Combine(CacheDirectory, "icon_name_cache.json");
-    private static readonly IReadOnlyDictionary<uint, string> BuiltInMappings = new Dictionary<uint, string>();
+    private static readonly IReadOnlyDictionary<uint, string> BuiltInMappings = new Dictionary<uint, string>
+    {
+        // Sequential Doman Mahjong tile icons: 76041–76074
+        // Manzu (Characters) M1–M9
+        [76041] = "M1", [76042] = "M2", [76043] = "M3", [76044] = "M4", [76045] = "M5",
+        [76046] = "M6", [76047] = "M7", [76048] = "M8", [76049] = "M9",
+        // Pinzu (Circles) P1–P9
+        [76050] = "P1", [76051] = "P2", [76052] = "P3", [76053] = "P4", [76054] = "P5",
+        [76055] = "P6", [76056] = "P7", [76057] = "P8", [76058] = "P9",
+        // Souzu (Bamboo) S1–S9
+        [76059] = "S1", [76060] = "S2", [76061] = "S3", [76062] = "S4", [76063] = "S5",
+        [76064] = "S6", [76065] = "S7", [76066] = "S8", [76067] = "S9",
+        // Honors: Winds then Dragons
+        [76068] = "EAST", [76069] = "SOUTH", [76070] = "WEST", [76071] = "NORTH",
+        [76072] = "WHITE", [76073] = "GREEN", [76074] = "RED",
+    };
     private static readonly HashSet<uint> LockedBuiltInIconIds = new(BuiltInMappings.Keys);
 
     private readonly ConcurrentDictionary<uint, string> _iconIdToTileCode = new();

@@ -104,11 +104,11 @@ Tile format: uppercase strings — `M1`–`M9`, `P1`–`P9`, `S1`–`S9`, `EAST`
 5. **IDataManager** reads the game's own source of truth — guaranteed correct, survives tile set changes, and auto-discovers all 34 tiles in one pass.
 
 **Implementation steps:**
-- [ ] **1.5.1** Explore available Excel sheets via `IDataManager` to find the Doman Mahjong tile definition sheet.
-- [ ] **1.5.2** Read all rows from the sheet and extract icon IDs + tile identity data.
-- [ ] **1.5.3** Build the icon-ID-to-tile-code mapping from the sheet data and populate `MahjongIconMap.BuiltInMappings`.
-- [ ] **1.5.4** Log the discovered mappings at plugin startup for verification.
-- [ ] **1.5.5** Remove the old empty `BuiltInMappings` dictionary and `LockedBuiltInIconIds` in favor of the data-driven approach.
+- [x] **1.5.1** Explore available Excel sheets via `IDataManager` to find the Doman Mahjong tile definition sheet. → **No tile sheet exists.** Emj sheets found: `EmjAddon`, `EmjCostume`, `EmjDani`, `EmjVoiceNpc`, `EmjCharaViewCamera` — none contain tile icon data.
+- [x] **1.5.2** ~~Read all rows from the sheet and extract icon IDs + tile identity data.~~ → N/A, no sheet exists.
+- [x] **1.5.3** Build the icon-ID-to-tile-code mapping from sequential icon range (76041–76074) and populate `MahjongIconMap.BuiltInMappings`. (Fallback path used.)
+- [x] **1.5.4** Log the discovered mappings at plugin startup for verification.
+- [x] **1.5.5** Populate `BuiltInMappings` with all 34 tile entries; `LockedBuiltInIconIds` locks all.
 - [ ] **1.5.6** Verify in-game that all 34 tiles now resolve correctly in the UI state display.
 
 **Fallback:** If `IDataManager` does not expose a Mahjong tile sheet, fall back to the `EmjModule.TileSet` field + icon ID range enumeration (76041–76074 sequential mapping). The sequential range is strongly suggested by observed icon IDs in gameplay, but the data manager approach is preferred because it's self-documenting and self-correcting.
