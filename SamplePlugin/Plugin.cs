@@ -870,7 +870,7 @@ public sealed class Plugin : IDalamudPlugin
             return;
 
         // Avoid re-requesting for the same hand
-        var handSig = string.Join(",", request.Hand) + "|" + (request.DrawnTile ?? "");
+        var handSig = string.Join(",", request.Hand);
         if (handSig == _lastSuggestHandSignature)
             return;
 

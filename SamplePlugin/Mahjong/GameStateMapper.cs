@@ -30,17 +30,13 @@ public static class GameStateMapper
 
         var drawnTile = ResolveDrawnTile(state, iconMap);
 
-        // If we have 14 tiles in hand and no separate drawn tile, split the last one as drawn
-        if (drawnTile == null && hand.Count == 14)
-        {
-            drawnTile = hand[^1];
-            hand = hand.GetRange(0, 13);
-        }
+        // Server expects all 14 tiles in the hand array (including drawn tile)
+        if (drawnTile != null)
+            hand.Add(drawnTile);
 
         var request = new SuggestMoveRequest
         {
             Hand = hand,
-            DrawnTile = drawnTile,
             Discards = BuildDiscardPools(state),
             DoraIndicators = ResolveDoraIndicators(state),
             SeatWind = state.SeatWind.Value is int sw ? WindNames.GetValueOrDefault(sw) : null,

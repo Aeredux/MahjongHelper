@@ -1,0 +1,70 @@
+{
+  "suggestions" : [ {
+    "discardTile" : "P4",
+    "shantenAfterDiscard" : 3,
+    "confidence" : 1.4044117647058822,
+    "reasoning" : "Maintains shanten at 3. Ukeire: 123 tiles (90.4% of remaining wall).",
+    "ukeireCount" : 123
+  }, {
+    "discardTile" : "P3",
+    "shantenAfterDiscard" : 3,
+    "confidence" : 1.125,
+    "reasoning" : "Maintains shanten at 3. Ukeire: 85 tiles (62.5% of remaining wall).",
+    "ukeireCount" : 85
+  }, {
+    "discardTile" : "M3",
+    "shantenAfterDiscard" : 3,
+    "confidence" : 1.0955882352941178,
+    "reasoning" : "Maintains shanten at 3. Ukeire: 81 tiles (59.6% of remaining wall).",
+    "ukeireCount" : 81
+  }, {
+    "discardTile" : "P6",
+    "shantenAfterDiscard" : 3,
+    "confidence" : 1.0955882352941178,
+    "reasoning" : "Maintains shanten at 3. Ukeire: 81 tiles (59.6% of remaining wall).",
+    "ukeireCount" : 81
+  }, {
+    "discardTile" : "S4",
+    "shantenAfterDiscard" : 3,
+    "confidence" : 1.0661764705882353,
+    "reasoning" : "Maintains shanten at 3. Ukeire: 77 tiles (56.6% of remaining wall).",
+    "ukeireCount" : 77
+  }, {
+    "discardTile" : "EAST",
+    "shantenAfterDiscard" : 3,
+    "confidence" : 1.0073529411764706,
+    "reasoning" : "Maintains shanten at 3. Ukeire: 69 tiles (50.7% of remaining wall). Terminal/honor tile - may be safer to discard.",
+    "ukeireCount" : 69
+  }, {
+    "discardTile" : "GREEN",
+    "shantenAfterDiscard" : 3,
+    "confidence" : 1.0073529411764706,
+    "reasoning" : "Maintains shanten at 3. Ukeire: 69 tiles (50.7% of remaining wall). Terminal/honor tile - may be safer to discard.",
+    "ukeireCount" : 69
+  }, {
+    "discardTile" : "S1",
+    "shantenAfterDiscard" : 3,
+    "confidence" : 1.0073529411764706,
+    "reasoning" : "Maintains shanten at 3. Ukeire: 69 tiles (50.7% of remaining wall). Terminal/honor tile - may be safer to discard.",
+    "ukeireCount" : 69
+  }, {
+    "discardTile" : "M4",
+    "shantenAfterDiscard" : 4,
+    "confidence" : 0.0,
+    "reasoning" : "Worsens shanten from 3 to 4. Ukeire: 75 tiles (55.1% of remaining wall).",
+    "ukeireCount" : 75
+  }, {
+    "discardTile" : "M1",
+    "shantenAfterDiscard" : 4,
+    "confidence" : 0.0,
+    "reasoning" : "Worsens shanten from 3 to 4. Ukeire: 71 tiles (52.2% of remaining wall). Terminal/honor tile - may be safer to discard.",
+    "ukeireCount" : 71
+  }, {
+    "discardTile" : "SOUTH",
+    "shantenAfterDiscard" : 4,
+    "confidence" : 0.0,
+    "reasoning" : "Worsens shanten from 3 to 4. Ukeire: 71 tiles (52.2% of remaining wall). Terminal/honor tile - may be safer to discard.",
+    "ukeireCount" : 71
+  } ],
+  "currentShanten" : 2
+}
