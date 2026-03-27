@@ -464,6 +464,9 @@ public static unsafe class EmjUiReader
         // Log AtkValues changes for call prompt discovery
         LogAtkValuesIfChanged(addon);
 
+        // Deep scan: dump ALL text at any depth in visible components (one-time snapshot per change)
+        DumpAllComponentTextDeep(addon);
+
         // Infer game phase from available signals
         var phase = InferGamePhase(addon, availableCalls, rawAtkInts);
 
@@ -712,6 +715,103 @@ public static unsafe class EmjUiReader
     /// </summary>
     private static string _lastCallDebugSignature = "";
     private static string _lastAtkValuesSignature = "";
+    private static string _lastDeepScanSignature = "";
+
+    /// <summary>
+    /// Deep-scans all component nodes up to 3 levels deep for ANY text, including
+    /// invisible nodes. Writes snapshot to file only when content changes.
+    /// </summary>
+    private static void DumpAllComponentTextDeep(AtkUnitBase* addon)
+    {
+        try
+        {
+            var lines = new List<string>();
+            var uld = addon->UldManager;
+
+            for (int i = 0; i < uld.NodeListCount; i++)
+            {
+                try
+                {
+                    var n = uld.NodeList[i];
+                    if (n == null) continue;
+                    var nType = (int)n->Type;
+                    if (nType < 1000) continue;
+
+                    // Skip tile-sized
+                    if ((n->Width == 34 && n->Height == 45) || (n->Width == 42 && n->Height == 55))
+                        continue;
+
+                    bool vis = false;
+                    try { vis = n->IsVisible(); } catch { }
+
+                    var comp = (AtkComponentNode*)n;
+                    if (comp->Component == null) continue;
+
+                    var texts = new List<string>();
+                    CollectTextRecursive(comp->Component, texts, 0, 3);
+
+                    if (texts.Count > 0)
+                    {
+                        lines.Add($"[{i}] id={n->NodeId} type={nType} size=({n->Width},{n->Height}) vis={vis}");
+                        foreach (var t in texts)
+                            lines.Add($"  {t}");
+                    }
+                }
+                catch { }
+            }
+
+            if (lines.Count == 0) return;
+
+            var sig = string.Join("\n", lines);
+            if (sig == _lastDeepScanSignature) return;
+            _lastDeepScanSignature = sig;
+
+            var logDir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MahjongHelper");
+            System.IO.Directory.CreateDirectory(logDir);
+            var entry = $"[{DateTime.UtcNow:O}]\n{sig}\n\n";
+            System.IO.File.AppendAllText(System.IO.Path.Combine(logDir, "deep_text_scan.log"), entry);
+        }
+        catch { }
+    }
+
+    private static void CollectTextRecursive(AtkComponentBase* comp, List<string> results, int depth, int maxDepth)
+    {
+        if (comp == null || depth > maxDepth) return;
+
+        var childUld = comp->UldManager;
+        var indent = new string(' ', depth * 2);
+
+        for (int j = 0; j < childUld.NodeListCount && j < 64; j++)
+        {
+            try
+            {
+                var cn = childUld.NodeList[j];
+                if (cn == null) continue;
+
+                bool cVis = false;
+                try { cVis = cn->IsVisible(); } catch { }
+
+                if (cn->Type == NodeType.Text)
+                {
+                    var txt = (AtkTextNode*)cn;
+                    string text = "";
+                    try { text = Marshal.PtrToStringUTF8((nint)txt->NodeText.StringPtr.Value) ?? ""; } catch { }
+                    if (!string.IsNullOrWhiteSpace(text))
+                        results.Add($"{indent}d{depth}[{j}] TEXT id={cn->NodeId} vis={cVis} \"{text.Trim()}\"");
+                }
+                else if ((int)cn->Type >= 1000)
+                {
+                    var subComp = (AtkComponentNode*)cn;
+                    if (subComp->Component != null)
+                    {
+                        results.Add($"{indent}d{depth}[{j}] COMP type={(int)cn->Type} id={cn->NodeId} vis={cVis} size=({cn->Width},{cn->Height})");
+                        CollectTextRecursive(subComp->Component, results, depth + 1, maxDepth);
+                    }
+                }
+            }
+            catch { }
+        }
+    }
 
     /// <summary>
     /// Logs the first 16 AtkValues whenever they change, to discover which
@@ -744,7 +844,6 @@ public static unsafe class EmjUiReader
     private static CallOptions ReadCallPrompts(AtkUnitBase* addon)
     {
         var calls = CallOptions.None;
-        var debugTexts = new List<string>();
 
         try
         {
@@ -756,90 +855,93 @@ public static unsafe class EmjUiReader
                 {
                     var n = uld.NodeList[i];
                     if (n == null) continue;
-                    if ((int)n->Type < 1000) continue;
-
-                    bool vis = false;
-                    try { vis = n->IsVisible(); } catch { }
-                    if (!vis) continue;
+                    var nType = (int)n->Type;
+                    if (nType < 1000) continue;
 
                     // Skip tile-sized components
                     if ((n->Width == 34 && n->Height == 45) || (n->Width == 42 && n->Height == 55))
                         continue;
 
-                    // Look for button-like components with text children
+                    bool vis = false;
+                    try { vis = n->IsVisible(); } catch { }
+
+                    // The call button container (type=1032) is marked invisible even when
+                    // call buttons inside it are active. Always scan it.
+                    if (!vis && nType != 1032)
+                        continue;
+
                     var comp = (AtkComponentNode*)n;
                     if (comp->Component == null) continue;
-                    var childUld = comp->Component->UldManager;
 
-                    for (int j = 0; j < childUld.NodeListCount && j < 32; j++)
-                    {
-                        try
-                        {
-                            var cn = childUld.NodeList[j];
-                            if (cn == null || cn->Type != NodeType.Text) continue;
-
-                            bool cVis = false;
-                            try { cVis = cn->IsVisible(); } catch { }
-                            if (!cVis) continue;
-
-                            var txt = (AtkTextNode*)cn;
-                            string text;
-                            try
-                            {
-                                text = Marshal.PtrToStringUTF8((nint)txt->NodeText.StringPtr.Value) ?? "";
-                            }
-                            catch { continue; }
-
-                            if (string.IsNullOrWhiteSpace(text)) continue;
-                            var lower = text.Trim().ToLowerInvariant();
-
-                            debugTexts.Add($"[{i}:{j}] type={(int)n->Type} size=({n->Width},{n->Height}) id={n->NodeId} text=\"{text.Trim()}\"");
-
-                            // Match common call prompt text (English and Japanese)
-                            if (lower.Contains("chi") || lower.Contains("チー"))
-                                calls |= CallOptions.Chi;
-                            else if (lower.Contains("pon") || lower.Contains("ポン"))
-                                calls |= CallOptions.Pon;
-                            else if (lower.Contains("kan") || lower.Contains("カン"))
-                                calls |= CallOptions.Kan;
-                            else if (lower.Contains("ron") || lower.Contains("ロン"))
-                                calls |= CallOptions.Ron;
-                            else if (lower.Contains("tsumo") || lower.Contains("ツモ"))
-                                calls |= CallOptions.Tsumo;
-                            else if (lower.Contains("riichi") || lower.Contains("リーチ") || lower.Contains("reach"))
-                                calls |= CallOptions.Riichi;
-                            else if (lower.Contains("skip") || lower.Contains("pass") || lower.Contains("cancel")
-                                     || lower.Contains("スキップ") || lower.Contains("キャンセル"))
-                                calls |= CallOptions.Skip;
-                        }
-                        catch { }
-                    }
+                    // Scan up to 3 levels deep: container(1032) → list(1030) → button(1029) → text
+                    ScanComponentForCalls(comp->Component, ref calls, 0, 3);
                 }
                 catch { }
             }
         }
         catch { }
 
-        // Log text found for debugging call detection issues (throttled — only on change)
-        if (debugTexts.Count > 0)
-        {
-            var currentSig = $"{calls}|{debugTexts.Count}|{string.Join("|", debugTexts)}";
-            if (currentSig != _lastCallDebugSignature)
-            {
-                _lastCallDebugSignature = currentSig;
-                try
-                {
-                    var logDir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MahjongHelper");
-                    System.IO.Directory.CreateDirectory(logDir);
-                    var entry = $"[{DateTime.UtcNow:O}] calls={calls} texts={debugTexts.Count}\n" +
-                                string.Join("\n", debugTexts) + "\n\n";
-                    System.IO.File.AppendAllText(System.IO.Path.Combine(logDir, "call_prompt_debug.log"), entry);
-                }
-                catch { }
-            }
-        }
-
         return calls;
+    }
+
+    private static void ScanComponentForCalls(AtkComponentBase* comp, ref CallOptions calls, int depth, int maxDepth)
+    {
+        if (comp == null || depth > maxDepth) return;
+
+        var childUld = comp->UldManager;
+        for (int j = 0; j < childUld.NodeListCount && j < 64; j++)
+        {
+            try
+            {
+                var cn = childUld.NodeList[j];
+                if (cn == null) continue;
+
+                if (cn->Type == NodeType.Text)
+                {
+                    bool cVis = false;
+                    try { cVis = cn->IsVisible(); } catch { }
+                    if (!cVis) continue;
+
+                    var txt = (AtkTextNode*)cn;
+                    string text;
+                    try { text = Marshal.PtrToStringUTF8((nint)txt->NodeText.StringPtr.Value) ?? ""; }
+                    catch { continue; }
+
+                    if (string.IsNullOrWhiteSpace(text)) continue;
+                    var trimmed = text.Trim();
+
+                    // Skip AI suggestion labels on player panes (e.g., "Pon!", "Tsumo!")
+                    // Actual call buttons use text without exclamation marks (e.g., "Pon", "Pass")
+                    if (trimmed.EndsWith("!"))
+                        continue;
+
+                    var lower = trimmed.ToLowerInvariant();
+
+                    if (lower.Contains("chi") || lower.Contains("チー"))
+                        calls |= CallOptions.Chi;
+                    else if (lower.Contains("pon") || lower.Contains("ポン"))
+                        calls |= CallOptions.Pon;
+                    else if (lower.Contains("kan") || lower.Contains("カン"))
+                        calls |= CallOptions.Kan;
+                    else if (lower.Contains("ron") || lower.Contains("ロン"))
+                        calls |= CallOptions.Ron;
+                    else if (lower.Contains("tsumo") || lower.Contains("ツモ"))
+                        calls |= CallOptions.Tsumo;
+                    else if (lower.Contains("riichi") || lower.Contains("リーチ") || lower.Contains("reach"))
+                        calls |= CallOptions.Riichi;
+                    else if (lower.Contains("skip") || lower.Contains("pass") || lower.Contains("cancel")
+                             || lower.Contains("スキップ") || lower.Contains("キャンセル"))
+                        calls |= CallOptions.Skip;
+                }
+                else if ((int)cn->Type >= 1000)
+                {
+                    var subComp = (AtkComponentNode*)cn;
+                    if (subComp->Component != null)
+                        ScanComponentForCalls(subComp->Component, ref calls, depth + 1, maxDepth);
+                }
+            }
+            catch { }
+        }
     }
 
     /// <summary>
