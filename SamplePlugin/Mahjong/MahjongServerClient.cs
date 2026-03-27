@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -10,9 +11,13 @@ namespace SamplePlugin.Mahjong;
 /// <summary>
 /// HTTP client for communicating with the local Mahjong solver server.
 /// All methods are async and return null on failure (never throw).
+/// Logs all requests/responses to %APPDATA%/MahjongHelper/server_log.txt for offline debugging.
 /// </summary>
 public sealed class MahjongServerClient : IDisposable
 {
+    private static readonly string LogDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MahjongHelper");
+    private static readonly string LogPath = Path.Combine(LogDirectory, "server_log.txt");
+
     private readonly HttpClient _http;
     private readonly JsonSerializerOptions _jsonOptions;
 
@@ -37,6 +42,7 @@ public sealed class MahjongServerClient : IDisposable
         _jsonOptions = new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+            PropertyNameCaseInsensitive = true,
             DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
         };
     }
@@ -48,11 +54,18 @@ public sealed class MahjongServerClient : IDisposable
     {
         try
         {
+            LogToFile(">>> GET /api/health");
             var response = await _http.GetAsync("/api/health", ct).ConfigureAwait(false);
             if (response.IsSuccessStatusCode)
             {
                 var json = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-                var health = JsonSerializer.Deserialize<HealthResponse>(json, _jsonOptions);
+                LogToFile($"<<< 200 /api/health\n{Truncate(json, 500)}");
+
+                // Server may respond with JSON or plain text
+                HealthResponse? health = null;
+                try { health = JsonSerializer.Deserialize<HealthResponse>(json, _jsonOptions); }
+                catch { }
+
                 _lastHealthy = true;
                 _lastServerVersion = health?.Version;
                 _lastError = null;
@@ -62,11 +75,13 @@ public sealed class MahjongServerClient : IDisposable
 
             _lastHealthy = false;
             _lastError = $"Health check returned {(int)response.StatusCode}";
+            LogToFile($"<<< {(int)response.StatusCode} /api/health");
         }
         catch (Exception ex)
         {
             _lastHealthy = false;
             _lastError = ex is TaskCanceledException ? "Timeout" : ex.Message;
+            LogToFile($"!!! /api/health EXCEPTION: {_lastError}");
         }
 
         _lastHealthCheck = DateTime.UtcNow;
@@ -126,10 +141,13 @@ public sealed class MahjongServerClient : IDisposable
         try
         {
             var json = JsonSerializer.Serialize(request, _jsonOptions);
+            LogToFile($">>> POST {endpoint}\n{json}");
+
             using var content = new StringContent(json, Encoding.UTF8, "application/json");
             var response = await _http.PostAsync(endpoint, content, ct).ConfigureAwait(false);
 
             var responseJson = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            LogToFile($"<<< {(int)response.StatusCode} {endpoint}\n{Truncate(responseJson, 2000)}");
 
             if (!response.IsSuccessStatusCode)
             {
@@ -143,8 +161,19 @@ public sealed class MahjongServerClient : IDisposable
         catch (Exception ex)
         {
             _lastError = ex is TaskCanceledException ? $"{endpoint} timeout" : $"{endpoint}: {ex.Message}";
+            LogToFile($"!!! {endpoint} EXCEPTION: {_lastError}");
             return null;
         }
+    }
+
+    private static void LogToFile(string message)
+    {
+        try
+        {
+            Directory.CreateDirectory(LogDirectory);
+            File.AppendAllText(LogPath, $"[{DateTime.UtcNow:O}] {message}\n\n");
+        }
+        catch { }
     }
 
     private static string Truncate(string s, int max)

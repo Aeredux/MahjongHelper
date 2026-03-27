@@ -84,7 +84,7 @@ public sealed class SuggestMoveResponse
     [JsonPropertyName("suggestions")]
     public List<DiscardSuggestion> Suggestions { get; set; } = [];
 
-    [JsonPropertyName("shanten")]
+    [JsonPropertyName("currentShanten")]
     public int? Shanten { get; set; }
 
     [JsonPropertyName("error")]
@@ -93,13 +93,13 @@ public sealed class SuggestMoveResponse
 
 public sealed class DiscardSuggestion
 {
-    [JsonPropertyName("tile")]
+    [JsonPropertyName("discardTile")]
     public string Tile { get; set; } = "";
 
-    [JsonPropertyName("shanten")]
+    [JsonPropertyName("shantenAfterDiscard")]
     public int? Shanten { get; set; }
 
-    [JsonPropertyName("ukeire")]
+    [JsonPropertyName("ukeireCount")]
     public int? Ukeire { get; set; }
 
     [JsonPropertyName("confidence")]
