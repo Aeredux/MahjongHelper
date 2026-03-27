@@ -5,17 +5,78 @@ using FFXIVClientStructs.FFXIV.Component.GUI;
 namespace SamplePlugin.Mahjong;
 
 /// <summary>
-/// Provides methods for simulating user clicks on EmjL (Doman Mahjong) addon nodes.
+/// Provides methods for simulating user actions on EmjL (Doman Mahjong) addon.
 ///
-/// Interaction approach (from Saucy reference):
-///   The game dispatches UI events through AtkEventListener.ReceiveEvent on component nodes.
-///   For minigame addons, the component node's own event listener handles tile interactions.
-///   We call ReceiveEvent on the component with the correct event type and target node.
+/// Discovered callback IDs (via FireCallback):
+///   7  = Discard specific tile (second value = 0-based hand position from left)
+///   8  = Discard drawn tile (tsumogiri)
+///   10 = Declare draw (ryuukyoku)
+///   16 = Withdraw from match
+///   19 = Close mahjong game
 /// </summary>
 public static unsafe class AddonClickHelper
 {
     private static readonly string LogDir = System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MahjongHelper");
+
+    private const int CallbackIdDiscardTile = 7;
+    private const int CallbackIdDiscardDrawn = 8;
+
+    /// <summary>
+    /// Discards a tile at the given hand position (0 = leftmost in sorted hand).
+    /// Uses FireCallback(2, [7, handPos], true).
+    /// </summary>
+    public static bool TryDiscardTile(AtkUnitBase* addon, int handPos)
+    {
+        if (addon == null || handPos < 0 || handPos > 13) return false;
+
+        try
+        {
+            LogAtkSnapshot(addon, $"pre-discard-pos{handPos}");
+
+            var values = stackalloc AtkValue[2];
+            values[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = CallbackIdDiscardTile };
+            values[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = handPos };
+            addon->FireCallback(2, values, true);
+
+            Log($"[DISCARD] Fired callback 7 with handPos={handPos}");
+            LogAtkSnapshot(addon, $"post-discard-pos{handPos}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log($"ERROR discarding tile at handPos={handPos}: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Discards the drawn tile (tsumogiri).
+    /// Uses FireCallback(2, [8, 0], true).
+    /// </summary>
+    public static bool TryDiscardDrawnTile(AtkUnitBase* addon)
+    {
+        if (addon == null) return false;
+
+        try
+        {
+            LogAtkSnapshot(addon, "pre-tsumogiri");
+
+            var values = stackalloc AtkValue[2];
+            values[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = CallbackIdDiscardDrawn };
+            values[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 0 };
+            addon->FireCallback(2, values, true);
+
+            Log($"[DISCARD] Fired callback 8 (tsumogiri)");
+            LogAtkSnapshot(addon, "post-tsumogiri");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log($"ERROR discarding drawn tile: {ex.Message}");
+            return false;
+        }
+    }
 
     /// <summary>
     /// Attempts to click a hand tile node by dispatching an event through the component's listener.
@@ -203,18 +264,9 @@ public static unsafe class AddonClickHelper
                     break;
 
                 default:
-                    // Method 0: sweep callback IDs 0-20 with FireCallback(2, [id, slotIndex])
-                    Log($"--- Sweeping callback IDs 0-20 with slotIndex={slotIndex} ---");
-                    for (int cbId = 0; cbId <= 20; cbId++)
-                    {
-                        var v = stackalloc AtkValue[2];
-                        v[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = cbId };
-                        v[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = slotIndex };
-                        addon->FireCallback(2, v, true);
-                    }
-                    Log($"[EXECUTE] Swept callback IDs 0-20");
-                    LogAtkSnapshot(addon, $"post-sweep-node{nodeIndex}");
-                    result = true;
+                    // Method 0: just log info, use specific method numbers for testing
+                    Log($"[INFO] Use /mj clicktile <node> <method> run — methods 6-10 for callbacks, or /mj firecb <id> <slot> run");
+                    result = false;
                     break;
             }
 

@@ -169,30 +169,65 @@ public sealed class AutoPlayManager
 
     private unsafe bool ExecuteDiscard(AtkUnitBase* addon, string tileCode)
     {
-        // Find the hand slot that matches the tile code
         if (_lastHandSlots == null || _lastHandSlots.Count == 0)
         {
             Log($"Cannot discard {tileCode}: no hand slots available");
             return false;
         }
 
-        // Find a visible hand tile matching the suggested discard
-        var matchingSlot = _lastHandSlots
-            .Where(s => s.Kind == EmjUiReader.SlotKind.CanonicalPlayerHand ||
-                        s.Kind == EmjUiReader.SlotKind.PlayerHand ||
-                        s.Kind == EmjUiReader.SlotKind.VisibleTileCandidate)
+        // Get the canonical hand (sorted left-to-right, excluding drawn tile)
+        var handSlots = _lastHandSlots
+            .Where(s => s.Kind == EmjUiReader.SlotKind.CanonicalPlayerHand)
             .Where(s => s.Visible && s.TileCode != null)
-            .FirstOrDefault(s => s.TileCode!.Equals(tileCode, StringComparison.OrdinalIgnoreCase));
+            .OrderBy(s => s.SlotIndex)
+            .ToList();
+
+        // Check if the drawn tile matches the suggested discard (tsumogiri)
+        var drawnSlot = _lastHandSlots
+            .Where(s => s.Kind == EmjUiReader.SlotKind.CanonicalPlayerDraw)
+            .Where(s => s.Visible && s.TileCode != null)
+            .FirstOrDefault();
+
+        if (drawnSlot != null && TileCodesMatch(drawnSlot.TileCode!, tileCode))
+        {
+            Log($"Executing tsumogiri: {tileCode} (drawn tile matches suggestion)");
+            return AddonClickHelper.TryDiscardDrawnTile(addon);
+        }
+
+        // Find the hand position (0 = leftmost) of the tile to discard
+        // Server returns M5/P5/S5 for red doras, but hand uses M0/P0/S0 — match both
+        var matchingSlot = handSlots
+            .FirstOrDefault(s => TileCodesMatch(s.TileCode!, tileCode));
 
         if (matchingSlot == null)
         {
-            Log($"Cannot discard {tileCode}: no matching hand slot found");
+            Log($"Cannot discard {tileCode}: no matching hand slot found in canonical hand");
             return false;
         }
 
-        Log($"Executing discard: {tileCode} nodeIndex={matchingSlot.NodeIndex} nodeId={matchingSlot.NodeId}");
-        // Use method 0 (try all methods) for now during discovery
-        return AddonClickHelper.TryClickTileNode(addon, matchingSlot.NodeIndex, true, 0);
+        var handPos = matchingSlot.SlotIndex;
+        Log($"Executing discard: {tileCode} handPos={handPos} (slot {matchingSlot.SlotIndex})");
+        return AddonClickHelper.TryDiscardTile(addon, handPos);
+    }
+
+    /// <summary>
+    /// Compares tile codes accounting for red dora normalization.
+    /// M0/P0/S0 (red 5s in UI) match M5/P5/S5 (server format).
+    /// </summary>
+    private static bool TileCodesMatch(string uiCode, string serverCode)
+    {
+        if (uiCode.Equals(serverCode, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // Red dora: UI uses M0/P0/S0, server uses M5/P5/S5
+        var normalizedUi = uiCode switch
+        {
+            "M0" => "M5",
+            "P0" => "P5",
+            "S0" => "S5",
+            _ => uiCode
+        };
+        return normalizedUi.Equals(serverCode, StringComparison.OrdinalIgnoreCase);
     }
 
     private unsafe bool ExecuteCallResponse(AtkUnitBase* addon, int callIndex)

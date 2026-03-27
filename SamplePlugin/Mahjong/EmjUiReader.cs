@@ -32,6 +32,7 @@ public static unsafe class EmjUiReader
         Unknown,
         WaitingForDiscard,
         WaitingForDraw,
+        OpponentTurn,
         CallDecisionPrompt,
         RiichiDecisionPrompt,
         TsumoDecisionPrompt,
@@ -961,6 +962,21 @@ public static unsafe class EmjUiReader
             return GamePhase.RiichiDecisionPrompt;
         if (availableCalls != CallOptions.None && availableCalls != CallOptions.Skip)
             return GamePhase.CallDecisionPrompt;
+
+        // AtkValues[0] encodes the game phase:
+        //   30 = player's turn to discard (drawn tile received)
+        //   6  = call decision prompt (already handled above via call options)
+        //   15 = turn in progress (opponent playing or animation)
+        if (rawAtkInts.Count > 0)
+        {
+            switch (rawAtkInts[0])
+            {
+                case 30:
+                    return GamePhase.WaitingForDiscard;
+                case 15:
+                    return GamePhase.OpponentTurn;
+            }
+        }
 
         return GamePhase.Unknown;
     }
