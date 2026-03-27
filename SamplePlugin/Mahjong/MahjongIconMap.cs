@@ -13,9 +13,9 @@ public sealed unsafe class MahjongIconMap
 {
     private static readonly string[] ExpectedTileCodes =
     {
-        "M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9",
-        "P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8", "P9",
-        "S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "S9",
+        "M1", "M2", "M3", "M4", "M5", "M0", "M6", "M7", "M8", "M9",
+        "P1", "P2", "P3", "P4", "P5", "P0", "P6", "P7", "P8", "P9",
+        "S1", "S2", "S3", "S4", "S5", "S0", "S6", "S7", "S8", "S9",
         "EAST", "SOUTH", "WEST", "NORTH", "WHITE", "GREEN", "RED",
     };
 
@@ -36,6 +36,8 @@ public sealed unsafe class MahjongIconMap
         // Honors: Winds then Dragons
         [76068] = "EAST", [76069] = "SOUTH", [76070] = "WEST", [76071] = "NORTH",
         [76072] = "WHITE", [76073] = "GREEN", [76074] = "RED",
+        // Red fives (aka dora): 76075–76077
+        [76075] = "M0", [76076] = "P0", [76077] = "S0",
     };
     private static readonly HashSet<uint> LockedBuiltInIconIds = new(BuiltInMappings.Keys);
 

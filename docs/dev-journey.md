@@ -569,6 +569,21 @@
 
 **Result:** Icon IDs should now be readable immediately after plugin reload without waiting for new `LoadIconTexture` calls. Combined with the 34-entry sequential mapping, the normalized state should show tile codes like `M8 P6 S4` instead of `(missing)`.
 
+## 2026-03-27: Red five (aka dora) icon mappings confirmed
+
+**What:** Added mappings for the three red five tiles (76075→M0, 76076→P0, 76077→S0) based on live gameplay correlation.
+
+**Why:** User reported hand `1 1 2 5r 7 8 m | 5r 6 p | 4 4 9 s | SOUTH WEST` drawn `2p`. UI state showed two unmapped icons: `ICON_76075` between M2 and M7 (confirmed red five of characters) and `ICON_76076` between M8 and P6 (confirmed red five of circles). By pattern, 76077 is the red five of bamboo.
+
+**Key insight:** FFXIV Doman Mahjong uses icons 76041–76074 for the 34 standard tiles (M1–M9, P1–P9, S1–S9, winds, dragons), then 76075–76077 for the three red fives (aka dora). This brings the total to 37 mapped icons.
+
+**Changes made:**
+- Added `[76075] = "M0"`, `[76076] = "P0"`, `[76077] = "S0"` to `BuiltInMappings` in `MahjongIconMap`.
+- Added `M0`, `P0`, `S0` to `ExpectedTileCodes` (now 37 entries).
+- Using "0" notation (standard Mahjong convention for red fives, e.g., 0m = red five of characters).
+
+**Result:** All 37 Doman Mahjong tile icons are now mapped. The mapping progress report should show `37/37` known tile codes with no missing entries.
+
 **What:** Created a dedicated execution-order test plan for collecting and validating all remaining Mahjong state information.
 
 **Why:** Needed a repeatable, low-effort workflow to systematically gather evidence, validate reader behavior, and triage failures without ad-hoc manual analysis loops.
