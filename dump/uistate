@@ -1,48 +1,81 @@
-Captured: 2026-03-27T02:06:41.8673666Z
-Canonical player hand slots: 9
-  [CanonicalPlayerHand:0] node=66 id=1340005 type=1055 vis=True pos=(210,0) size=(42,55) M8
-  [CanonicalPlayerHand:1] node=65 id=1340006 type=1055 vis=True pos=(252,0) size=(42,55) ICON_76076
-  [CanonicalPlayerHand:2] node=64 id=1340007 type=1055 vis=True pos=(294,0) size=(42,55) P6
-  [CanonicalPlayerHand:3] node=63 id=1340008 type=1055 vis=True pos=(336,0) size=(42,55) S4
-  [CanonicalPlayerHand:4] node=62 id=1340009 type=1055 vis=True pos=(378,0) size=(42,55) S4
-  [CanonicalPlayerHand:5] node=61 id=1340010 type=1055 vis=True pos=(420,0) size=(42,55) S9
-  [CanonicalPlayerHand:6] node=60 id=1340011 type=1055 vis=True pos=(462,0) size=(42,55) SOUTH
-  [CanonicalPlayerHand:7] node=59 id=1340012 type=1055 vis=True pos=(504,0) size=(42,55) WEST
-  [CanonicalPlayerHand:8] node=54 id=135 type=1055 vis=True pos=(556,0) size=(42,55) P2
+Captured: 2026-03-27T05:46:07.1719261Z
+--- Game Info ---
+SeatWind: ?
+RoundWind: ?
+Round: ? Honba: ? RiichiSticks: ?
+Scores: Player=? Right=? Opposite=? Left=?
+Riichi: Player=False Right=False Opposite=True Left=False
+AvailableCalls: None
+Phase: Unknown
+Canonical player hand slots: 13
+  [CanonicalPlayerHand:0] node=70 id=1340001 type=1055 vis=True pos=(42,0) size=(42,55) M4
+  [CanonicalPlayerHand:1] node=69 id=1340002 type=1055 vis=True pos=(84,0) size=(42,55) M5
+  [CanonicalPlayerHand:2] node=68 id=1340003 type=1055 vis=True pos=(126,0) size=(42,55) M8
+  [CanonicalPlayerHand:3] node=58 id=1340013 type=1055 vis=True pos=(168,0) size=(42,55) P2
+  [CanonicalPlayerHand:4] node=67 id=1340004 type=1055 vis=True pos=(168,0) size=(42,55) P3
+  [CanonicalPlayerHand:5] node=66 id=1340005 type=1055 vis=True pos=(210,0) size=(42,55) P6
+  [CanonicalPlayerHand:6] node=65 id=1340006 type=1055 vis=True pos=(252,0) size=(42,55) P6
+  [CanonicalPlayerHand:7] node=64 id=1340007 type=1055 vis=True pos=(294,0) size=(42,55) P8
+  [CanonicalPlayerHand:8] node=63 id=1340008 type=1055 vis=True pos=(336,0) size=(42,55) S5
+  [CanonicalPlayerHand:9] node=62 id=1340009 type=1055 vis=True pos=(378,0) size=(42,55) S0
+  [CanonicalPlayerHand:10] node=61 id=1340010 type=1055 vis=True pos=(420,0) size=(42,55) S6
+  [CanonicalPlayerHand:11] node=60 id=1340011 type=1055 vis=True pos=(462,0) size=(42,55) SOUTH
+  [CanonicalPlayerHand:12] node=59 id=1340012 type=1055 vis=True pos=(504,0) size=(42,55) GREEN
 Canonical player draw slot:
-  [CanonicalPlayerDraw:0] node=107 id=127 type=1022 vis=True pos=(180,0) size=(34,45) S5
-Player hand slots: 13
-  [PlayerHand:0] node=54 id=135 type=1055 vis=True pos=(556,0) size=(42,55) P2
+  [CanonicalPlayerDraw:0] node=54 id=135 type=1055 vis=True pos=(556,0) size=(42,55) WEST
+PlayerDiscard: 0 tiles
+RightDiscard: 0 tiles
+OppositeDiscard: 0 tiles
+LeftDiscard: 0 tiles
+DoraIndicator: 10 tiles
+  GREEN WHITE S2 P2 NORTH P9 S9 P6 SOUTH NORTH
+  [DoraIndicator:0] node=105 id=1270002 type=1022 vis=True pos=(180,68) size=(34,45) GREEN
+  [DoraIndicator:0] node=137 id=1240002 type=1024 vis=True pos=(136,180) size=(34,45) WHITE
+  [DoraIndicator:0] node=170 id=1210001 type=1023 vis=True pos=(0,170) size=(34,45) S2
+  [DoraIndicator:0] node=202 id=1180001 type=1021 vis=True pos=(34,0) size=(34,45) P2
+  [DoraIndicator:1] node=106 id=1270001 type=1022 vis=True pos=(180,34) size=(34,45) NORTH
+  [DoraIndicator:1] node=138 id=1240001 type=1024 vis=True pos=(170,180) size=(34,45) P9
+  [DoraIndicator:1] node=171 id=121 type=1023 vis=True pos=(0,204) size=(34,45) S9
+  [DoraIndicator:1] node=203 id=118 type=1021 vis=True pos=(0,0) size=(34,45) P6
+  [DoraIndicator:2] node=107 id=127 type=1022 vis=True pos=(180,0) size=(34,45) SOUTH
+  [DoraIndicator:2] node=139 id=124 type=1024 vis=True pos=(204,180) size=(34,45) NORTH
+Player hand slots: 18
+  [PlayerHand:0] node=54 id=135 type=1055 vis=True pos=(556,0) size=(42,55) WEST
   [PlayerHand:1] node=55 id=1340016 type=1055 vis=True pos=(0,0) size=(42,55) (no-icon)
   [PlayerHand:2] node=56 id=1340015 type=1055 vis=True pos=(0,0) size=(42,55) (no-icon)
   [PlayerHand:3] node=57 id=1340014 type=1055 vis=True pos=(0,0) size=(42,55) (no-icon)
-  [PlayerHand:4] node=58 id=1340013 type=1055 vis=True pos=(0,0) size=(42,55) (no-icon)
-  [PlayerHand:5] node=59 id=1340012 type=1055 vis=True pos=(504,0) size=(42,55) WEST
+  [PlayerHand:4] node=58 id=1340013 type=1055 vis=True pos=(168,0) size=(42,55) P2
+  [PlayerHand:5] node=59 id=1340012 type=1055 vis=True pos=(504,0) size=(42,55) GREEN
   [PlayerHand:6] node=60 id=1340011 type=1055 vis=True pos=(462,0) size=(42,55) SOUTH
-  [PlayerHand:7] node=61 id=1340010 type=1055 vis=True pos=(420,0) size=(42,55) S9
-  [PlayerHand:8] node=62 id=1340009 type=1055 vis=True pos=(378,0) size=(42,55) S4
-  [PlayerHand:9] node=63 id=1340008 type=1055 vis=True pos=(336,0) size=(42,55) S4
-  [PlayerHand:10] node=64 id=1340007 type=1055 vis=True pos=(294,0) size=(42,55) P6
-  [PlayerHand:11] node=65 id=1340006 type=1055 vis=True pos=(252,0) size=(42,55) ICON_76076
-  [PlayerHand:12] node=66 id=1340005 type=1055 vis=True pos=(210,0) size=(42,55) M8
+  [PlayerHand:7] node=61 id=1340010 type=1055 vis=True pos=(420,0) size=(42,55) S6
+  [PlayerHand:8] node=62 id=1340009 type=1055 vis=True pos=(378,0) size=(42,55) S0
+  [PlayerHand:9] node=63 id=1340008 type=1055 vis=True pos=(336,0) size=(42,55) S5
+  [PlayerHand:10] node=64 id=1340007 type=1055 vis=True pos=(294,0) size=(42,55) P8
+  [PlayerHand:11] node=65 id=1340006 type=1055 vis=True pos=(252,0) size=(42,55) P6
+  [PlayerHand:12] node=66 id=1340005 type=1055 vis=True pos=(210,0) size=(42,55) P6
+  [PlayerHand:13] node=67 id=1340004 type=1055 vis=True pos=(168,0) size=(42,55) P3
+  [PlayerHand:14] node=68 id=1340003 type=1055 vis=True pos=(126,0) size=(42,55) M8
+  [PlayerHand:15] node=69 id=1340002 type=1055 vis=True pos=(84,0) size=(42,55) M5
+  [PlayerHand:16] node=70 id=1340001 type=1055 vis=True pos=(42,0) size=(42,55) M4
+  [PlayerHand:17] node=71 id=134 type=1055 vis=True pos=(0,0) size=(42,55) M1
 Player draw slot:
-  [PlayerDraw:0] node=107 id=127 type=1022 vis=True pos=(180,0) size=(34,45) S5
+  (missing)
 Visible tile candidates: 18
   [VisibleTileCandidate:1] node=55 id=1340016 type=1055 vis=True pos=(0,0) size=(42,55) (no-icon)
   [VisibleTileCandidate:2] node=56 id=1340015 type=1055 vis=True pos=(0,0) size=(42,55) (no-icon)
   [VisibleTileCandidate:3] node=57 id=1340014 type=1055 vis=True pos=(0,0) size=(42,55) (no-icon)
-  [VisibleTileCandidate:4] node=58 id=1340013 type=1055 vis=True pos=(0,0) size=(42,55) (no-icon)
   [VisibleTileCandidate:17] node=71 id=134 type=1055 vis=True pos=(0,0) size=(42,55) M1
-  [VisibleTileCandidate:16] node=70 id=1340001 type=1055 vis=True pos=(42,0) size=(42,55) M1
-  [VisibleTileCandidate:15] node=69 id=1340002 type=1055 vis=True pos=(84,0) size=(42,55) M2
-  [VisibleTileCandidate:14] node=68 id=1340003 type=1055 vis=True pos=(126,0) size=(42,55) ICON_76075
-  [VisibleTileCandidate:13] node=67 id=1340004 type=1055 vis=True pos=(168,0) size=(42,55) M7
-  [VisibleTileCandidate:12] node=66 id=1340005 type=1055 vis=True pos=(210,0) size=(42,55) M8
-  [VisibleTileCandidate:11] node=65 id=1340006 type=1055 vis=True pos=(252,0) size=(42,55) ICON_76076
-  [VisibleTileCandidate:10] node=64 id=1340007 type=1055 vis=True pos=(294,0) size=(42,55) P6
-  [VisibleTileCandidate:9] node=63 id=1340008 type=1055 vis=True pos=(336,0) size=(42,55) S4
-  [VisibleTileCandidate:8] node=62 id=1340009 type=1055 vis=True pos=(378,0) size=(42,55) S4
-  [VisibleTileCandidate:7] node=61 id=1340010 type=1055 vis=True pos=(420,0) size=(42,55) S9
+  [VisibleTileCandidate:16] node=70 id=1340001 type=1055 vis=True pos=(42,0) size=(42,55) M4
+  [VisibleTileCandidate:15] node=69 id=1340002 type=1055 vis=True pos=(84,0) size=(42,55) M5
+  [VisibleTileCandidate:14] node=68 id=1340003 type=1055 vis=True pos=(126,0) size=(42,55) M8
+  [VisibleTileCandidate:4] node=58 id=1340013 type=1055 vis=True pos=(168,0) size=(42,55) P2
+  [VisibleTileCandidate:13] node=67 id=1340004 type=1055 vis=True pos=(168,0) size=(42,55) P3
+  [VisibleTileCandidate:12] node=66 id=1340005 type=1055 vis=True pos=(210,0) size=(42,55) P6
+  [VisibleTileCandidate:11] node=65 id=1340006 type=1055 vis=True pos=(252,0) size=(42,55) P6
+  [VisibleTileCandidate:10] node=64 id=1340007 type=1055 vis=True pos=(294,0) size=(42,55) P8
+  [VisibleTileCandidate:9] node=63 id=1340008 type=1055 vis=True pos=(336,0) size=(42,55) S5
+  [VisibleTileCandidate:8] node=62 id=1340009 type=1055 vis=True pos=(378,0) size=(42,55) S0
+  [VisibleTileCandidate:7] node=61 id=1340010 type=1055 vis=True pos=(420,0) size=(42,55) S6
   [VisibleTileCandidate:6] node=60 id=1340011 type=1055 vis=True pos=(462,0) size=(42,55) SOUTH
-  [VisibleTileCandidate:5] node=59 id=1340012 type=1055 vis=True pos=(504,0) size=(42,55) WEST
-  [VisibleTileCandidate:0] node=54 id=135 type=1055 vis=True pos=(556,0) size=(42,55) P2
+  [VisibleTileCandidate:5] node=59 id=1340012 type=1055 vis=True pos=(504,0) size=(42,55) GREEN
+  [VisibleTileCandidate:0] node=54 id=135 type=1055 vis=True pos=(556,0) size=(42,55) WEST

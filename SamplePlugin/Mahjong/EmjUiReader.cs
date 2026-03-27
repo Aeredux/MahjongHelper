@@ -298,21 +298,13 @@ public static unsafe class EmjUiReader
     }
 
     /// <summary>
-    /// Classifies 34x45 tile nodes into discard pools (4 players) and dora indicators
-    /// based on their parent node grouping and spatial position.
-    ///
-    /// The EmjL addon groups discard tiles under parent container nodes. By examining
-    /// which parent a tile belongs to and its Y-position, we can determine which
-    /// player's discard pool it represents and whether it's a dora indicator.
-    ///
-    /// Classification strategy (initial heuristic, will be refined with live data):
-    /// - Tiles are grouped by their parent node ID.
-    /// - Groups with very few tiles (1-5) in a central area are likely dora indicators.
-    /// - Larger groups are discard pools, classified by spatial position:
-    ///   - Bottom area (highest Y values) = local player discards
-    ///   - Right area = right player (shimocha)
-    ///   - Top area (lowest Y values) = opposite player (toimen)
-    ///   - Left area = left player (kamicha)
+    /// Classifies 34x45 tile nodes into discard pools (4 players) based on their
+    /// component NodeType. Each player's discard pool uses a distinct component type:
+    ///   1021 = local player discards
+    ///   1022 = left player (kamicha) discards
+    ///   1023 = right player (shimocha) discards
+    ///   1024 = opposite player (toimen) discards
+    /// Dora indicators are read separately via RootNode child-tree navigation.
     /// </summary>
     private static void ClassifySmallTiles(AtkUldManager uld, List<UiSlot> smallTiles, IconIdCapture? iconCapture, MahjongIconMap? iconMap, List<UiSlot> outputSlots)
     {
@@ -324,123 +316,48 @@ public static unsafe class EmjUiReader
         if (tilesWithIcons.Count == 0)
             return;
 
-        // Group tiles by parent node to find structural groups.
-        // Each discard pool and the dora indicator area should be under different parent nodes.
-        var parentGroups = new Dictionary<uint, List<UiSlot>>();
-        foreach (var tile in tilesWithIcons)
+        // Classify by NodeType — each player's discard pool uses a distinct component type
+        var playerCounts = new Dictionary<SlotKind, int>
         {
-            try
-            {
-                if (tile.NodeIndex < 0 || tile.NodeIndex >= uld.NodeListCount)
-                    continue;
-
-                var node = uld.NodeList[tile.NodeIndex];
-                if (node == null || node->ParentNode == null)
-                    continue;
-
-                var parentId = node->ParentNode->NodeId;
-                if (!parentGroups.ContainsKey(parentId))
-                    parentGroups[parentId] = new List<UiSlot>();
-                parentGroups[parentId].Add(tile);
-            }
-            catch
-            {
-            }
-        }
-
-        // Compute Y-band center for each parent group
-        var groupStats = parentGroups.Select(g =>
-        {
-            var tiles = g.Value;
-            var avgY = tiles.Average(t => t.Y);
-            var avgX = tiles.Average(t => t.X);
-            var minY = tiles.Min(t => t.Y);
-            var maxY = tiles.Max(t => t.Y);
-            var minX = tiles.Min(t => t.X);
-            var maxX = tiles.Max(t => t.X);
-            return new
-            {
-                ParentId = g.Key,
-                Tiles = tiles,
-                AvgY = avgY,
-                AvgX = avgX,
-                MinY = minY,
-                MaxY = maxY,
-                MinX = minX,
-                MaxX = maxX,
-                YSpread = maxY - minY,
-                XSpread = maxX - minX,
-                Count = tiles.Count,
-            };
-        }).ToList();
-
-        if (groupStats.Count == 0)
-            return;
-
-        // Heuristic: dora indicators are typically a small group (<=5 tiles) positioned
-        // near the center of the board. Discard pools have more tiles and spread across
-        // a wider area. If we can't clearly identify dora, we skip it and log everything
-        // as discard tiles for now.
-
-        // Sort groups by Y to assign player positions.
-        // In the FFXIV Mahjong UI (as observed):
-        // - Local player (bottom of screen): highest Y values
-        // - Opposite player (top): lowest Y values
-        // - Left player: left side
-        // - Right player: right side
-        // But discard pools for all 4 players are actually in the center area of the board,
-        // distinguished primarily by Y-position bands.
-
-        // Separate potential dora indicators: small group with narrow spatial spread
-        var doraGroups = groupStats.Where(g => g.Count <= 5 && g.XSpread < 200 && g.YSpread < 100).ToList();
-        var discardGroups = groupStats.Where(g => !doraGroups.Contains(g)).ToList();
-
-        // If we have exactly 4 discard groups + potentially some dora, great.
-        // Otherwise, fall back to Y-based sorting of all non-dora groups.
-
-        // Assign dora indicators
-        foreach (var doraGroup in doraGroups)
-        {
-            for (int i = 0; i < doraGroup.Tiles.Count; i++)
-            {
-                var tile = doraGroup.Tiles[i];
-                outputSlots.Add(tile with { Kind = SlotKind.DoraIndicator, SlotIndex = i });
-            }
-        }
-
-        // Sort discard groups by average Y position to assign player seats.
-        // Highest Y = bottom of screen = local player.
-        var sortedDiscardGroups = discardGroups.OrderByDescending(g => g.AvgY).ToList();
-
-        // Map groups to player positions based on Y ordering.
-        // With 4 groups, the order should be: player (bottom), right, opposite, left
-        // But in practice, the spatial layout varies. We use the Y-sort as primary heuristic.
-        var kindMapping = new[]
-        {
-            SlotKind.PlayerDiscard,    // highest Y = bottom = local player
-            SlotKind.RightDiscard,     // next
-            SlotKind.LeftDiscard,      // next
-            SlotKind.OppositeDiscard,  // lowest Y = top = opposite player
+            { SlotKind.PlayerDiscard, 0 },
+            { SlotKind.LeftDiscard, 0 },
+            { SlotKind.RightDiscard, 0 },
+            { SlotKind.OppositeDiscard, 0 },
         };
 
-        for (int g = 0; g < sortedDiscardGroups.Count; g++)
+        foreach (var tile in tilesWithIcons)
         {
-            var kind = g < kindMapping.Length ? kindMapping[g] : SlotKind.PlayerDiscard;
-            var group = sortedDiscardGroups[g];
-            var orderedTiles = group.Tiles.OrderBy(t => t.Y).ThenBy(t => t.X).ToList();
-
-            for (int i = 0; i < orderedTiles.Count; i++)
+            var kind = tile.NodeType switch
             {
-                outputSlots.Add(orderedTiles[i] with { Kind = kind, SlotIndex = i });
-            }
+                1021 => SlotKind.PlayerDiscard,
+                1022 => SlotKind.LeftDiscard,
+                1023 => SlotKind.RightDiscard,
+                1024 => SlotKind.OppositeDiscard,
+                _ => (SlotKind?)null,
+            };
+
+            if (kind == null)
+                continue;
+
+            var k = kind.Value;
+            var idx = playerCounts[k]++;
+            outputSlots.Add(tile with { Kind = k, SlotIndex = idx });
         }
     }
 
     /// <summary>
-    /// Reads game info from AtkValues and visible UI elements.
-    /// AtkValues indices are discovered via the UI element discovery dump and may need
-    /// adjustment after live validation. Initial mapping is best-effort based on
-    /// common FFXIV addon patterns for Doman Mahjong.
+    /// Reads game info using RootNode child-tree navigation by NodeID,
+    /// following the approach from DomanMahjongStatus.
+    ///
+    /// Known paths (NodeID chains from RootNode):
+    ///   Round indicator:  root → 16 → 19  (image node, texture IconID 121451-121458)
+    ///   Honba count:      root → 21 → 23  (text "×N")
+    ///   Riichi sticks:    root → 21 → 22  (text "×N")
+    ///   Player pane:      root → 36 → 37 → 38  (player), 36 → 39 → 40 (right), 36 → 41 → 42 (across), 36 → 43 → 44 (left)
+    ///     Score:          pane → 10/11 → 12/13 → 2  (text)
+    ///     Seat wind:      pane → 7/8 → 9/10  (text)
+    ///     Current turn:   pane → 14/15  (has visible children when it's that player's turn)
+    ///   Dora (score screen only): root → 46 → 54 → 80 → 83
     /// </summary>
     private static UiGameInfo ReadGameInfo(AtkUnitBase* addon)
     {
@@ -459,12 +376,6 @@ public static unsafe class EmjUiReader
         try
         {
             var valCount = addon->AtkValuesCount;
-
-            // Collect all int/uint AtkValues for discovery logging.
-            // Also attempt to read known game state values.
-            // NOTE: The exact AtkValue indices for wind/round/scores are not yet confirmed.
-            // The discovery dump (DumpUiElementDiscovery) will help identify them.
-            // For now, we capture all small ints for the raw log and attempt common patterns.
             for (int i = 0; i < valCount && i < 500; i++)
             {
                 try
@@ -472,24 +383,52 @@ public static unsafe class EmjUiReader
                     var val = addon->AtkValues[i];
                     if (val.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int ||
                         val.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.UInt)
-                    {
                         rawAtkInts.Add(val.Int);
-                    }
                     else
-                    {
                         rawAtkInts.Add(0);
-                    }
                 }
-                catch
-                {
-                    rawAtkInts.Add(0);
-                }
+                catch { rawAtkInts.Add(0); }
             }
 
-            // Read scores and wind from text nodes.
-            // The EmjL addon displays wind/round info and scores as text nodes.
-            ReadWindAndScoresFromTextNodes(addon, ref seatWind, ref roundWind, ref roundNumber,
-                ref playerScore, ref rightScore, ref oppositeScore, ref leftScore);
+            var root = addon->RootNode;
+            if (root != null)
+            {
+                // Round indicator: root → 16 → 19 (image with texture IconID)
+                var roundImageNode = FindChildById(root, 16, 19);
+                if (roundImageNode != null && roundImageNode->Type == NodeType.Image)
+                {
+                    var iconId = TryReadIconIdFromStruct((AtkImageNode*)roundImageNode);
+                    (roundWind, roundNumber) = iconId switch
+                    {
+                        121451 => (0, 1),  // East 1
+                        121452 => (0, 2),  // East 2
+                        121453 => (0, 3),  // East 3
+                        121454 => (0, 4),  // East 4
+                        121455 => (1, 1),  // South 1
+                        121456 => (1, 2),  // South 2
+                        121457 => (1, 3),  // South 3
+                        121458 => (1, 4),  // South 4
+                        _ => ((int?)null, (int?)null),
+                    };
+                }
+
+                // Honba count: root → 21 → 23 (text "×N")
+                honba = ReadTextNodeInt(root, 21, 23);
+
+                // Riichi stick count: root → 21 → 22 (text "×N")
+                riichiSticks = ReadTextNodeInt(root, 21, 22);
+
+                // Player panes — score + seat wind
+                ReadPlayerPane(root, new[] { 36, 37, 38 }, true,
+                    ref playerScore, ref seatWind);
+                int? rightSeatWind = null, oppositeSeatWind = null, leftSeatWind = null;
+                ReadPlayerPane(root, new[] { 36, 39, 40 }, false,
+                    ref rightScore, ref rightSeatWind);
+                ReadPlayerPane(root, new[] { 36, 41, 42 }, false,
+                    ref oppositeScore, ref oppositeSeatWind);
+                ReadPlayerPane(root, new[] { 36, 43, 44 }, false,
+                    ref leftScore, ref leftSeatWind);
+            }
         }
         catch
         {
@@ -498,9 +437,6 @@ public static unsafe class EmjUiReader
 
         // Detect call prompts from visible button-like components
         var availableCalls = ReadCallPrompts(addon);
-
-        // Detect riichi status from visual indicators
-        ReadRiichiStatus(addon, riichiStatus);
 
         // Infer game phase from available signals
         var phase = InferGamePhase(addon, availableCalls, rawAtkInts);
@@ -512,80 +448,160 @@ public static unsafe class EmjUiReader
     }
 
     /// <summary>
-    /// Scans visible text nodes in the addon for wind indicators, round info, and scores.
-    /// Wind text typically appears as directional kanji/English near the center of the board.
-    /// Scores appear as numeric text near each player's position.
+    /// Reads a player info pane and extracts score and seat wind.
+    /// For the local player: score at pane → 10 → 12 → 2, wind at pane → 7 → 9.
+    /// For opponents:        score at pane → 11 → 13 → 2, wind at pane → 8 → 10.
     /// </summary>
-    private static void ReadWindAndScoresFromTextNodes(AtkUnitBase* addon,
-        ref int? seatWind, ref int? roundWind, ref int? roundNumber,
-        ref int? playerScore, ref int? rightScore, ref int? oppositeScore, ref int? leftScore)
+    private static void ReadPlayerPane(AtkResNode* root, int[] paneIds, bool isPlayer,
+        ref int? score, ref int? wind)
     {
-        var uld = addon->UldManager;
-
-        for (int i = 0; i < uld.NodeListCount; i++)
+        try
         {
-            try
+            var pane = FindChildById(root, paneIds);
+            if (pane == null) return;
+
+            // Score
+            var scoreNode = isPlayer
+                ? FindChildById(pane, 10, 12, 2)
+                : FindChildById(pane, 11, 13, 2);
+            if (scoreNode != null)
             {
-                var n = uld.NodeList[i];
-                if (n == null || n->Type != NodeType.Text) continue;
+                var text = ReadNodeText(scoreNode);
+                if (text != null && int.TryParse(text.Replace(",", ""), out var s))
+                    score = s;
+            }
 
-                bool vis = false;
-                try { vis = n->IsVisible(); } catch { }
-                if (!vis) continue;
-
-                var txt = (AtkTextNode*)n;
-                string text;
-                try
+            // Seat wind
+            var windNode = isPlayer
+                ? FindChildById(pane, 7, 9)
+                : FindChildById(pane, 8, 10);
+            if (windNode != null)
+            {
+                var text = ReadNodeText(windNode);
+                if (text != null)
                 {
-                    text = Marshal.PtrToStringUTF8((nint)txt->NodeText.StringPtr.Value) ?? "";
-                }
-                catch { continue; }
-
-                if (string.IsNullOrWhiteSpace(text)) continue;
-
-                var trimmed = text.Trim();
-
-                // Wind detection: look for wind kanji or English wind names
-                // Common patterns: "東" (East), "南" (South), "西" (West), "北" (North)
-                // Also "East X局" style round indicators
-                if (trimmed.Contains('東') || trimmed.Contains("East", StringComparison.OrdinalIgnoreCase))
-                {
-                    // If this is a small central text (round indicator), it's round wind
-                    if (n->Width <= 100 && n->Height <= 50)
-                        roundWind ??= 0; // East
-                }
-                else if (trimmed.Contains('南') || trimmed.Contains("South", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (n->Width <= 100 && n->Height <= 50)
-                        roundWind ??= 1; // South
-                }
-                else if (trimmed.Contains('西') || trimmed.Contains("West", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (n->Width <= 100 && n->Height <= 50)
-                        roundWind ??= 2; // West
-                }
-                else if (trimmed.Contains('北') || trimmed.Contains("North", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (n->Width <= 100 && n->Height <= 50)
-                        roundWind ??= 3; // North
-                }
-
-                // Score detection: purely numeric text that looks like a Mahjong score
-                if (int.TryParse(trimmed.Replace(",", ""), out var score) && score >= 0 && score <= 100000)
-                {
-                    // Assign score by Y-position: bottom = player, top = opposite, left/right by X
-                    if (n->Y > 350)
-                        playerScore ??= score;
-                    else if (n->Y < 100)
-                        oppositeScore ??= score;
-                    else if (n->X < 200)
-                        leftScore ??= score;
-                    else if (n->X > 600)
-                        rightScore ??= score;
+                    wind = text.Trim() switch
+                    {
+                        "East" or "東" => 0,
+                        "South" or "南" => 1,
+                        "West" or "西" => 2,
+                        "North" or "北" => 3,
+                        _ => null,
+                    };
                 }
             }
-            catch { }
         }
+        catch { }
+    }
+
+    /// <summary>
+    /// Reads a text node at the given child ID path and parses it as an integer.
+    /// Strips common prefixes like "×" used for honba/riichi stick counts.
+    /// </summary>
+    private static int? ReadTextNodeInt(AtkResNode* root, params int[] ids)
+    {
+        try
+        {
+            var node = FindChildById(root, ids);
+            if (node == null) return null;
+            var text = ReadNodeText(node);
+            if (text == null) return null;
+            var cleaned = text.Trim().TrimStart('×').Trim();
+            if (int.TryParse(cleaned, out var val))
+                return val;
+        }
+        catch { }
+        return null;
+    }
+
+    /// <summary>
+    /// Reads the text content of a Text node.
+    /// </summary>
+    private static string? ReadNodeText(AtkResNode* node)
+    {
+        try
+        {
+            if (node == null || node->Type != NodeType.Text) return null;
+            var txt = (AtkTextNode*)node;
+            return Marshal.PtrToStringUTF8((nint)txt->NodeText.StringPtr.Value);
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Navigates the ATK node tree by following a chain of NodeIDs.
+    /// Each step searches the children of the current node (or the component's internal
+    /// UldManager children if the node is a component) for a child with the matching NodeID.
+    /// This mirrors DomanMahjongStatus's GetChild(params int[] ids) approach.
+    /// </summary>
+    private static AtkResNode* FindChildById(AtkResNode* node, params int[] ids)
+    {
+        if (node == null || ids.Length == 0)
+            return node;
+
+        var current = node;
+        foreach (var id in ids)
+        {
+            var child = FindDirectChildById(current, (uint)id);
+            if (child == null)
+                return null;
+            current = child;
+        }
+        return current;
+    }
+
+    /// <summary>
+    /// Finds a direct child node with the given NodeID.
+    /// If the current node is a component, searches its internal UldManager children.
+    /// Otherwise, searches ChildNode linked list.
+    /// </summary>
+    private static AtkResNode* FindDirectChildById(AtkResNode* node, uint id)
+    {
+        if (node == null) return null;
+
+        try
+        {
+            // If it's a component node, search UldManager children
+            if ((int)node->Type >= 1000)
+            {
+                var comp = (AtkComponentNode*)node;
+                if (comp->Component != null)
+                {
+                    // Search via UldManager RootNode sibling chain (DomanMahjongStatus style)
+                    var uldRoot = comp->Component->UldManager.RootNode;
+                    var sibling = uldRoot;
+                    int steps = 0;
+                    while (sibling != null && steps++ < 200)
+                    {
+                        if (sibling->NodeId == id)
+                            return sibling;
+                        sibling = sibling->PrevSiblingNode;
+                    }
+
+                    // Also check NodeList as fallback
+                    var childUld = comp->Component->UldManager;
+                    for (int i = 0; i < childUld.NodeListCount && i < 200; i++)
+                    {
+                        var cn = childUld.NodeList[i];
+                        if (cn != null && cn->NodeId == id)
+                            return cn;
+                    }
+                }
+            }
+
+            // Search ChildNode linked list
+            var child = node->ChildNode;
+            int childSteps = 0;
+            while (child != null && childSteps++ < 200)
+            {
+                if (child->NodeId == id)
+                    return child;
+                child = child->PrevSiblingNode;
+            }
+        }
+        catch { }
+
+        return null;
     }
 
     /// <summary>
@@ -671,59 +687,6 @@ public static unsafe class EmjUiReader
         catch { }
 
         return calls;
-    }
-
-    /// <summary>
-    /// Detects riichi status for each player by looking for riichi stick indicators
-    /// in the discard pool areas. Riichi sticks are typically horizontal bar images
-    /// placed across the discard pool when a player declares riichi.
-    /// This is a heuristic that will be refined with live data.
-    /// </summary>
-    private static void ReadRiichiStatus(AtkUnitBase* addon, bool[] riichiStatus)
-    {
-        // Riichi sticks are typically narrow horizontal image nodes placed sideways
-        // across or near the discard pool. Without confirmed node IDs, this is
-        // a best-effort scan for distinctive narrow rectangular image nodes
-        // that are visible and positioned near the board center.
-        try
-        {
-            var uld = addon->UldManager;
-
-            for (int i = 0; i < uld.NodeListCount; i++)
-            {
-                try
-                {
-                    var n = uld.NodeList[i];
-                    if (n == null) continue;
-                    if (n->Type != NodeType.Image) continue;
-
-                    bool vis = false;
-                    try { vis = n->IsVisible(); } catch { }
-                    if (!vis) continue;
-
-                    // Riichi sticks are typically long and thin (e.g., ~80-120 x 5-15)
-                    var w = n->Width;
-                    var h = n->Height;
-                    bool isHorizontalStick = (w > 50 && h > 0 && h < 20 && w > h * 3);
-                    bool isVerticalStick = (h > 50 && w > 0 && w < 20 && h > w * 3);
-
-                    if (!isHorizontalStick && !isVerticalStick)
-                        continue;
-
-                    // Classify by position: bottom=player, top=opposite, left=left, right=right
-                    if (n->Y > 300)
-                        riichiStatus[0] = true; // player
-                    else if (n->Y < 150)
-                        riichiStatus[2] = true; // opposite
-                    else if (n->X < 250)
-                        riichiStatus[3] = true; // left
-                    else if (n->X > 550)
-                        riichiStatus[1] = true; // right
-                }
-                catch { }
-            }
-        }
-        catch { }
     }
 
     /// <summary>

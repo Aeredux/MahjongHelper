@@ -689,3 +689,47 @@
 - ⚠️ Game phase inference — currently call-prompt-driven only, hand-count-based detection pending
 
 **Result:** Phase 2 is code-complete. All game state reader features are implemented and compile cleanly. The UI state panel and normalized state panel now show the full game state including wind, scores, riichi status, available calls, and game phase. Live validation during gameplay will determine which heuristic thresholds need adjustment.
+
+## 2026-03-27: Fix discard classification + add child-tree navigation for game state
+
+**What:** Fixed discard tile classification (was showing all discards as dora indicators) and replaced heuristic text/image scanning with proper RootNode child-tree navigation based on DomanMahjongStatus reference code.
+
+**Why:** User reported that discards were all being classified as DoraIndicator and were not separated by player. The spatial/parent-grouping heuristic was wrong. The user also pointed to the DomanMahjongStatus plugin which reads game state via specific NodeID paths in the ATK tree.
+
+**Key discoveries from live dump data:**
+- Discard tiles have **distinct NodeType values per player**:
+  - `1021` = local player discards
+  - `1022` = left player (kamicha) discards
+  - `1023` = right player (shimocha) discards
+  - `1024` = opposite player (toimen) discards
+- Dora indicators during gameplay are NOT rendered as 34x45 tile nodes — they use a different mechanism. The DomanMahjongStatus reference only reads dora from the end-of-round score screen.
+- The DomanMahjongStatus plugin navigates the ATK tree by NodeID chains (`GetChild(id, id, ...)`) from the RootNode, NOT by NodeList index.
+
+**Changes made:**
+
+1. **Rewrote `ClassifySmallTiles`** — replaced entire spatial/parent-grouping heuristic with simple NodeType-based mapping. ~100 lines of heuristic code replaced with ~15 lines of direct type checking.
+
+2. **Added ATK child-tree navigation helpers:**
+   - `FindChildById(AtkResNode* root, params int[] ids)` — walks a chain of NodeIDs through the tree
+   - `FindDirectChildById(AtkResNode* node, uint id)` — finds a direct child by NodeID, handling both regular ChildNode lists and component UldManager trees
+   - `ReadNodeText(AtkResNode* node)` — reads text content from a Text node
+   - `ReadTextNodeInt(AtkResNode* root, params int[] ids)` — navigates to a text node and parses int (strips ×-prefix for honba/riichi sticks)
+
+3. **Rewrote `ReadGameInfo`** using child-tree navigation:
+   - Round indicator: root → 16 → 19 (image IconID 121451-121458 maps to East/South 1-4)
+   - Honba count: root → 21 → 23 (text "×N")
+   - Riichi stick count: root → 21 → 22 (text "×N")
+   - Player panes: root → 36 → {37,39,41,43} → {38,40,42,44}
+   - Scores: pane → {10,11} → {12,13} → 2 (text)
+   - Seat winds: pane → {7,8} → {9,10} (text "East"/"South"/"West"/"North")
+
+4. **Removed heuristic methods:**
+   - `ReadWindAndScoresFromTextNodes` — replaced by child-tree navigation
+   - `ReadRiichiStatus` — was producing false positives (matching arbitrary narrow image nodes)
+
+5. **Added `ReadPlayerPane` helper** — reads score and seat wind from a player's info pane component.
+
+**What's still pending:**
+- Dora indicator reading during gameplay (need to investigate what node structure holds the dora tiles on the board)
+- Riichi status per player (need to find the correct node path — DomanMahjongStatus doesn't expose this directly)
+- Call prompt detection validation (text keyword matching still needs live testing)
