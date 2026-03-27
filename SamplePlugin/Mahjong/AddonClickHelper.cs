@@ -153,4 +153,58 @@ public static unsafe class AddonClickHelper
             return false;
         }
     }
+
+    /// <summary>
+    /// Attempts to click a hand tile node directly using ReceiveEvent.
+    /// Discovery mode to test different event types and parameters.
+    /// nodeIndex is the position in the addon's NodeList.
+    /// </summary>
+    public static bool TryClickTileNode(AtkUnitBase* addon, int nodeIndex, bool execute)
+    {
+        if (addon == null || nodeIndex < 0) return false;
+
+        try
+        {
+            var uld = addon->UldManager;
+            if (nodeIndex >= uld.NodeListCount)
+            {
+                Log($"[CLICK-TEST] nodeIndex={nodeIndex} out of range (max={uld.NodeListCount})");
+                return false;
+            }
+
+            var node = uld.NodeList[nodeIndex];
+            if (node == null)
+            {
+                Log($"[CLICK-TEST] node at index {nodeIndex} is null");
+                return false;
+            }
+
+            Log($"[CLICK-TEST] Target: nodeIndex={nodeIndex} nodeId={node->NodeId} type={node->Type} " +
+                $"pos=({node->X},{node->Y}) size=({node->Width}x{node->Height}) visible={node->IsVisible()}");
+            LogAtkSnapshot(addon, $"pre-click-node{nodeIndex}");
+
+            if (!execute)
+            {
+                Log($"[DRY-RUN] Would click node {nodeIndex}");
+                return true;
+            }
+
+            // Try method 1: ReceiveEvent on the node directly
+            var evt = stackalloc AtkEvent[1];
+            evt->Param = (uint)node->NodeId;
+            evt->Target = (AtkEventTarget*)node;
+            evt->Listener = null;
+            evt->NextEvent = null;
+            addon->ReceiveEvent(AtkEventType.MouseClick, (int)node->NodeId, evt, null);
+
+            Log($"[EXECUTE] Clicked node {nodeIndex} via ReceiveEvent (NodeId={node->NodeId})");
+            LogAtkSnapshot(addon, $"post-click-node{nodeIndex}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log($"ERROR clicking node {nodeIndex}: {ex.Message}");
+            return false;
+        }
+    }
 }

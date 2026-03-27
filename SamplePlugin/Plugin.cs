@@ -125,7 +125,7 @@ public sealed class Plugin : IDalamudPlugin
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "/mj — toggle debug window | /mj overlay | /mj compact | /mj auto | /mj pause | /mj mark discard|call | /mj probecallback <a> <b> [run]"
+            HelpMessage = "/mj — toggle debug window | /mj overlay | /mj compact | /mj auto | /mj pause | /mj mark discard|call | /mj probecallback <a> <b> [run] | /mj clicktile <nodeIndex> [run]"
         });
 
         // Tell the UI system that we want our windows to be drawn through the window system
@@ -1396,6 +1396,25 @@ public sealed class Plugin : IDalamudPlugin
             else
             {
                 AppendRecentTransition($"{DateTime.UtcNow:O} invalid probecallback args: '{trimmed}'");
+            }
+        }
+        else if (lower.StartsWith("clicktile "))
+        {
+            // Usage: /mj clicktile <nodeIndex> [run]
+            var parts = lower.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 2 && int.TryParse(parts[1], out var nodeIndex))
+            {
+                var execute = parts.Length >= 3 && parts[2] == "run";
+                unsafe
+                {
+                    var addonPtr = _lastAddonAddress != 0 ? (AtkUnitBase*)_lastAddonAddress : null;
+                    AddonClickHelper.TryClickTileNode(addonPtr, nodeIndex, execute);
+                }
+                AppendRecentTransition($"{DateTime.UtcNow:O} click tile node={nodeIndex} execute={execute}");
+            }
+            else
+            {
+                AppendRecentTransition($"{DateTime.UtcNow:O} invalid clicktile args: '{trimmed}'");
             }
         }
         else
