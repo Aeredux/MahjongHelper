@@ -768,3 +768,33 @@
 - Throttled to 1 request/second, skips duplicate hand signatures
 - Server status shown in diagnostics and as a status line in MainWindow
 - Suggestion text displayed in a new "Server Suggestion" panel in MainWindow
+
+## 2026-03-27: Phase 4 — Suggestion Display UI (overlay)
+
+**What:** Created a dedicated in-game overlay window for displaying AI discard suggestions during Mahjong games.
+
+**New file: `SuggestionOverlayWindow.cs`**
+
+Two display modes:
+- **Compact mode:** Single line showing best discard tile + shanten + ukeire. Click `[+]` to expand.
+- **Full mode:** Header with shanten count + server status, ranked suggestion table (tile, shanten-after-discard, ukeire, confidence), hover tooltips for reasoning text, call recommendation area. Click `[-]` to collapse.
+
+Features:
+- Semi-transparent dark background for readability over game UI
+- Color-coded: gold for best pick, green/cyan/white for ukeire ranges, red for errors
+- Shows up to 8 suggestions with "... +N more" for overflow
+- Auto-hides when not in a Mahjong game (tied to reader status)
+- Call recommendation area (placeholder for Phase 4.4)
+
+**Configuration:**
+- `OverlayVisible` — persisted toggle for overlay visibility
+- `OverlayCompactMode` — persisted toggle for compact vs full mode
+
+**Commands:**
+- `/mj overlay` — toggle overlay visibility
+- `/mj compact` — toggle compact/full mode
+- `/mj` — toggle debug window (unchanged)
+
+**Integration:**
+- Overlay fed live data from Plugin.cs: suggestion response, server status, hand description, current turn
+- Auto-opens when in a Mahjong game, auto-closes when not

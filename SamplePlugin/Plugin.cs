@@ -57,6 +57,7 @@ public sealed class Plugin : IDalamudPlugin
     public readonly WindowSystem WindowSystem = new("SamplePlugin");
     private ConfigWindow ConfigWindow { get; init; }
     private MainWindow MainWindow { get; init; }
+    private SuggestionOverlayWindow OverlayWindow { get; init; }
     private DateTime _nextDumpAtUtc = DateTime.MinValue;
     private DateTime _nextUiStateCaptureAtUtc = DateTime.MinValue;
     private bool _startupDumpDone = false;
@@ -108,13 +109,15 @@ public sealed class Plugin : IDalamudPlugin
 
         ConfigWindow = new ConfigWindow(this);
         MainWindow = new MainWindow(this);
+        OverlayWindow = new SuggestionOverlayWindow(Configuration);
 
         WindowSystem.AddWindow(ConfigWindow);
         WindowSystem.AddWindow(MainWindow);
+        WindowSystem.AddWindow(OverlayWindow);
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "A useful message to display in /xlhelp"
+            HelpMessage = "/mj — toggle debug window | /mj overlay — toggle overlay | /mj compact — toggle compact mode"
         });
 
         // Tell the UI system that we want our windows to be drawn through the window system
@@ -262,6 +265,22 @@ public sealed class Plugin : IDalamudPlugin
         MainWindow.diagnosticsText = BuildDiagnosticsText();
         MainWindow.recentTransitionsText = BuildRecentTransitionsText();
         MainWindow.serverStatusText = _serverClient.GetStatusText();
+
+        // Feed overlay data
+        OverlayWindow.IsOpen = Configuration.OverlayVisible && _lastReaderStatus == AddonReaderStatus.NoErrors;
+        OverlayWindow.ServerStatus = _serverClient.GetStatusText();
+        if (_lastMergedState != null)
+        {
+            OverlayWindow.HandDescription = _lastMergedState.HandDescription.Value;
+            OverlayWindow.CurrentTurnIndex = _lastMergedState.CurrentTurn.Value switch
+            {
+                "Player" => 0,
+                "Right" => 1,
+                "Opposite" => 2,
+                "Left" => 3,
+                _ => null,
+            };
+        }
 
         // Periodic server health check (every 30 seconds)
         if (now >= _nextHealthCheckUtc)
@@ -892,6 +911,7 @@ public sealed class Plugin : IDalamudPlugin
             {
                 var response = await _serverClient.SuggestMoveAsync(request).ConfigureAwait(false);
                 _lastSuggestion = response;
+                OverlayWindow.LastSuggestion = response;
                 if (response != null)
                 {
                     MainWindow.serverSuggestionText = FormatSuggestion(response);
@@ -1126,16 +1146,31 @@ public sealed class Plugin : IDalamudPlugin
 
         ConfigWindow.Dispose();
         MainWindow.Dispose();
+        OverlayWindow.Dispose();
 
         CommandManager.RemoveHandler(CommandName);
     }
 
     private void OnCommand(string command, string args)
     {
-        // In response to the slash command, toggle the display status of our main ui
-        MainWindow.Toggle();
+        var trimmed = args.Trim().ToLowerInvariant();
+        if (trimmed == "overlay")
+        {
+            Configuration.OverlayVisible = !Configuration.OverlayVisible;
+            Configuration.Save();
+        }
+        else if (trimmed == "compact")
+        {
+            Configuration.OverlayCompactMode = !Configuration.OverlayCompactMode;
+            Configuration.Save();
+        }
+        else
+        {
+            // Default: toggle main debug window
+            MainWindow.Toggle();
+        }
     }
-    
+
     public void ToggleConfigUi() => ConfigWindow.Toggle();
     public void ToggleMainUi() => MainWindow.Toggle();
 }
