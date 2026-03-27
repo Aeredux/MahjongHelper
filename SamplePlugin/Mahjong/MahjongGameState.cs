@@ -42,7 +42,8 @@ public sealed record MahjongGameState(
     StateField<int> OppositeScore,
     StateField<int> LeftScore,
     StateField<string> AvailableCalls,
-    StateField<string> GamePhase)
+    StateField<string> GamePhase,
+    StateField<string> CurrentTurn)
 {
     public string ToDisplayText()
     {
@@ -60,6 +61,7 @@ public sealed record MahjongGameState(
         sb.AppendLine($"Scores: Player={FormatValue(PlayerScore)} Right={FormatValue(RightScore)} Opposite={FormatValue(OppositeScore)} Left={FormatValue(LeftScore)}");
         sb.AppendLine($"RiichiStatus: {FormatValue(RiichiStatus)}");
         sb.AppendLine($"AvailableCalls: {FormatValue(AvailableCalls)}");
+        sb.AppendLine($"CurrentTurn: {FormatValue(CurrentTurn)}");
         sb.AppendLine($"PlayerDiscards: {FormatValue(PlayerDiscards)}");
         sb.AppendLine($"RightDiscards: {FormatValue(RightDiscards)}");
         sb.AppendLine($"OppositeDiscards: {FormatValue(OppositeDiscards)}");
@@ -168,6 +170,18 @@ public static class MahjongGameStateBuilder
         var phaseStr = gameInfo.Phase.ToString();
         var mergedPhase = new StateField<string>(phaseStr, MahjongStateSource.Node, IsAuthoritative: true, IsFallback: false);
 
+        var turnStr = gameInfo.CurrentTurn switch
+        {
+            0 => "Player",
+            1 => "Right",
+            2 => "Opposite",
+            3 => "Left",
+            _ => null,
+        };
+        var mergedCurrentTurn = turnStr != null
+            ? new StateField<string>(turnStr, MahjongStateSource.Node, IsAuthoritative: true, IsFallback: false)
+            : StateField<string>.Missing();
+
         return new MahjongGameState(
             now,
             mergedAgentState,
@@ -188,7 +202,8 @@ public static class MahjongGameStateBuilder
             mergedOppositeScore,
             mergedLeftScore,
             mergedCalls,
-            mergedPhase);
+            mergedPhase,
+            mergedCurrentTurn);
     }
 
     private static StateField<int> MergeNullableInt(int? current, StateField<int>? previous)

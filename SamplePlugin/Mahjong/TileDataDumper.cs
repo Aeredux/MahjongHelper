@@ -92,6 +92,9 @@ public static unsafe class TileDataDumper
         // ─── Section 1f: UI element discovery (text nodes, buttons, wind/riichi/call prompts) ───
         DumpUiElementDiscovery(sb, addon);
 
+        // ─── Section 1g: Dora indicator discovery (center board area) ───
+        DumpDoraDiscovery(sb, addon, iconCapture, iconMap);
+
         // ─── Section 2: Complete node list ───
         sb.AppendLine("--- FULL NODE LIST ---");
         sb.AppendLine("idx | nodeId | vis | pos(x,y) | size(w,h) | type | flags | color");
@@ -663,6 +666,116 @@ public static unsafe class TileDataDumper
     }
 
     // ─── Spatial tile classification for discard pool / dora discovery ───
+
+    /// <summary>
+    /// Scans for potential dora indicator tiles by walking the RootNode child tree.
+    /// During gameplay, dora indicators may be rendered in a special board area component,
+    /// not as standalone 34x45 tiles in the NodeList. This dump helps discover the structure.
+    /// Also checks the center board node (NodeID 16 area) for tile-like image children.
+    /// </summary>
+    private static void DumpDoraDiscovery(StringBuilder sb, AtkUnitBase* addon, IconIdCapture? iconCapture, MahjongIconMap? iconMap)
+    {
+        sb.AppendLine("--- DORA INDICATOR DISCOVERY ---");
+
+        try
+        {
+            var root = addon->RootNode;
+            if (root == null)
+            {
+                sb.AppendLine("  (RootNode is null)");
+                sb.AppendLine();
+                return;
+            }
+
+            // Walk all visible component nodes in the NodeList and look for
+            // tile-sized image children with icon IDs in the Mahjong range (76041-76077).
+            // Exclude known discard types (1021-1024) and hand type (1055).
+            var uld = addon->UldManager;
+            sb.AppendLine("Visible components with Mahjong-range icons (excluding discards/hand):");
+            for (int i = 0; i < uld.NodeListCount; i++)
+            {
+                try
+                {
+                    var n = uld.NodeList[i];
+                    if (n == null) continue;
+                    var type = (int)n->Type;
+                    if (type < 1000) continue;
+
+                    // Skip known types
+                    if (type == 1021 || type == 1022 || type == 1023 || type == 1024 || type == 1055)
+                        continue;
+
+                    bool vis = false;
+                    try { vis = n->IsVisible(); } catch { }
+                    if (!vis) continue;
+
+                    // Search component's children for icon-mode image nodes
+                    var comp = (AtkComponentNode*)n;
+                    if (comp->Component == null) continue;
+                    var childUld = comp->Component->UldManager;
+
+                    for (int j = 0; j < childUld.NodeListCount && j < 64; j++)
+                    {
+                        try
+                        {
+                            var cn = childUld.NodeList[j];
+                            if (cn == null || cn->Type != NodeType.Image) continue;
+
+                            var img = (AtkImageNode*)cn;
+                            // Try reading icon ID from texture resource chain
+                            uint iconId = 0;
+                            try
+                            {
+                                if (img->PartsList != null && img->PartId < img->PartsList->PartCount)
+                                {
+                                    var part = img->PartsList->Parts[img->PartId];
+                                    if (part.UldAsset != null && part.UldAsset->AtkTexture.Resource != null)
+                                        iconId = part.UldAsset->AtkTexture.Resource->IconId;
+                                }
+                            }
+                            catch { }
+
+                            if (iconId >= 76041 && iconId <= 76077)
+                            {
+                                var tileCode = iconMap?.Resolve(iconId) ?? $"ICON_{iconId}";
+                                uint parentId = 0;
+                                try { if (n->ParentNode != null) parentId = n->ParentNode->NodeId; } catch { }
+                                sb.AppendLine($"  [{i,3}] id={n->NodeId} type={type} pos=({n->X:F0},{n->Y:F0}) size=({n->Width},{n->Height}) parent={parentId} -> child[{j}] iconId={iconId} tile={tileCode}");
+                            }
+                        }
+                        catch { }
+                    }
+
+                    // Also check via IconIdCapture hook
+                    if (iconCapture != null)
+                    {
+                        for (int j = 0; j < childUld.NodeListCount && j < 64; j++)
+                        {
+                            try
+                            {
+                                var cn = childUld.NodeList[j];
+                                if (cn == null || cn->Type != NodeType.Image) continue;
+                                var addr = (nint)cn;
+                                if (iconCapture.IconMap.TryGetValue(addr, out var capturedIcon) && capturedIcon >= 76041 && capturedIcon <= 76077)
+                                {
+                                    var tileCode = iconMap?.Resolve(capturedIcon) ?? $"ICON_{capturedIcon}";
+                                    sb.AppendLine($"  [{i,3}] id={n->NodeId} type={type} (hook) -> child[{j}] iconId={capturedIcon} tile={tileCode}");
+                                }
+                            }
+                            catch { }
+                        }
+                    }
+                }
+                catch { }
+            }
+        }
+        catch (Exception ex)
+        {
+            sb.AppendLine($"  ERROR: {ex.Message}");
+        }
+
+        sb.AppendLine();
+    }
 
     /// <summary>
     /// Dumps all visible tile-like nodes grouped by spatial position to discover

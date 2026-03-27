@@ -66,6 +66,7 @@ public static unsafe class EmjUiReader
         bool[] RiichiStatus,
         CallOptions AvailableCalls,
         GamePhase Phase,
+        int? CurrentTurn,
         IReadOnlyList<int> RawAtkInts)
     {
         public string ToDisplayText()
@@ -76,10 +77,20 @@ public static unsafe class EmjUiReader
             sb.AppendLine($"Round: {RoundNumber?.ToString() ?? "?"} Honba: {Honba?.ToString() ?? "?"} RiichiSticks: {RiichiSticks?.ToString() ?? "?"}");
             sb.AppendLine($"Scores: Player={PlayerScore?.ToString() ?? "?"} Right={RightScore?.ToString() ?? "?"} Opposite={OppositeScore?.ToString() ?? "?"} Left={LeftScore?.ToString() ?? "?"}");
             sb.AppendLine($"Riichi: Player={RiichiStatus[0]} Right={RiichiStatus[1]} Opposite={RiichiStatus[2]} Left={RiichiStatus[3]}");
+            sb.AppendLine($"CurrentTurn: {FormatCurrentTurn(CurrentTurn)}");
             sb.AppendLine($"AvailableCalls: {AvailableCalls}");
             sb.AppendLine($"Phase: {Phase}");
             return sb.ToString();
         }
+
+        private static string FormatCurrentTurn(int? turn) => turn switch
+        {
+            0 => "Player",
+            1 => "Right",
+            2 => "Opposite",
+            3 => "Left",
+            _ => "?",
+        };
 
         private static string FormatWind(int? wind) => wind switch
         {
@@ -182,7 +193,7 @@ public static unsafe class EmjUiReader
         if (addon == null)
         {
             var emptyInfo = new UiGameInfo(null, null, null, null, null, null, null, null, null,
-                new bool[4], CallOptions.None, GamePhase.Unknown, Array.Empty<int>());
+                new bool[4], CallOptions.None, GamePhase.Unknown, null, Array.Empty<int>());
             return new UiState(slots, emptyInfo, DateTime.UtcNow);
         }
 
@@ -378,6 +389,7 @@ public static unsafe class EmjUiReader
         int? oppositeScore = null;
         int? leftScore = null;
         var riichiStatus = new bool[4]; // player, right, opposite, left
+        int? currentTurn = null;
         var rawAtkInts = new List<int>();
 
         try
@@ -404,7 +416,7 @@ public static unsafe class EmjUiReader
                 var roundImageNode = FindChildById(root, 16, 19);
                 if (roundImageNode != null && roundImageNode->Type == NodeType.Image)
                 {
-                    var iconId = TryReadIconIdFromStruct((AtkImageNode*)roundImageNode);
+                    var iconId = (int)TryReadIconIdFromStruct((AtkImageNode*)roundImageNode);
                     (roundWind, roundNumber) = iconId switch
                     {
                         121451 => (0, 1),  // East 1
@@ -435,6 +447,10 @@ public static unsafe class EmjUiReader
                     ref oppositeScore, ref oppositeSeatWind);
                 ReadPlayerPane(root, new[] { 36, 43, 44 }, false,
                     ref leftScore, ref leftSeatWind);
+
+                // Current turn detection: pane → child(14) for player, child(15) for opponents.
+                // The pane whose indicator child has visible children is the current turn.
+                currentTurn = DetectCurrentTurn(root);
             }
         }
         catch
@@ -451,7 +467,7 @@ public static unsafe class EmjUiReader
         return new UiGameInfo(
             seatWind, roundWind, roundNumber, honba, riichiSticks,
             playerScore, rightScore, oppositeScore, leftScore,
-            riichiStatus, availableCalls, phase, rawAtkInts);
+            riichiStatus, availableCalls, phase, currentTurn, rawAtkInts);
     }
 
     /// <summary>
@@ -499,6 +515,80 @@ public static unsafe class EmjUiReader
             }
         }
         catch { }
+    }
+
+    /// <summary>
+    /// Detects whose turn it is by checking each player pane's turn indicator.
+    /// The player pane uses child(14), opponents use child(15).
+    /// The one with visible children in that indicator node is the current turn.
+    /// Returns: 0=Player, 1=Right, 2=Opposite, 3=Left, null=unknown.
+    /// </summary>
+    private static int? DetectCurrentTurn(AtkResNode* root)
+    {
+        try
+        {
+            // (paneIds, indicatorChildId, turnIndex)
+            var panes = new[]
+            {
+                (new[] { 36, 37, 38 }, 14, 0), // player
+                (new[] { 36, 39, 40 }, 15, 1), // right
+                (new[] { 36, 41, 42 }, 15, 2), // opposite
+                (new[] { 36, 43, 44 }, 15, 3), // left
+            };
+
+            foreach (var (paneIds, indicatorId, turnIndex) in panes)
+            {
+                var pane = FindChildById(root, paneIds);
+                if (pane == null) continue;
+
+                var indicator = FindDirectChildById(pane, (uint)indicatorId);
+                if (indicator == null) continue;
+
+                // Check if indicator has any visible children
+                if (HasVisibleChild(indicator))
+                    return turnIndex;
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    /// <summary>
+    /// Checks if a node has any visible child (either via ChildNode list or component UldManager).
+    /// </summary>
+    private static bool HasVisibleChild(AtkResNode* node)
+    {
+        if (node == null) return false;
+        try
+        {
+            // Check component children
+            if ((int)node->Type >= 1000)
+            {
+                var comp = (AtkComponentNode*)node;
+                if (comp->Component != null)
+                {
+                    var uldRoot = comp->Component->UldManager.RootNode;
+                    var sibling = uldRoot;
+                    int steps = 0;
+                    while (sibling != null && steps++ < 100)
+                    {
+                        try { if (sibling->IsVisible()) return true; } catch { }
+                        sibling = sibling->PrevSiblingNode;
+                    }
+                }
+            }
+
+            // Check direct children
+            var child = node->ChildNode;
+            int childSteps = 0;
+            while (child != null && childSteps++ < 100)
+            {
+                try { if (child->IsVisible()) return true; } catch { }
+                child = child->PrevSiblingNode;
+            }
+        }
+        catch { }
+        return false;
     }
 
     /// <summary>

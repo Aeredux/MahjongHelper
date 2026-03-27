@@ -867,7 +867,8 @@ public sealed class Plugin : IDalamudPlugin
             state.LeftScore.Value.ToString(),
             riichiStatus,
             state.AvailableCalls.Value ?? string.Empty,
-            state.GamePhase.Value ?? string.Empty);
+            state.GamePhase.Value ?? string.Empty,
+            state.CurrentTurn.Value ?? string.Empty);
     }
 
     private static string BuildActiveSourcePath(MahjongGameState state)
