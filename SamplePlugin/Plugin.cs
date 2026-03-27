@@ -869,6 +869,10 @@ public sealed class Plugin : IDalamudPlugin
         if (request == null || request.Hand.Count == 0)
             return;
 
+        // Only request when player has 14 tiles (drawn tile in hand, needs to discard)
+        if (request.Hand.Count < 14)
+            return;
+
         // Avoid re-requesting for the same hand
         var handSig = string.Join(",", request.Hand);
         if (handSig == _lastSuggestHandSignature)
