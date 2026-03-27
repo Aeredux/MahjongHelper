@@ -893,12 +893,12 @@ public sealed class Plugin : IDalamudPlugin
         if (request == null || request.Hand.Count == 0)
             return;
 
-        // Only request when player has 14 tiles (drawn tile in hand, needs to discard)
-        if (request.Hand.Count < 14)
+        // Only request when player has 14 tiles total (13 hand + drawn, needs to discard)
+        if (GameStateMapper.GetTotalTileCount(request) < 14)
             return;
 
         // Avoid re-requesting for the same hand
-        var handSig = string.Join(",", request.Hand);
+        var handSig = string.Join(",", request.Hand) + "|" + (request.DrawnTile ?? "");
         if (handSig == _lastSuggestHandSignature)
             return;
 
@@ -957,12 +957,12 @@ public sealed class Plugin : IDalamudPlugin
 
         // Determine call type (pick the most significant available call)
         string callType;
-        if (calls.Contains("Ron")) callType = "ron";
-        else if (calls.Contains("Tsumo")) callType = "tsumo";
-        else if (calls.Contains("Kan")) callType = "kan";
-        else if (calls.Contains("Pon")) callType = "pon";
-        else if (calls.Contains("Chi")) callType = "chi";
-        else if (calls.Contains("Riichi")) callType = "riichi";
+        if (calls.Contains("Ron")) callType = "RON";
+        else if (calls.Contains("Tsumo")) callType = "TSUMO";
+        else if (calls.Contains("Kan")) callType = "KAN";
+        else if (calls.Contains("Pon")) callType = "PON";
+        else if (calls.Contains("Chi")) callType = "CHI";
+        else if (calls.Contains("Riichi")) callType = "RIICHI";
         else return;
 
         // Determine the call tile: last tile in the most recent opponent discard pool

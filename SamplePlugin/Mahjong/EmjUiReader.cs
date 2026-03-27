@@ -713,7 +713,6 @@ public static unsafe class EmjUiReader
     /// offers a call decision. The presence/visibility of these components indicates
     /// which calls are available.
     /// </summary>
-    private static string _lastCallDebugSignature = "";
     private static string _lastAtkValuesSignature = "";
     private static string _lastDeepScanSignature = "";
 

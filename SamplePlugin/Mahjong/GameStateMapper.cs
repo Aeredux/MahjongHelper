@@ -20,6 +20,7 @@ public static class GameStateMapper
 
     /// <summary>
     /// Builds a suggest-move request from the current game state.
+    /// Server expects 13 tiles in hand + separate drawn_tile.
     /// Returns null if there isn't enough data (no hand tiles).
     /// </summary>
     public static SuggestMoveRequest? BuildSuggestMoveRequest(MahjongGameState state, MahjongIconMap iconMap)
@@ -30,27 +31,35 @@ public static class GameStateMapper
 
         var drawnTile = ResolveDrawnTile(state, iconMap);
 
-        // Server expects all 14 tiles in the hand array (including drawn tile)
-        if (drawnTile != null)
-            hand.Add(drawnTile);
+        // hand should be 13 tiles, drawn_tile sent separately
+        // If we have 14 tiles in hand and no separate drawn tile, split the last one
+        if (drawnTile == null && hand.Count == 14)
+        {
+            drawnTile = hand[^1];
+            hand.RemoveAt(hand.Count - 1);
+        }
 
-        var request = new SuggestMoveRequest
+        return new SuggestMoveRequest
         {
             Hand = hand,
-            Discards = BuildDiscardPools(state),
-            DoraIndicators = ResolveDoraIndicators(state),
+            DrawnTile = drawnTile,
+            Opponents = BuildOpponents(state),
             SeatWind = state.SeatWind.Value is int sw ? WindNames.GetValueOrDefault(sw) : null,
             RoundWind = state.RoundWind.Value is int rw ? WindNames.GetValueOrDefault(rw) : null,
-            RoundNumber = state.RoundNumber.Value is int rn and > 0 ? rn : null,
         };
-
-        return request;
     }
+
+    /// <summary>
+    /// Returns the total tile count (hand + drawn) for the current request.
+    /// Used by Plugin.cs to check if the player has 14 tiles.
+    /// </summary>
+    public static int GetTotalTileCount(SuggestMoveRequest request)
+        => request.Hand.Count + (request.DrawnTile != null ? 1 : 0);
 
     /// <summary>
     /// Builds an evaluate-call request.
     /// callTile is the tile being offered (e.g., the discard you can chi/pon/ron).
-    /// callType is "chi", "pon", "kan", "ron", "tsumo", or "riichi".
+    /// callType should be UPPERCASE: "RON", "PON", "CHI", "KAN", "TSUMO", "RIICHI".
     /// </summary>
     public static EvaluateCallRequest? BuildEvaluateCallRequest(
         MahjongGameState state, MahjongIconMap iconMap, string? callTile, string? callType)
@@ -63,9 +72,10 @@ public static class GameStateMapper
         {
             Hand = hand,
             CallTile = callTile,
-            CallType = callType,
-            Discards = BuildDiscardPools(state),
-            DoraIndicators = ResolveDoraIndicators(state),
+            CallType = callType?.ToUpperInvariant(),
+            Menzen = true,
+            PlayerScore = state.PlayerScore.Value is int ps and > 0 ? ps : null,
+            Opponents = BuildOpponents(state),
             SeatWind = state.SeatWind.Value is int sw ? WindNames.GetValueOrDefault(sw) : null,
             RoundWind = state.RoundWind.Value is int rw ? WindNames.GetValueOrDefault(rw) : null,
         };
@@ -101,29 +111,62 @@ public static class GameStateMapper
     }
 
     /// <summary>
-    /// Builds discard pools from state. Filters out unresolved tile codes.
+    /// Builds opponent info list from state discard pools and riichi status.
+    /// Opponents are: Right (index 1), Opposite (index 2), Left (index 3).
     /// </summary>
-    private static DiscardPools BuildDiscardPools(MahjongGameState state)
+    private static List<OpponentInfo>? BuildOpponents(MahjongGameState state)
     {
-        return new DiscardPools
+        var opponents = new List<OpponentInfo>();
+        var riichiStatus = state.RiichiStatus.Value;
+        var seatWind = state.SeatWind.Value is int sw ? sw : -1;
+
+        // Right opponent
+        var rightDiscards = FilterValidTiles(state.RightDiscards.Value);
+        if (rightDiscards.Count > 0 || (riichiStatus is { Count: >= 4 } && riichiStatus[1]))
         {
-            Player = FilterValidTiles(state.PlayerDiscards.Value),
-            Right = FilterValidTiles(state.RightDiscards.Value),
-            Opposite = FilterValidTiles(state.OppositeDiscards.Value),
-            Left = FilterValidTiles(state.LeftDiscards.Value),
-        };
+            opponents.Add(new OpponentInfo
+            {
+                Wind = GetOpponentWind(seatWind, 1),
+                Discards = rightDiscards.Select(t => new DiscardedTile { Tile = t }).ToList(),
+                Riichi = riichiStatus is { Count: >= 4 } && riichiStatus[1],
+            });
+        }
+
+        // Opposite opponent
+        var oppositeDiscards = FilterValidTiles(state.OppositeDiscards.Value);
+        if (oppositeDiscards.Count > 0 || (riichiStatus is { Count: >= 4 } && riichiStatus[2]))
+        {
+            opponents.Add(new OpponentInfo
+            {
+                Wind = GetOpponentWind(seatWind, 2),
+                Discards = oppositeDiscards.Select(t => new DiscardedTile { Tile = t }).ToList(),
+                Riichi = riichiStatus is { Count: >= 4 } && riichiStatus[2],
+            });
+        }
+
+        // Left opponent
+        var leftDiscards = FilterValidTiles(state.LeftDiscards.Value);
+        if (leftDiscards.Count > 0 || (riichiStatus is { Count: >= 4 } && riichiStatus[3]))
+        {
+            opponents.Add(new OpponentInfo
+            {
+                Wind = GetOpponentWind(seatWind, 3),
+                Discards = leftDiscards.Select(t => new DiscardedTile { Tile = t }).ToList(),
+                Riichi = riichiStatus is { Count: >= 4 } && riichiStatus[3],
+            });
+        }
+
+        return opponents.Count > 0 ? opponents : null;
     }
 
     /// <summary>
-    /// Resolves dora indicator tile codes.
+    /// Given the player's seat wind index (0=E,1=S,2=W,3=N) and a relative offset,
+    /// returns the opponent's wind name.
     /// </summary>
-    private static List<string>? ResolveDoraIndicators(MahjongGameState state)
+    private static string? GetOpponentWind(int playerSeatWind, int offset)
     {
-        if (state.DoraIndicators.Value is not { Count: > 0 } indicators)
-            return null;
-
-        var valid = FilterValidTiles(indicators);
-        return valid.Count > 0 ? valid : null;
+        if (playerSeatWind < 0) return null;
+        return WindNames.GetValueOrDefault((playerSeatWind + offset) % 4);
     }
 
     /// <summary>
