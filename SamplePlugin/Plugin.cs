@@ -28,6 +28,7 @@ public sealed class Plugin : IDalamudPlugin
     private static readonly string NormalizedStateHistoryPath = Path.Combine(CacheDirectory, "normalized_state_history.log");
     private static readonly string NormalizedStateExportPath = Path.Combine(CacheDirectory, "normalized_state_export.txt");
     private static readonly string ProbeSnippetExportPath = Path.Combine(CacheDirectory, "probe_snippet_export.txt");
+    private static readonly string StartupDiagDumpPath = Path.Combine(CacheDirectory, "startup_diag.txt");
 
     [PluginService] internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
     [PluginService] internal static ITextureProvider TextureProvider { get; private set; } = null!;
@@ -126,6 +127,111 @@ public sealed class Plugin : IDalamudPlugin
 
         // If EmjL addon is already open (player is in a mahjong game), dump immediately on load
         TryImmediateDump();
+
+        // Always dump startup diagnostics so pipeline state can be inspected offline
+        DumpStartupDiagnostics();
+    }
+
+    private void DumpStartupDiagnostics()
+    {
+        try
+        {
+            Directory.CreateDirectory(CacheDirectory);
+            var sb = new StringBuilder();
+            sb.AppendLine($"=== Startup Diagnostics {DateTime.UtcNow:O} ===");
+            sb.AppendLine();
+
+            // 1) Icon map state
+            var mapSnapshot = _iconMap.Snapshot();
+            sb.AppendLine($"[MahjongIconMap] Active mappings: {mapSnapshot.Count}");
+            foreach (var pair in mapSnapshot.OrderBy(p => p.Key))
+                sb.AppendLine($"  {pair.Key} -> {pair.Value}");
+            sb.AppendLine();
+
+            // 2) Icon map progress report (no observed icons at startup)
+            sb.AppendLine("[MahjongIconMap] Progress Report:");
+            sb.AppendLine(_iconMap.BuildProgressReport(Array.Empty<uint>()));
+            sb.AppendLine();
+
+            // 3) IconIdCapture state
+            var capturedEntries = _iconCapture.IconMap;
+            sb.AppendLine($"[IconIdCapture] Cached image-node entries: {capturedEntries.Count}");
+            var mahjongRange = new List<(nint addr, uint iconId)>();
+            foreach (var pair in capturedEntries)
+            {
+                if (pair.Value >= 76041 && pair.Value <= 76150)
+                    mahjongRange.Add((pair.Key, pair.Value));
+            }
+            sb.AppendLine($"[IconIdCapture] Entries in Mahjong icon range (76041-76150): {mahjongRange.Count}");
+            foreach (var (addr, iconId) in mahjongRange.OrderBy(e => e.iconId))
+            {
+                var tileCode = _iconMap.Resolve(iconId);
+                sb.AppendLine($"  0x{addr:X} -> iconId={iconId} tile={tileCode ?? "(unmapped)"}");
+            }
+            sb.AppendLine();
+
+            var recentCaptures = _iconCapture.GetRecentCaptures();
+            sb.AppendLine($"[IconIdCapture] Recent captures (ring buffer): {recentCaptures.Count}");
+            foreach (var (time, addr, iconId) in recentCaptures.TakeLast(20))
+                sb.AppendLine($"  {time:O} 0x{addr:X} -> {iconId}");
+            sb.AppendLine();
+
+            // 4) Cache file contents
+            var iconCachePath = Path.Combine(CacheDirectory, "icon_capture_cache.json");
+            if (File.Exists(iconCachePath))
+            {
+                var cacheJson = File.ReadAllText(iconCachePath);
+                sb.AppendLine($"[IconIdCapture] Cache file ({iconCachePath}):");
+                sb.AppendLine(cacheJson.Length > 2000 ? cacheJson[..2000] + "..." : cacheJson);
+            }
+            else
+            {
+                sb.AppendLine("[IconIdCapture] Cache file: (not found)");
+            }
+            sb.AppendLine();
+
+            var nameCachePath = Path.Combine(CacheDirectory, "icon_name_cache.json");
+            if (File.Exists(nameCachePath))
+            {
+                var nameJson = File.ReadAllText(nameCachePath);
+                sb.AppendLine($"[MahjongIconMap] Cache file ({nameCachePath}):");
+                sb.AppendLine(nameJson.Length > 2000 ? nameJson[..2000] + "..." : nameJson);
+            }
+            else
+            {
+                sb.AppendLine("[MahjongIconMap] Cache file: (not found)");
+            }
+            sb.AppendLine();
+
+            // 5) Normalized state
+            sb.AppendLine($"[NormalizedState] Last merged state:");
+            sb.AppendLine(_lastMergedState?.ToDisplayText() ?? "(none — no merge has occurred yet)");
+            sb.AppendLine();
+
+            // 6) EmjL addon presence
+            unsafe
+            {
+                var addonPtr = GameGui.GetAddonByName("EmjL");
+                sb.AppendLine($"[Addon] EmjL present: {!addonPtr.IsNull}");
+                if (!addonPtr.IsNull)
+                {
+                    var addon = (AtkUnitBase*)addonPtr.Address;
+                    sb.AppendLine($"[Addon] RootNode present: {addon != null && addon->RootNode != null}");
+                    if (addon != null)
+                        sb.AppendLine($"[Addon] NodeListCount: {addon->UldManager.NodeListCount}");
+                }
+            }
+
+            sb.AppendLine();
+            sb.AppendLine("=== End Startup Diagnostics ===");
+
+            File.WriteAllText(StartupDiagDumpPath, sb.ToString());
+            Log.Information($"Startup diagnostics written to {StartupDiagDumpPath}");
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Failed to write startup diagnostics: {ex.Message}");
+        }
     }
 
     private void OnFrameworkUpdate(IFramework _)
