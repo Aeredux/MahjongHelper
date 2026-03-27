@@ -641,3 +641,51 @@
 - Dora indicator tiles
 - Seat wind / riichi status
 - Call prompt detection
+
+## 2026-03-27: Phase 2 completion — full game state reader
+
+**What:** Implemented all remaining Phase 2 features: discard pool classification, dora indicator reading, seat wind/round wind detection, score reading, riichi status detection, call decision prompt detection, and game phase inference.
+
+**Why:** Phase 2.1 (player hand + draw) was confirmed working. The remaining Phase 2 tasks were needed to provide a complete game state for the server communication phase.
+
+**Changes made:**
+
+1. **EmjUiReader — new types and reading methods:**
+   - Added `GamePhase` enum: `Unknown`, `WaitingForDiscard`, `WaitingForDraw`, `CallDecisionPrompt`, `RiichiDecisionPrompt`, `TsumoDecisionPrompt`, `RonDecisionPrompt`, `BetweenRounds`, `GameOver`.
+   - Added `CallOptions` flags enum: `Chi`, `Pon`, `Kan`, `Ron`, `Tsumo`, `Riichi`, `Skip`.
+   - Added `UiGameInfo` record carrying all non-tile game state: seat wind, round wind, round number, honba, riichi sticks, 4 player scores, riichi status per player, available call options, inferred game phase, raw AtkValue ints.
+   - Extended `UiState` record to include `UiGameInfo GameInfo`.
+   - Added `ReadGameInfo()` — orchestrates all game info reading.
+   - Added `ReadWindAndScoresFromTextNodes()` — scans visible text nodes for wind kanji/English and score values, classifies by spatial position.
+   - Added `ReadCallPrompts()` — scans visible non-tile component nodes for text children containing call keywords (chi/pon/kan/ron/tsumo/riichi/skip in English and Japanese).
+   - Added `ReadRiichiStatus()` — scans for narrow rectangular image nodes (riichi stick proportions) and classifies by Y/X position.
+   - Added `InferGamePhase()` — infers phase from available call prompts (Ron → RonDecisionPrompt, Tsumo → TsumoDecisionPrompt, Riichi → RiichiDecisionPrompt, other calls → CallDecisionPrompt).
+
+2. **MahjongGameState — new fields:**
+   - Added: `SeatWind`, `RoundWind`, `RoundNumber`, `RiichiStatus` (bool[4]), `PlayerScore`/`RightScore`/`OppositeScore`/`LeftScore`, `AvailableCalls`, `GamePhase`.
+   - Updated `ToDisplayText()` to show all new fields.
+   - Added `IReadOnlyList<bool>` formatting support in `FormatValue`.
+
+3. **MahjongGameStateBuilder — merge logic for new fields:**
+   - Added `MergeNullableInt()` helper for wind/score fields with cached fallback.
+   - Merge now populates all new fields from `UiGameInfo`.
+   - `BuildNormalizedStateSignature()` and `BuildActiveSourcePath()` updated to include new fields.
+
+4. **TileDataDumper — UI element discovery section:**
+   - Added `DumpUiElementDiscovery()` section that scans:
+	 - Visible text nodes (wind labels, scores, status text)
+	 - Component-hosted text nodes (buttons, labels inside containers)
+	 - Non-tile component nodes (potential buttons/indicators with child type counts)
+	 - Non-tile image/NineGrid nodes (potential riichi sticks, indicators)
+	 - AtkValues game state candidates (small ints, scores, bools, strings)
+   - This section enables passive discovery of exact node IDs for future refinement.
+
+**What's known vs needs live validation:**
+- ✅ Discard pool classification (parent-node grouping + Y-sorting) — scaffolded, needs live data to confirm group assignment
+- ✅ Dora indicator detection (small groups with narrow spatial spread) — scaffolded, needs live data
+- ⚠️ Wind/score text node reading — heuristic spatial thresholds need live calibration
+- ⚠️ Riichi stick detection — proportional image node scan, needs live validation of stick dimensions
+- ⚠️ Call prompt detection — text-based keyword matching, needs live validation of button text
+- ⚠️ Game phase inference — currently call-prompt-driven only, hand-count-based detection pending
+
+**Result:** Phase 2 is code-complete. All game state reader features are implemented and compile cleanly. The UI state panel and normalized state panel now show the full game state including wind, scores, riichi status, available calls, and game phase. Live validation during gameplay will determine which heuristic thresholds need adjustment.

@@ -86,6 +86,12 @@ public static unsafe class TileDataDumper
         // ─── Section 1d: Client Mahjong state probes ───
         DumpClientMahjongState(sb);
 
+        // ─── Section 1e: Spatial tile classification (discard pools, dora, etc.) ───
+        DumpSpatialTileClassification(sb, addon, iconCapture, iconMap);
+
+        // ─── Section 1f: UI element discovery (text nodes, buttons, wind/riichi/call prompts) ───
+        DumpUiElementDiscovery(sb, addon);
+
         // ─── Section 2: Complete node list ───
         sb.AppendLine("--- FULL NODE LIST ---");
         sb.AppendLine("idx | nodeId | vis | pos(x,y) | size(w,h) | type | flags | color");
@@ -421,6 +427,400 @@ public static unsafe class TileDataDumper
 
         if (!any)
             sb.AppendLine("      (none)");
+    }
+
+    // ─── UI element discovery for wind, riichi, call prompts, game phase ───
+
+    /// <summary>
+    /// Scans all visible text nodes and non-tile component nodes in the EmjL addon
+    /// to discover wind indicators, riichi status, call prompt buttons, round/turn info,
+    /// and other game state UI elements.
+    /// </summary>
+    private static void DumpUiElementDiscovery(StringBuilder sb, AtkUnitBase* addon)
+    {
+        sb.AppendLine("--- UI ELEMENT DISCOVERY (text nodes, buttons, indicators) ---");
+
+        var uld = addon->UldManager;
+
+        // 1) All visible text nodes — these carry wind names, round info, score, etc.
+        sb.AppendLine("Visible text nodes:");
+        for (int i = 0; i < uld.NodeListCount; i++)
+        {
+            try
+            {
+                var n = uld.NodeList[i];
+                if (n == null) continue;
+                if (n->Type != NodeType.Text) continue;
+
+                bool vis = false;
+                try { vis = n->IsVisible(); } catch { }
+                if (!vis) continue;
+
+                var txt = (AtkTextNode*)n;
+                string text = "";
+                try
+                {
+                    text = Marshal.PtrToStringUTF8((nint)txt->NodeText.StringPtr.Value) ?? "";
+                }
+                catch { text = "(read-err)"; }
+
+                uint parentId = 0;
+                try { if (n->ParentNode != null) parentId = n->ParentNode->NodeId; } catch { }
+
+                sb.AppendLine($"  [{i,3}] id={n->NodeId,8} pos=({n->X:F0},{n->Y:F0}) size=({n->Width},{n->Height}) parent={parentId} text=\"{text.Replace("\n", "\\n").Trim()}\"");
+            }
+            catch { }
+        }
+        sb.AppendLine();
+
+        // 2) All visible text nodes inside component nodes (buttons, labels inside containers)
+        sb.AppendLine("Visible component-hosted text nodes:");
+        for (int i = 0; i < uld.NodeListCount; i++)
+        {
+            try
+            {
+                var n = uld.NodeList[i];
+                if (n == null) continue;
+                if ((int)n->Type < 1000) continue;
+
+                bool vis = false;
+                try { vis = n->IsVisible(); } catch { }
+                if (!vis) continue;
+
+                // Skip tile-sized components (already classified)
+                if ((n->Width == 34 && n->Height == 45) || (n->Width == 42 && n->Height == 55))
+                    continue;
+
+                var comp = (AtkComponentNode*)n;
+                if (comp->Component == null) continue;
+
+                var childUld = comp->Component->UldManager;
+                var texts = new List<string>();
+
+                for (int j = 0; j < childUld.NodeListCount && j < 64; j++)
+                {
+                    try
+                    {
+                        var cn = childUld.NodeList[j];
+                        if (cn == null || cn->Type != NodeType.Text) continue;
+
+                        bool cVis = false;
+                        try { cVis = cn->IsVisible(); } catch { }
+                        if (!cVis) continue;
+
+                        var txt = (AtkTextNode*)cn;
+                        string text = "";
+                        try
+                        {
+                            text = Marshal.PtrToStringUTF8((nint)txt->NodeText.StringPtr.Value) ?? "";
+                        }
+                        catch { text = "(read-err)"; }
+
+                        if (!string.IsNullOrWhiteSpace(text))
+                            texts.Add($"child[{j}]id={cn->NodeId} \"{text.Replace("\n", "\\n").Trim()}\"");
+                    }
+                    catch { }
+                }
+
+                if (texts.Count > 0)
+                    sb.AppendLine($"  [{i,3}] id={n->NodeId,8} type={(int)n->Type} pos=({n->X:F0},{n->Y:F0}) size=({n->Width},{n->Height}): {string.Join(" | ", texts)}");
+            }
+            catch { }
+        }
+        sb.AppendLine();
+
+        // 3) Non-tile visible component nodes summary (potential buttons, indicators)
+        sb.AppendLine("Non-tile visible component nodes (potential buttons/indicators):");
+        for (int i = 0; i < uld.NodeListCount; i++)
+        {
+            try
+            {
+                var n = uld.NodeList[i];
+                if (n == null) continue;
+                if ((int)n->Type < 1000) continue;
+
+                bool vis = false;
+                try { vis = n->IsVisible(); } catch { }
+                if (!vis) continue;
+
+                // Skip tile-sized components
+                if ((n->Width == 34 && n->Height == 45) || (n->Width == 42 && n->Height == 55))
+                    continue;
+
+                uint parentId = 0;
+                try { if (n->ParentNode != null) parentId = n->ParentNode->NodeId; } catch { }
+
+                // Count children and identify child types
+                int childCount = 0;
+                int textChildren = 0;
+                int imageChildren = 0;
+                try
+                {
+                    var comp = (AtkComponentNode*)n;
+                    if (comp->Component != null)
+                    {
+                        var childUld = comp->Component->UldManager;
+                        childCount = childUld.NodeListCount;
+                        for (int j = 0; j < childUld.NodeListCount && j < 64; j++)
+                        {
+                            try
+                            {
+                                var cn = childUld.NodeList[j];
+                                if (cn == null) continue;
+                                if (cn->Type == NodeType.Text) textChildren++;
+                                else if (cn->Type == NodeType.Image) imageChildren++;
+                            }
+                            catch { }
+                        }
+                    }
+                }
+                catch { }
+
+                sb.AppendLine($"  [{i,3}] id={n->NodeId,8} type={(int)n->Type} pos=({n->X:F0},{n->Y:F0}) size=({n->Width},{n->Height}) parent={parentId} children={childCount} (text={textChildren},img={imageChildren})");
+            }
+            catch { }
+        }
+        sb.AppendLine();
+
+        // 4) Visible NineGrid/Image nodes that are NOT tile-related (riichi sticks, indicators)
+        sb.AppendLine("Visible non-tile image nodes (potential riichi sticks, indicators):");
+        for (int i = 0; i < uld.NodeListCount; i++)
+        {
+            try
+            {
+                var n = uld.NodeList[i];
+                if (n == null) continue;
+                if (n->Type != NodeType.Image && n->Type != NodeType.NineGrid) continue;
+
+                bool vis = false;
+                try { vis = n->IsVisible(); } catch { }
+                if (!vis) continue;
+
+                uint parentId = 0;
+                try { if (n->ParentNode != null) parentId = n->ParentNode->NodeId; } catch { }
+
+                string extra = "";
+                if (n->Type == NodeType.Image)
+                {
+                    try
+                    {
+                        var img = (AtkImageNode*)n;
+                        extra = $" partId={img->PartId} flags=0x{img->Flags:X}";
+                    }
+                    catch { }
+                }
+
+                sb.AppendLine($"  [{i,3}] id={n->NodeId,8} type={n->Type} pos=({n->X:F0},{n->Y:F0}) size=({n->Width},{n->Height}) parent={parentId}{extra}");
+            }
+            catch { }
+        }
+        sb.AppendLine();
+
+        // 5) AtkValues summary focusing on game state values (wind, round, scores, phase)
+        sb.AppendLine("AtkValues game state candidates:");
+        try
+        {
+            var valCount = addon->AtkValuesCount;
+            for (int i = 0; i < valCount && i < 500; i++)
+            {
+                try
+                {
+                    var val = addon->AtkValues[i];
+                    // Highlight non-zero ints that look like game state (small values = wind/round/phase)
+                    if (val.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int ||
+                        val.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.UInt)
+                    {
+                        var v = val.Int;
+                        // Small ints (0-20) could be wind, round, phase, riichi state
+                        if (v >= 0 && v <= 20)
+                            sb.AppendLine($"  [{i,3}] type={val.Type,-14} int={v} <<< SMALL_INT (wind/round/phase?)");
+                        // Score-like values
+                        else if (v >= 1000 && v <= 100000 && v % 100 == 0)
+                            sb.AppendLine($"  [{i,3}] type={val.Type,-14} int={v} <<< SCORE?");
+                    }
+                    // Highlight non-empty strings (tile names, wind names, status labels)
+                    else if (val.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String ||
+                             val.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String8)
+                    {
+                        try
+                        {
+                            string s = val.String.ToString();
+                            if (!string.IsNullOrWhiteSpace(s))
+                                sb.AppendLine($"  [{i,3}] type={val.Type,-14} str=\"{s}\" <<< STRING");
+                        }
+                        catch { }
+                    }
+                    else if (val.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Bool)
+                    {
+                        sb.AppendLine($"  [{i,3}] type={val.Type,-14} bool={val.Int != 0} <<< BOOL (toggle?)");
+                    }
+                }
+                catch { }
+            }
+        }
+        catch { }
+        sb.AppendLine();
+    }
+
+    // ─── Spatial tile classification for discard pool / dora discovery ───
+
+    /// <summary>
+    /// Dumps all visible tile-like nodes grouped by spatial position to discover
+    /// discard pools, dora indicators, and other tile regions in the EmjL addon.
+    /// Tile nodes are either type 1045 (34x45, used for discard/dora) or type 1055 (42x55, player hand).
+    /// Grouping by Y-band helps identify which player's discard pool each belongs to.
+    /// </summary>
+    private static void DumpSpatialTileClassification(StringBuilder sb, AtkUnitBase* addon, IconIdCapture? iconCapture, MahjongIconMap? iconMap)
+    {
+        sb.AppendLine("--- SPATIAL TILE CLASSIFICATION ---");
+
+        var uld = addon->UldManager;
+        var allTiles = new List<(int NodeIndex, uint NodeId, int NodeType, bool Visible, float X, float Y, int Width, int Height, uint IconId, string? TileCode, float ParentX, float ParentY)>();
+
+        for (int i = 0; i < uld.NodeListCount; i++)
+        {
+            try
+            {
+                var n = uld.NodeList[i];
+                if (n == null) continue;
+
+                var type = (int)n->Type;
+                // Include all component tile types: 1045 (34x45 discards), 1055 (42x55 hand),
+                // 1022 (drawn tile / discard), and any other tile-like components
+                if (type < 1000) continue;
+
+                bool vis = false;
+                try { vis = n->IsVisible(); } catch { }
+
+                // Include both visible and invisible tiles for full layout mapping
+                var isTileSize = (n->Width == 34 && n->Height == 45) ||
+                                 (n->Width == 42 && n->Height == 55) ||
+                                 (n->Width == 40 && n->Height == 52);
+
+                if (!isTileSize) continue;
+
+                uint iconId = 0;
+                if (vis)
+                    EmjUiReader.TryFindIconPublic(n, iconCapture, out iconId);
+
+                string? tileCode = iconId > 0 ? iconMap?.Resolve(iconId) : null;
+
+                // Get parent node position for absolute positioning context
+                float parentX = 0, parentY = 0;
+                try
+                {
+                    if (n->ParentNode != null)
+                    {
+                        parentX = n->ParentNode->X;
+                        parentY = n->ParentNode->Y;
+                    }
+                }
+                catch { }
+
+                allTiles.Add((i, n->NodeId, type, vis, n->X, n->Y, n->Width, n->Height, iconId, tileCode, parentX, parentY));
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine($"  NodeList[{i}] scan error: {ex.Message}");
+            }
+        }
+
+        sb.AppendLine($"Total tile-sized component nodes found: {allTiles.Count}");
+        sb.AppendLine($"  Visible: {allTiles.Count(t => t.Visible)}");
+        sb.AppendLine($"  With icon: {allTiles.Count(t => t.IconId > 0)}");
+        sb.AppendLine();
+
+        // Group by size for classification
+        var bySize = allTiles.GroupBy(t => $"{t.Width}x{t.Height}").OrderBy(g => g.Key);
+        foreach (var group in bySize)
+        {
+            sb.AppendLine($"  Size {group.Key}: {group.Count()} total, {group.Count(t => t.Visible)} visible, {group.Count(t => t.IconId > 0)} with icon");
+        }
+        sb.AppendLine();
+
+        // Group by node type
+        var byType = allTiles.GroupBy(t => t.NodeType).OrderBy(g => g.Key);
+        foreach (var group in byType)
+        {
+            sb.AppendLine($"  Type {group.Key}: {group.Count()} total, {group.Count(t => t.Visible)} visible");
+        }
+        sb.AppendLine();
+
+        // Group visible tiles with icons by Y-band (quantized to 20px bands)
+        // This helps identify spatial regions: player hand, discard pools, dora area
+        sb.AppendLine("Visible tiles with icons, grouped by Y-band (20px):");
+        var visibleWithIcons = allTiles.Where(t => t.Visible && t.IconId > 0).OrderBy(t => t.Y).ThenBy(t => t.X).ToList();
+        var yBands = visibleWithIcons.GroupBy(t => ((int)t.Y / 20) * 20).OrderBy(g => g.Key);
+        foreach (var band in yBands)
+        {
+            sb.AppendLine($"  Y~{band.Key}: {band.Count()} tiles");
+            foreach (var t in band.OrderBy(t => t.X))
+            {
+                var tile = t.TileCode ?? (t.IconId > 0 ? $"ICON_{t.IconId}" : "(no-icon)");
+                sb.AppendLine($"    [{t.NodeIndex,3}] id={t.NodeId,8} type={t.NodeType} pos=({t.X:F0},{t.Y:F0}) size=({t.Width},{t.Height}) parent=({t.ParentX:F0},{t.ParentY:F0}) {tile}");
+            }
+        }
+        sb.AppendLine();
+
+        // Group ALL visible tile-sized nodes by parent node ID for structural grouping
+        sb.AppendLine("Visible tile nodes grouped by parent node:");
+        var visibleTiles = allTiles.Where(t => t.Visible).ToList();
+        // Read parent node IDs
+        var parentGroups = new Dictionary<uint, List<(int NodeIndex, uint NodeId, int NodeType, float X, float Y, int Width, int Height, uint IconId, string? TileCode)>>();
+        for (int i = 0; i < uld.NodeListCount; i++)
+        {
+            var tile = visibleTiles.FirstOrDefault(t => t.NodeIndex == i);
+            if (tile.NodeIndex == 0 && i != 0) continue;
+            if (!tile.Visible) continue;
+
+            try
+            {
+                var n = uld.NodeList[i];
+                if (n == null || n->ParentNode == null) continue;
+                var parentId = n->ParentNode->NodeId;
+                if (!parentGroups.ContainsKey(parentId))
+                    parentGroups[parentId] = new();
+                parentGroups[parentId].Add((tile.NodeIndex, tile.NodeId, tile.NodeType, tile.X, tile.Y, tile.Width, tile.Height, tile.IconId, tile.TileCode));
+            }
+            catch { }
+        }
+        foreach (var (parentId, children) in parentGroups.OrderBy(p => p.Key))
+        {
+            var withIcons = children.Count(c => c.IconId > 0);
+            sb.AppendLine($"  Parent id={parentId}: {children.Count} children, {withIcons} with icon");
+            foreach (var c in children.OrderBy(c => c.X).ThenBy(c => c.Y))
+            {
+                var tile = c.TileCode ?? (c.IconId > 0 ? $"ICON_{c.IconId}" : "(no-icon)");
+                sb.AppendLine($"    [{c.NodeIndex,3}] id={c.NodeId,8} type={c.NodeType} pos=({c.X:F0},{c.Y:F0}) size=({c.Width},{c.Height}) {tile}");
+            }
+        }
+        sb.AppendLine();
+
+        // List all visible 34x45 nodes (candidate discard/dora tiles) explicitly
+        sb.AppendLine("All visible 34x45 tile nodes (candidate discard/dora):");
+        var smallTiles = allTiles.Where(t => t.Visible && t.Width == 34 && t.Height == 45).OrderBy(t => t.Y).ThenBy(t => t.X).ToList();
+        foreach (var t in smallTiles)
+        {
+            var tile = t.TileCode ?? (t.IconId > 0 ? $"ICON_{t.IconId}" : "(no-icon)");
+            sb.AppendLine($"  [{t.NodeIndex,3}] id={t.NodeId,8} type={t.NodeType} pos=({t.X:F0},{t.Y:F0}) parent=({t.ParentX:F0},{t.ParentY:F0}) {tile}");
+        }
+        sb.AppendLine();
+
+        // Node index range summary for key tile sizes
+        if (allTiles.Count > 0)
+        {
+            sb.AppendLine("Node index ranges:");
+            var hand55 = allTiles.Where(t => t.Width == 42 && t.Height == 55).ToList();
+            if (hand55.Count > 0)
+                sb.AppendLine($"  42x55 (hand): indices {hand55.Min(t => t.NodeIndex)}..{hand55.Max(t => t.NodeIndex)}");
+            var discard45 = allTiles.Where(t => t.Width == 34 && t.Height == 45).ToList();
+            if (discard45.Count > 0)
+                sb.AppendLine($"  34x45 (discard/dora): indices {discard45.Min(t => t.NodeIndex)}..{discard45.Max(t => t.NodeIndex)}");
+            var draw52 = allTiles.Where(t => t.Width == 40 && t.Height == 52).ToList();
+            if (draw52.Count > 0)
+                sb.AppendLine($"  40x52 (draw/other): indices {draw52.Min(t => t.NodeIndex)}..{draw52.Max(t => t.NodeIndex)}");
+        }
+        sb.AppendLine();
     }
 
     // ─── AtkValues ───

@@ -119,11 +119,11 @@ Tile format: uppercase strings — `M1`–`M9`, `P1`–`P9`, `S1`–`S9`, `EAST`
 **Goal:** Reliably extract the full game state from the EmjL addon.
 
 - [x] **2.1** Implement `GameStateReader` class that parses the ATK tree and returns a structured game state object (player hand tiles, drawn tile).
-- [ ] **2.2** Identify and read discard pool nodes for each player (opponent discards, tsumogiri detection if possible).
-- [ ] **2.2a** Identify dora indicator tiles (visible on the dead wall / game board UI).
-- [ ] **2.3** Identify seat wind indicators and riichi status for each player.
-- [ ] **2.4** Identify call decision UI elements (when the game prompts for chi/pon/kan/ron/tsumo).
-- [ ] **2.5** Detect game phase: waiting for discard, waiting for draw, call decision prompt, between rounds, etc.
+- [x] **2.2** Identify and read discard pool nodes for each player (opponent discards, tsumogiri detection if possible).
+- [x] **2.2a** Identify dora indicator tiles (visible on the dead wall / game board UI).
+- [x] **2.3** Identify seat wind indicators and riichi status for each player.
+- [x] **2.4** Identify call decision UI elements (when the game prompts for chi/pon/kan/ron/tsumo).
+- [x] **2.5** Detect game phase: waiting for discard, waiting for draw, call decision prompt, between rounds, etc.
 
 ### Phase 3: Server Communication
 

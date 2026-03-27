@@ -139,6 +139,12 @@ public class MainWindow : Window, IDisposable
             ImGui.SetClipboardText(handIconIds ?? "(none)");
         }
 
+        ImGui.SameLine();
+        if (ImGui.Button("Copy Discard/Dora"))
+        {
+            ImGui.SetClipboardText(ExtractDiscardDoraSection(normalizedStateText));
+        }
+
         ImGui.Separator();
         ImGui.Text($"Reader Status: {readerStatus}");
         ImGui.Separator();
@@ -230,5 +236,26 @@ public class MainWindow : Window, IDisposable
             endIndex = dumpText.Length;
 
         return dumpText.Substring(startIndex, endIndex - startIndex).TrimEnd();
+    }
+
+    private static string ExtractDiscardDoraSection(string? normalizedText)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedText))
+            return "(no normalized state)";
+
+        var sb = new System.Text.StringBuilder();
+        foreach (var line in normalizedText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None))
+        {
+            if (line.StartsWith("PlayerDiscards:", StringComparison.Ordinal) ||
+                line.StartsWith("RightDiscards:", StringComparison.Ordinal) ||
+                line.StartsWith("OppositeDiscards:", StringComparison.Ordinal) ||
+                line.StartsWith("LeftDiscards:", StringComparison.Ordinal) ||
+                line.StartsWith("DoraIndicators:", StringComparison.Ordinal))
+            {
+                sb.AppendLine(line);
+            }
+        }
+
+        return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no discard/dora data)";
     }
 }

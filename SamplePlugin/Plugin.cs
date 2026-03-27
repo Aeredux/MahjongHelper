@@ -838,6 +838,12 @@ public sealed class Plugin : IDalamudPlugin
     private static string BuildNormalizedStateSignature(MahjongGameState state)
     {
         var handIds = state.HandIconIds.Value == null ? string.Empty : string.Join(",", state.HandIconIds.Value);
+        var playerDiscards = state.PlayerDiscards.Value == null ? string.Empty : string.Join(",", state.PlayerDiscards.Value);
+        var rightDiscards = state.RightDiscards.Value == null ? string.Empty : string.Join(",", state.RightDiscards.Value);
+        var oppositeDiscards = state.OppositeDiscards.Value == null ? string.Empty : string.Join(",", state.OppositeDiscards.Value);
+        var leftDiscards = state.LeftDiscards.Value == null ? string.Empty : string.Join(",", state.LeftDiscards.Value);
+        var doraIndicators = state.DoraIndicators.Value == null ? string.Empty : string.Join(",", state.DoraIndicators.Value);
+        var riichiStatus = state.RiichiStatus.Value == null ? string.Empty : string.Join(",", state.RiichiStatus.Value);
         return string.Join("|",
             state.AgentState.Value.ToString(),
             state.AgentState.Source,
@@ -846,7 +852,22 @@ public sealed class Plugin : IDalamudPlugin
             state.DrawIconId.Value.ToString(),
             state.DrawIconId.Source,
             state.HandDescription.Value ?? string.Empty,
-            state.HandDescription.Source);
+            state.HandDescription.Source,
+            playerDiscards,
+            rightDiscards,
+            oppositeDiscards,
+            leftDiscards,
+            doraIndicators,
+            state.SeatWind.Value.ToString(),
+            state.RoundWind.Value.ToString(),
+            state.RoundNumber.Value.ToString(),
+            state.PlayerScore.Value.ToString(),
+            state.RightScore.Value.ToString(),
+            state.OppositeScore.Value.ToString(),
+            state.LeftScore.Value.ToString(),
+            riichiStatus,
+            state.AvailableCalls.Value ?? string.Empty,
+            state.GamePhase.Value ?? string.Empty);
     }
 
     private static string BuildActiveSourcePath(MahjongGameState state)
@@ -857,6 +878,8 @@ public sealed class Plugin : IDalamudPlugin
             state.HandIconIds.Source,
             state.DrawIconId.Source,
             state.HandDescription.Source,
+            state.SeatWind.Source,
+            state.GamePhase.Source,
         };
 
         sources.Remove(MahjongStateSource.Unknown);
