@@ -18,6 +18,8 @@ public class MainWindow : Window, IDisposable
     public static String normalizedStateText = "Captured: (none)\nNormalized Mahjong State\nAgentState: (missing) [src=Unknown, non-authoritative]";
     public static String diagnosticsText = "Phase C Diagnostics\nReaderStatus: AddonNotFound";
     public static String recentTransitionsText = "(no normalized transitions yet)";
+    public static String serverSuggestionText = "(no suggestion yet)";
+    public static String serverStatusText = "Not checked";
     private string resetIconIdInput = "";
     public bool RequestTileDump;
 
@@ -147,6 +149,17 @@ public class MainWindow : Window, IDisposable
 
         ImGui.Separator();
         ImGui.Text($"Reader Status: {readerStatus}");
+        ImGui.Text($"Server: {serverStatusText}");
+
+        ImGui.Text("Server Suggestion");
+        ImGui.InputTextMultiline(
+            "##serverSuggestion",
+            ref serverSuggestionText,
+            50_000,
+            new System.Numerics.Vector2(-1, 100),
+            ImGuiInputTextFlags.ReadOnly
+        );
+
         ImGui.Separator();
         ImGui.Text("Mapping Progress");
         ImGui.SetNextItemWidth(160 * ImGuiHelpers.GlobalScale);

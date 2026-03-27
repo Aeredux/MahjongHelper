@@ -129,11 +129,11 @@ Tile format: uppercase strings — `M1`–`M9`, `P1`–`P9`, `S1`–`S9`, `EAST`
 
 **Goal:** Send game state to the local server and receive suggestions.
 
-- [ ] **3.1** Implement `MahjongServerClient` with `HttpClient` — health check, suggest-move, evaluate-call, validate-move endpoints.
-- [ ] **3.2** Map internal game state to the server's JSON request format (tile type strings, opponent discard arrays).
-- [ ] **3.3** Parse server responses into internal suggestion/evaluation models.
-- [ ] **3.4** Add error handling: server unreachable, timeout, malformed response. Show user-friendly errors in the plugin UI.
-- [ ] **3.5** Add a health-check indicator in the UI (green/red dot showing server connectivity).
+- [x] **3.1** Implement `MahjongServerClient` with `HttpClient` — health check, suggest-move, evaluate-call, validate-move endpoints.
+- [x] **3.2** Map internal game state to the server's JSON request format (tile type strings, opponent discard arrays).
+- [x] **3.3** Parse server responses into internal suggestion/evaluation models.
+- [x] **3.4** Add error handling: server unreachable, timeout, malformed response. Show user-friendly errors in the plugin UI.
+- [x] **3.5** Add a health-check indicator in the UI (green/red dot showing server connectivity).
 
 ### Phase 4: Suggestion Display UI
 

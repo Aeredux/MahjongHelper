@@ -1,0 +1,3 @@
+1. Dora seems to be correct in dump's DORA INDICATOR DISCOVERY area but order is flipped.
+2. Available calls says Skip when Chi is available.
+3. Riichi status is always nnnn maybe not impleemnted?

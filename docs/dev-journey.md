@@ -733,3 +733,38 @@
 - Dora indicator reading during gameplay (need to investigate what node structure holds the dora tiles on the board)
 - Riichi status per player (need to find the correct node path — DomanMahjongStatus doesn't expose this directly)
 - Call prompt detection validation (text keyword matching still needs live testing)
+
+## 2026-03-27: Phase 3 — Server Communication
+
+**What:** Implemented the full server communication layer for sending game state to the local Mahjong solver server and receiving discard suggestions.
+
+**New files:**
+
+1. **`ServerModels.cs`** — Request/response DTOs:
+   - `SuggestMoveRequest` — hand tiles, drawn tile, discard pools, dora, wind/round context
+   - `EvaluateCallRequest` — hand tiles, call tile/type, discard context
+   - `ValidateMoveRequest` — hand tiles + proposed discard
+   - `DiscardPools` — per-player discard arrays
+   - Response models: `SuggestMoveResponse` (with `DiscardSuggestion` list), `EvaluateCallResponse`, `ValidateMoveResponse`, `HealthResponse`
+   - All use `System.Text.Json` attributes for snake_case JSON serialization
+
+2. **`MahjongServerClient.cs`** — HTTP client wrapper:
+   - Targets `http://localhost:8080` by default
+   - Async methods: `CheckHealthAsync`, `SuggestMoveAsync`, `EvaluateCallAsync`, `ValidateMoveAsync`
+   - Tracks health state, server version, last error
+   - 5-second timeout, never throws (returns null on failure)
+   - `GetStatusText()` for compact UI display
+
+3. **`GameStateMapper.cs`** — Converts `MahjongGameState` → server request format:
+   - Resolves icon IDs to tile code strings via `MahjongIconMap`
+   - Handles 14-tile hand splitting (last tile as drawn)
+   - Builds `DiscardPools` from state fields
+   - Filters out unresolved/placeholder tile codes
+
+**Plugin integration:**
+- Server client created on plugin init, disposed on teardown
+- Periodic health check every 30 seconds via `OnFrameworkUpdate`
+- Auto-suggest on state change: when hand changes, builds `SuggestMoveRequest` and fires async request
+- Throttled to 1 request/second, skips duplicate hand signatures
+- Server status shown in diagnostics and as a status line in MainWindow
+- Suggestion text displayed in a new "Server Suggestion" panel in MainWindow

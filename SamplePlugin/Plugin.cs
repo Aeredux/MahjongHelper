@@ -14,6 +14,7 @@ using System;
 using System.Linq;
 using System.Collections.Generic;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace SamplePlugin;
 
@@ -81,11 +82,18 @@ public sealed class Plugin : IDalamudPlugin
     private const int MaxRecentFailures = 12;
     private const int MaxRecentTransitions = 40;
     private AddonReaderStatus _lastReaderStatus = AddonReaderStatus.AddonNotFound;
+    private MahjongServerClient _serverClient = null!;
+    private SuggestMoveResponse? _lastSuggestion;
+    private DateTime _nextHealthCheckUtc = DateTime.MinValue;
+    private DateTime _nextSuggestUtc = DateTime.MinValue;
+    private string _lastSuggestHandSignature = string.Empty;
+    private bool _suggestInFlight;
 
     public Plugin()
     {
         _iconCapture = new IconIdCapture(GameInterop);
         _iconMap = new MahjongIconMap();
+        _serverClient = new MahjongServerClient();
         _emjReader = new EmjAddonReader();
         _readerScheduler = new AddonReaderScheduler(GameGui);
         _readerScheduler.AddObservedAddon(_emjReader);
@@ -234,7 +242,7 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
-    private void OnFrameworkUpdate(IFramework _)
+    private void OnFrameworkUpdate(IFramework framework)
     {
         var now = DateTime.UtcNow;
         var delta = (float)Math.Max(0.0, (now - _lastSchedulerTickUtc).TotalSeconds);
@@ -253,6 +261,18 @@ public sealed class Plugin : IDalamudPlugin
 
         MainWindow.diagnosticsText = BuildDiagnosticsText();
         MainWindow.recentTransitionsText = BuildRecentTransitionsText();
+        MainWindow.serverStatusText = _serverClient.GetStatusText();
+
+        // Periodic server health check (every 30 seconds)
+        if (now >= _nextHealthCheckUtc)
+        {
+            _nextHealthCheckUtc = now.AddSeconds(30);
+            Task.Run(async () =>
+            {
+                try { await _serverClient.CheckHealthAsync().ConfigureAwait(false); }
+                catch { }
+            });
+        }
     }
 
     private unsafe void TryImmediateDump()
@@ -820,6 +840,9 @@ public sealed class Plugin : IDalamudPlugin
 
         AppendRecentTransition(transition);
 
+        // Trigger server suggest-move when state changes
+        TryRequestSuggestion(merged);
+
         try
         {
             Directory.CreateDirectory(CacheDirectory);
@@ -833,6 +856,93 @@ public sealed class Plugin : IDalamudPlugin
         {
             RecordFailure($"Normalized transition log failed: {ex.Message}");
         }
+    }
+
+    private void TryRequestSuggestion(MahjongGameState state)
+    {
+        // Only request when server is healthy and we're not already in-flight
+        if (_serverClient.IsHealthy != true || _suggestInFlight)
+            return;
+
+        // Only request when player has a hand with tiles
+        var request = GameStateMapper.BuildSuggestMoveRequest(state, _iconMap);
+        if (request == null || request.Hand.Count == 0)
+            return;
+
+        // Avoid re-requesting for the same hand
+        var handSig = string.Join(",", request.Hand) + "|" + (request.DrawnTile ?? "");
+        if (handSig == _lastSuggestHandSignature)
+            return;
+
+        // Throttle: at most once per second
+        if (DateTime.UtcNow < _nextSuggestUtc)
+            return;
+
+        _lastSuggestHandSignature = handSig;
+        _suggestInFlight = true;
+        _nextSuggestUtc = DateTime.UtcNow.AddSeconds(1);
+
+        Task.Run(async () =>
+        {
+            try
+            {
+                var response = await _serverClient.SuggestMoveAsync(request).ConfigureAwait(false);
+                _lastSuggestion = response;
+                if (response != null)
+                {
+                    MainWindow.serverSuggestionText = FormatSuggestion(response);
+                }
+                else
+                {
+                    MainWindow.serverSuggestionText = $"Server error: {_serverClient.LastError ?? "unknown"}";
+                }
+            }
+            catch (Exception ex)
+            {
+                MainWindow.serverSuggestionText = $"Request failed: {ex.Message}";
+            }
+            finally
+            {
+                _suggestInFlight = false;
+            }
+        });
+    }
+
+    private static string FormatSuggestion(SuggestMoveResponse response)
+    {
+        var sb = new StringBuilder();
+
+        if (!string.IsNullOrEmpty(response.Error))
+        {
+            sb.AppendLine($"Server error: {response.Error}");
+            return sb.ToString();
+        }
+
+        if (response.Shanten.HasValue)
+            sb.AppendLine($"Shanten: {response.Shanten}");
+
+        if (response.Suggestions.Count == 0)
+        {
+            sb.AppendLine("No suggestions");
+            return sb.ToString();
+        }
+
+        sb.AppendLine($"Suggestions ({response.Suggestions.Count}):");
+        foreach (var s in response.Suggestions)
+        {
+            var parts = new List<string> { $"  {s.Tile}" };
+            if (s.Shanten.HasValue)
+                parts.Add($"shanten={s.Shanten}");
+            if (s.Ukeire.HasValue)
+                parts.Add($"ukeire={s.Ukeire}");
+            if (s.Confidence.HasValue)
+                parts.Add($"conf={s.Confidence:P0}");
+            sb.AppendLine(string.Join(" ", parts));
+            if (!string.IsNullOrEmpty(s.Reasoning))
+                sb.AppendLine($"    {s.Reasoning}");
+        }
+
+        return sb.ToString();
     }
 
     private static string BuildNormalizedStateSignature(MahjongGameState state)
@@ -911,6 +1021,7 @@ public sealed class Plugin : IDalamudPlugin
         sb.AppendLine($"LastSuccessfulProbeUpdate: {FormatTimestamp(_lastSuccessfulProbeUpdateUtc)}");
         sb.AppendLine($"LastSuccessfulNodeUpdate: {FormatTimestamp(_lastSuccessfulNodeUpdateUtc)}");
         sb.AppendLine($"LastSuccessfulMergeUpdate: {FormatTimestamp(_lastSuccessfulMergeUpdateUtc)}");
+        sb.AppendLine($"ServerStatus: {_serverClient.GetStatusText()}");
         sb.AppendLine("RecentFailures:");
 
         if (_recentFailures.Count == 0)
@@ -999,6 +1110,7 @@ public sealed class Plugin : IDalamudPlugin
     public void Dispose()
     {
         _iconCapture.Dispose();
+        _serverClient.Dispose();
         AddonLifecycle.UnregisterListener(OnMahjongDraw);
         Framework.Update -= OnFrameworkUpdate;
         // Unregister all actions to not leak anything during disposal of plugin
