@@ -142,7 +142,7 @@ Tile format: uppercase strings — `M1`–`M9`, `P1`–`P9`, `S1`–`S9`, `EAST`
 - [x] **4.1** Design the main overlay window (ImGui) showing: current shanten, best discard, ukeire count, reasoning text.
 - [x] **4.2** Display the full ranked suggestion list (all discard options sorted by confidence).
 - [ ] **4.3** Highlight the recommended discard tile in the player's hand (visual indicator on the actual game tile node, or an arrow/border in the overlay).
-- [ ] **4.4** Show call decision recommendations when a call prompt appears (should I chi/pon/kan? with confidence and reasoning).
+- [x] **4.4** Show call decision recommendations when a call prompt appears (should I chi/pon/kan? with confidence and reasoning).
 - [x] **4.5** Add toggle to show/hide the overlay, and a compact mode (just the best discard tile name).
 
 ### Phase 5: Auto-Play Mode

@@ -89,6 +89,8 @@ public sealed class Plugin : IDalamudPlugin
     private DateTime _nextSuggestUtc = DateTime.MinValue;
     private string _lastSuggestHandSignature = string.Empty;
     private bool _suggestInFlight;
+    private bool _callEvalInFlight;
+    private string _lastCallEvalSignature = string.Empty;
 
     public Plugin()
     {
@@ -862,6 +864,9 @@ public sealed class Plugin : IDalamudPlugin
         // Trigger server suggest-move when state changes
         TryRequestSuggestion(merged);
 
+        // Trigger call evaluation when call prompts are visible
+        TryRequestCallEvaluation(merged);
+
         try
         {
             Directory.CreateDirectory(CacheDirectory);
@@ -930,6 +935,124 @@ public sealed class Plugin : IDalamudPlugin
                 _suggestInFlight = false;
             }
         });
+    }
+
+    private void TryRequestCallEvaluation(MahjongGameState state)
+    {
+        if (_serverClient.IsHealthy != true || _callEvalInFlight)
+            return;
+
+        // Only evaluate when a call prompt is visible
+        var calls = state.AvailableCalls.Value;
+        if (string.IsNullOrEmpty(calls) || calls == "None")
+        {
+            // Clear stale recommendation when no call prompt
+            if (!string.IsNullOrEmpty(OverlayWindow.CallRecommendation))
+            {
+                OverlayWindow.CallRecommendation = null;
+                _lastCallEvalSignature = string.Empty;
+            }
+            return;
+        }
+
+        // Determine call type (pick the most significant available call)
+        string callType;
+        if (calls.Contains("Ron")) callType = "ron";
+        else if (calls.Contains("Tsumo")) callType = "tsumo";
+        else if (calls.Contains("Kan")) callType = "kan";
+        else if (calls.Contains("Pon")) callType = "pon";
+        else if (calls.Contains("Chi")) callType = "chi";
+        else if (calls.Contains("Riichi")) callType = "riichi";
+        else return;
+
+        // Determine the call tile: last tile in the most recent opponent discard pool
+        var callTile = GetLastOpponentDiscard(state);
+
+        // Avoid re-requesting for the same call situation
+        var sig = $"{calls}|{callTile}";
+        if (sig == _lastCallEvalSignature)
+            return;
+
+        _lastCallEvalSignature = sig;
+        _callEvalInFlight = true;
+
+        var request = GameStateMapper.BuildEvaluateCallRequest(state, _iconMap, callTile, callType);
+        if (request == null)
+        {
+            _callEvalInFlight = false;
+            return;
+        }
+
+        Task.Run(async () =>
+        {
+            try
+            {
+                var response = await _serverClient.EvaluateCallAsync(request).ConfigureAwait(false);
+                if (response != null)
+                {
+                    var action = response.ShouldCall ? "YES" : "NO";
+                    var confText = response.Confidence.HasValue ? $" ({response.Confidence:P0})" : "";
+                    var reason = !string.IsNullOrEmpty(response.Reasoning) ? $" — {response.Reasoning}" : "";
+                    OverlayWindow.CallRecommendation = $"{callType.ToUpperInvariant()} {callTile ?? "?"}: {action}{confText}{reason}";
+                }
+                else
+                {
+                    OverlayWindow.CallRecommendation = $"{callType}: server error";
+                }
+            }
+            catch
+            {
+                OverlayWindow.CallRecommendation = $"{callType}: request failed";
+            }
+            finally
+            {
+                _callEvalInFlight = false;
+            }
+        });
+    }
+
+    /// <summary>
+    /// Gets the last discarded tile from the opponent whose turn it was (the call tile).
+    /// Checks right, opposite, left discard pools and returns the last tile from whichever
+    /// has the most recent discard.
+    /// </summary>
+    private static string? GetLastOpponentDiscard(MahjongGameState state)
+    {
+        // For riichi/tsumo, the call tile is from the player's own draw
+        var phase = state.GamePhase.Value;
+        if (phase == "RiichiDecisionPrompt" || phase == "TsumoDecisionPrompt")
+            return null;
+
+        // Check opponent discard pools for the most recent tile
+        var pools = new[]
+        {
+            state.RightDiscards.Value,
+            state.OppositeDiscards.Value,
+            state.LeftDiscards.Value,
+        };
+
+        // The call tile is the last discard from the opponent whose turn just ended.
+        // We use CurrentTurn to identify, but if unknown, pick the longest pool's last tile.
+        var turn = state.CurrentTurn.Value;
+        IReadOnlyList<string>? targetPool = turn switch
+        {
+            "Right" => state.RightDiscards.Value,
+            "Opposite" => state.OppositeDiscards.Value,
+            "Left" => state.LeftDiscards.Value,
+            _ => null,
+        };
+
+        if (targetPool is { Count: > 0 })
+            return targetPool[^1];
+
+        // Fallback: find the pool with the most tiles and take the last one
+        foreach (var pool in pools)
+        {
+            if (pool is { Count: > 0 })
+                return pool[^1];
+        }
+
+        return null;
     }
 
     private static string FormatSuggestion(SuggestMoveResponse response)
