@@ -1389,13 +1389,51 @@ public sealed class Plugin : IDalamudPlugin
                 unsafe
                 {
                     var addonPtr = _lastAddonAddress != 0 ? (AtkUnitBase*)_lastAddonAddress : null;
-                    AddonClickHelper.TryFireProbeCallback(addonPtr, a, b, execute);
+                    AddonClickHelper.TryFireProbeCallbackEx(addonPtr, 0, new[] { a, b }, execute);
                 }
                 AppendRecentTransition($"{DateTime.UtcNow:O} probe callback a={a} b={b} execute={execute}");
             }
             else
             {
                 AppendRecentTransition($"{DateTime.UtcNow:O} invalid probecallback args: '{trimmed}'");
+            }
+        }
+        else if (lower.StartsWith("firecb "))
+        {
+            // Usage: /mj firecb <val1> <val2> ... [run]
+            var parts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 2)
+            {
+                var values = new List<int>();
+                var execute = false;
+                for (int i = 1; i < parts.Length; i++)
+                {
+                    if (parts[i].ToLowerInvariant() == "run")
+                    {
+                        execute = true;
+                        break;
+                    }
+                    if (int.TryParse(parts[i], out var val))
+                        values.Add(val);
+                }
+
+                if (values.Count > 0)
+                {
+                    unsafe
+                    {
+                        var addonPtr = _lastAddonAddress != 0 ? (AtkUnitBase*)_lastAddonAddress : null;
+                        AddonClickHelper.TryFireProbeCallbackEx(addonPtr, 0, values.ToArray(), execute);
+                    }
+                    AppendRecentTransition($"{DateTime.UtcNow:O} firecb values=[{string.Join(",", values)}] execute={execute}");
+                }
+                else
+                {
+                    AppendRecentTransition($"{DateTime.UtcNow:O} invalid firecb args: no values");
+                }
+            }
+            else
+            {
+                AppendRecentTransition($"{DateTime.UtcNow:O} invalid firecb args: '{trimmed}'");
             }
         }
         else if (lower.StartsWith("clicktile "))

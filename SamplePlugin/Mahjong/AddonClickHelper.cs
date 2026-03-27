@@ -124,8 +124,10 @@ public static unsafe class AddonClickHelper
     /// <summary>
     /// Fires a raw callback probe to EmjL for discovery.
     /// Intended for manual controlled testing only.
+    /// callbackId: the callback handler ID (similar to Saucy's 14)
+    /// values: array of int values to pass
     /// </summary>
-    public static bool TryFireProbeCallback(AtkUnitBase* addon, int a, int b, bool execute)
+    public static bool TryFireProbeCallbackEx(AtkUnitBase* addon, int callbackId, int[] values, bool execute)
     {
         if (addon == null) return false;
 
@@ -133,23 +135,28 @@ public static unsafe class AddonClickHelper
         {
             if (!execute)
             {
-                Log($"[DRY-RUN] Probe callback would fire: a={a}, b={b}");
-                LogAtkSnapshot(addon, $"probe-dryrun-a{a}-b{b}");
+                var valStr = string.Join(",", values);
+                Log($"[DRY-RUN] Probe callback would fire: callbackId={callbackId}, values=[{valStr}]");
+                LogAtkSnapshot(addon, $"probe-dryrun-cb{callbackId}");
                 return true;
             }
 
-            var values = stackalloc AtkValue[2];
-            values[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = a };
-            values[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = b };
-            addon->FireCallback(2, values);
+            var atkVals = stackalloc AtkValue[values.Length];
+            for (int i = 0; i < values.Length; i++)
+            {
+                atkVals[i] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = values[i] };
+            }
 
-            Log($"[EXECUTE] Probe callback fired: a={a}, b={b}");
-            LogAtkSnapshot(addon, $"probe-exec-a{a}-b{b}");
+            addon->FireCallback((uint)values.Length, atkVals, true);
+
+            var valStr2 = string.Join(",", values);
+            Log($"[EXECUTE] Probe callback fired: callbackId={callbackId}, values=[{valStr2}]");
+            LogAtkSnapshot(addon, $"probe-exec-cb{callbackId}");
             return true;
         }
         catch (Exception ex)
         {
-            Log($"ERROR probe callback a={a}, b={b}: {ex.Message}");
+            Log($"ERROR probe callback callbackId={callbackId}: {ex.Message}");
             return false;
         }
     }
