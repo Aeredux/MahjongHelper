@@ -151,81 +151,114 @@ public class MainWindow : Window, IDisposable
         ImGui.Text($"Reader Status: {readerStatus}");
         ImGui.Text($"Server: {serverStatusText}");
 
-        ImGui.Text("Server Suggestion");
-        ImGui.InputTextMultiline(
-            "##serverSuggestion",
-            ref serverSuggestionText,
-            50_000,
-            new System.Numerics.Vector2(-1, 100),
-            ImGuiInputTextFlags.ReadOnly
-        );
-
-        ImGui.Separator();
-        ImGui.Text("Mapping Progress");
-        ImGui.SetNextItemWidth(160 * ImGuiHelpers.GlobalScale);
-        ImGui.InputText("##resetIconIdInput", ref resetIconIdInput, 32);
-        ImGui.SameLine();
-        if (ImGui.Button("Reset Icon ID") && uint.TryParse(resetIconIdInput, out var iconId))
+        // Tab bar for organizing content
+        if (ImGui.BeginTabBar("DebugTabs", ImGuiTabBarFlags.None))
         {
-            if (!plugin.ResetLearnedMapping(iconId))
-                mappingReport = $"Reset failed for icon {iconId}. It may be locked or unknown." + Environment.NewLine + Environment.NewLine + mappingReport;
-            else
-                resetIconIdInput = "";
+            if (ImGui.BeginTabItem("Server"))
+            {
+                ImGui.Text("Server Suggestion");
+                ImGui.InputTextMultiline(
+                    "##serverSuggestion",
+                    ref serverSuggestionText,
+                    50_000,
+                    new System.Numerics.Vector2(-1, 300),
+                    ImGuiInputTextFlags.ReadOnly
+                );
+                ImGui.EndTabItem();
+            }
+
+            if (ImGui.BeginTabItem("Mapping"))
+            {
+                ImGui.Text("Mapping Progress");
+                ImGui.SetNextItemWidth(160 * ImGuiHelpers.GlobalScale);
+                ImGui.InputText("##resetIconIdInput", ref resetIconIdInput, 32);
+                ImGui.SameLine();
+                if (ImGui.Button("Reset Icon ID") && uint.TryParse(resetIconIdInput, out var iconId))
+                {
+                    if (!plugin.ResetLearnedMapping(iconId))
+                        mappingReport = $"Reset failed for icon {iconId}. It may be locked or unknown." + Environment.NewLine + Environment.NewLine + mappingReport;
+                    else
+                        resetIconIdInput = "";
+                }
+                ImGui.InputTextMultiline(
+                    "##mappingProgress",
+                    ref mappingReport,
+                    200_000,
+                    new System.Numerics.Vector2(-1, 400),
+                    ImGuiInputTextFlags.ReadOnly
+                );
+                ImGui.EndTabItem();
+            }
+
+            if (ImGui.BeginTabItem("UI State"))
+            {
+                ImGui.Text("Mahjong UI State (slot-based scaffold)");
+                ImGui.InputTextMultiline(
+                    "##mahjongUiState",
+                    ref text3,
+                    400_000,
+                    new System.Numerics.Vector2(-1, 400),
+                    ImGuiInputTextFlags.ReadOnly
+                );
+                ImGui.EndTabItem();
+            }
+
+            if (ImGui.BeginTabItem("Normalized"))
+            {
+                ImGui.Text("Normalized Mahjong State (probe + node + cache)");
+                ImGui.InputTextMultiline(
+                    "##mahjongNormalizedState",
+                    ref normalizedStateText,
+                    200_000,
+                    new System.Numerics.Vector2(-1, 400),
+                    ImGuiInputTextFlags.ReadOnly
+                );
+                ImGui.EndTabItem();
+            }
+
+            if (ImGui.BeginTabItem("Diagnostics"))
+            {
+                ImGui.Text("Diagnostics");
+                ImGui.InputTextMultiline(
+                    "##mahjongDiagnostics",
+                    ref diagnosticsText,
+                    120_000,
+                    new System.Numerics.Vector2(-1, 400),
+                    ImGuiInputTextFlags.ReadOnly
+                );
+                ImGui.EndTabItem();
+            }
+
+            if (ImGui.BeginTabItem("Transitions"))
+            {
+                ImGui.Text("Recent Normalized Transitions");
+                ImGui.InputTextMultiline(
+                    "##mahjongRecentTransitions",
+                    ref recentTransitionsText,
+                    160_000,
+                    new System.Numerics.Vector2(-1, 400),
+                    ImGuiInputTextFlags.ReadOnly
+                );
+                ImGui.EndTabItem();
+            }
+
+            if (ImGui.BeginTabItem("Raw Dump"))
+            {
+                ImGui.Text("Raw Dump");
+                ImGui.InputTextMultiline(
+                    "##mahjongDump",
+                    ref text,
+                    2_000_000,
+                    new System.Numerics.Vector2(-1, 400),
+                    ImGuiInputTextFlags.ReadOnly
+                );
+                ImGui.EndTabItem();
+            }
+
+            ImGui.EndTabBar();
         }
-        ImGui.InputTextMultiline(
-            "##mappingProgress",
-            ref mappingReport,
-            200_000,
-            new System.Numerics.Vector2(-1, 180),
-            ImGuiInputTextFlags.ReadOnly
-        );
-
-        ImGui.Text("Mahjong UI State (slot-based scaffold)");
-        ImGui.InputTextMultiline(
-            "##mahjongUiState",
-            ref text3,
-            400_000,
-            new System.Numerics.Vector2(-1, 180),
-            ImGuiInputTextFlags.ReadOnly
-        );
-
-        ImGui.Text("Normalized Mahjong State (probe + node + cache)");
-        ImGui.InputTextMultiline(
-            "##mahjongNormalizedState",
-            ref normalizedStateText,
-            200_000,
-            new System.Numerics.Vector2(-1, 150),
-            ImGuiInputTextFlags.ReadOnly
-        );
-
-        ImGui.Text("Diagnostics");
-        ImGui.InputTextMultiline(
-            "##mahjongDiagnostics",
-            ref diagnosticsText,
-            120_000,
-            new System.Numerics.Vector2(-1, 130),
-            ImGuiInputTextFlags.ReadOnly
-        );
-
-        ImGui.Text("Recent Normalized Transitions");
-        ImGui.InputTextMultiline(
-            "##mahjongRecentTransitions",
-            ref recentTransitionsText,
-            160_000,
-            new System.Numerics.Vector2(-1, 120),
-            ImGuiInputTextFlags.ReadOnly
-        );
 
         ImGui.Separator();
-        ImGui.Text("Raw Dump");
-        ImGui.InputTextMultiline(
-            "##mahjongDump",
-            ref text,
-            2_000_000, // max chars
-            new System.Numerics.Vector2(-1, 220),
-            ImGuiInputTextFlags.ReadOnly
-        );
-
         if (ImGui.Button("Show Settings"))
         {
             plugin.ToggleConfigUi();
