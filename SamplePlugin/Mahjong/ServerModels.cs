@@ -34,10 +34,10 @@ public sealed class EvaluateCallRequest
     [JsonPropertyName("hand")]
     public List<string> Hand { get; set; } = [];
 
-    [JsonPropertyName("call_tile")]
+    [JsonPropertyName("calledTile")]
     public string? CallTile { get; set; }
 
-    [JsonPropertyName("call_type")]
+    [JsonPropertyName("callType")]
     public string? CallType { get; set; }
 
     [JsonPropertyName("discards")]
