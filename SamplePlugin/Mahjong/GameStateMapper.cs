@@ -5,8 +5,8 @@ namespace SamplePlugin.Mahjong;
 
 /// <summary>
 /// Converts MahjongGameState into server API request objects.
-/// Tile codes are already in the server's expected format (M1-M9, P1-P9, S1-S9,
-/// EAST/SOUTH/WEST/NORTH, WHITE/GREEN/RED, M0/P0/S0).
+/// Tile codes from the icon map may include red dora notation (M0/P0/S0),
+/// which are normalized to regular 5s (M5/P5/S5) for the server.
 /// </summary>
 public static class GameStateMapper
 {
@@ -17,6 +17,21 @@ public static class GameStateMapper
         [2] = "WEST",
         [3] = "NORTH",
     };
+
+    /// <summary>
+    /// Normalizes red dora tiles (M0/P0/S0) to regular 5s (M5/P5/S5).
+    /// The server's TileType enum does not accept red dora notation.
+    /// </summary>
+    private static string NormalizeTile(string tile)
+    {
+        return tile switch
+        {
+            "M0" => "M5",
+            "P0" => "P5",
+            "S0" => "S5",
+            _ => tile
+        };
+    }
 
     /// <summary>
     /// Builds a suggest-move request from the current game state.
@@ -71,7 +86,7 @@ public static class GameStateMapper
         return new EvaluateCallRequest
         {
             Hand = hand,
-            CallTile = callTile,
+            CallTile = callTile != null ? NormalizeTile(callTile) : null,
             CallType = callType?.ToUpperInvariant(),
             Menzen = true,
             PlayerScore = state.PlayerScore.Value is int ps and > 0 ? ps : null,
@@ -83,6 +98,7 @@ public static class GameStateMapper
 
     /// <summary>
     /// Resolves the player's hand tile codes from icon IDs.
+    /// Normalizes red dora tiles (M0/P0/S0) to regular 5s for the server.
     /// </summary>
     private static List<string>? ResolveHand(MahjongGameState state, MahjongIconMap iconMap)
     {
@@ -94,7 +110,7 @@ public static class GameStateMapper
         {
             var code = iconMap.Resolve(id);
             if (code != null)
-                tiles.Add(code);
+                tiles.Add(NormalizeTile(code));
         }
 
         return tiles.Count > 0 ? tiles : null;
@@ -102,11 +118,15 @@ public static class GameStateMapper
 
     /// <summary>
     /// Resolves the drawn tile code from its icon ID.
+    /// Normalizes red dora tiles (M0/P0/S0) to regular 5s for the server.
     /// </summary>
     private static string? ResolveDrawnTile(MahjongGameState state, MahjongIconMap iconMap)
     {
         if (state.DrawIconId.Value is uint drawId and > 0)
-            return iconMap.Resolve(drawId);
+        {
+            var code = iconMap.Resolve(drawId);
+            return code != null ? NormalizeTile(code) : null;
+        }
         return null;
     }
 
@@ -171,12 +191,16 @@ public static class GameStateMapper
 
     /// <summary>
     /// Filters out placeholder/unresolved tile strings (like "?" or "ICON_*").
+    /// Normalizes red dora tiles (M0/P0/S0) to regular 5s for the server.
     /// </summary>
     private static List<string> FilterValidTiles(IReadOnlyList<string>? tiles)
     {
         if (tiles == null || tiles.Count == 0)
             return [];
 
-        return tiles.Where(t => !string.IsNullOrWhiteSpace(t) && !t.StartsWith("ICON_") && t != "?").ToList();
+        return tiles
+            .Where(t => !string.IsNullOrWhiteSpace(t) && !t.StartsWith("ICON_") && t != "?")
+            .Select(NormalizeTile)
+            .ToList();
     }
 }
