@@ -613,3 +613,31 @@
 	- completion criteria for testing coverage.
 
 **Result:** Team now has a concrete testing playbook that maps directly to existing instrumentation and should maximize signal while minimizing user burden.
+
+## 2026-03-27: MILESTONE — Player hand reading confirmed working
+
+**What:** Locked in Phase 1 + Phase 2.1 as complete. Player hand tile reading is confirmed accurate by user.
+
+**Confirmed working:**
+- All 37 tile icons mapped correctly (34 standard + 3 red fives: 76041–76077)
+- Player hand nodes 54–71 (type 1055, 42x55) correctly identified
+- Drawn tile detected by position gap (largest X gap > 50px between sorted hand tiles)
+- Direct AtkImageNode texture resource chain read works after mid-game plugin reload
+- Empty/placeholder hand slots (pos=0,0, no icon) correctly filtered out
+- Canonical hand + draw separation produces accurate results matching user's actual hand
+
+**Known layout facts locked in:**
+| Item | Value |
+|------|-------|
+| Player hand nodes | NodeList indices 54–71, type 1055, size 42x55 |
+| Active hand tiles | Visible, pos > 0 or has icon |
+| Drawn tile | Rightmost tile with largest X gap (>50px) from rest |
+| Node 107 (type 1022) | NOT player's draw — shows other player's discard |
+| Icon ID range | 76041–76077 (37 tiles total) |
+| Red fives | 76075=M0, 76076=P0, 76077=S0 |
+
+**Next targets (Phase 2.2+):**
+- Opponent discard pool identification
+- Dora indicator tiles
+- Seat wind / riichi status
+- Call prompt detection

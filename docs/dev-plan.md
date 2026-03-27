@@ -71,7 +71,8 @@ A Dalamud plugin for FFXIV's Doman Mahjong (Gold Saucer) that reads in-game stat
 | `/api/history` | GET | Past suggestion history |
 | `/api/game-state/{id}` | GET | Stored game record by ID |
 
-Tile format: uppercase strings — `M1`–`M9`, `P1`–`P9`, `S1`–`S9`, `EAST`, `SOUTH`, `WEST`, `NORTH`, `WHITE`, `GREEN`, `RED`.
+Tile format: uppercase strings — `M1`–`M9`, `P1`–`P9`, `S1`–`S9`, `EAST`, `SOUTH`, `WEST`, `NORTH`, `WHITE`, `GREEN`, `RED`, `M0`, `P0`, `S0` (red fives).
+
 
 ## Development Phases
 
@@ -79,10 +80,10 @@ Tile format: uppercase strings — `M1`–`M9`, `P1`–`P9`, `S1`–`S9`, `EAST`
 
 **Goal:** Determine the mapping between EmjL addon image part IDs and actual Mahjong tile types.
 
-- [ ] **1.1** Add a dedicated file logger that periodically dumps ATK tree data to a known file (e.g., `%APPDATA%/MahjongHelper/dump.txt`) so the addon state can be inspected outside the game without needing live Dalamud log access.
-- [ ] **1.2** Refine `AtkTreeDumper` to focus on tile-relevant nodes — extract image part IDs, node IDs, positions, and visibility for all 34x45 nodes in a structured format (JSON or CSV).
-- [ ] **1.3** With a live game session: user reports their hand, compare against dumped image part IDs to build the tile ID mapping table.
-- [ ] **1.4** Validate the mapping across multiple hands/rounds to confirm it's consistent. Store the mapping in a config/data file.
+- [x] **1.1** Add a dedicated file logger that periodically dumps ATK tree data to a known file (e.g., `%APPDATA%/MahjongHelper/dump.txt`) so the addon state can be inspected outside the game without needing live Dalamud log access.
+- [x] **1.2** Refine `AtkTreeDumper` to focus on tile-relevant nodes — extract image part IDs, node IDs, positions, and visibility for all 34x45 nodes in a structured format (JSON or CSV).
+- [x] **1.3** With a live game session: user reports their hand, compare against dumped image part IDs to build the tile ID mapping table.
+- [x] **1.4** Validate the mapping across multiple hands/rounds to confirm it's consistent. Store the mapping in a config/data file.
 
 ### Phase 1.5: IDataManager-Based Icon ID Discovery
 
@@ -109,7 +110,7 @@ Tile format: uppercase strings — `M1`–`M9`, `P1`–`P9`, `S1`–`S9`, `EAST`
 - [x] **1.5.3** Build the icon-ID-to-tile-code mapping from sequential icon range (76041–76074) and populate `MahjongIconMap.BuiltInMappings`. (Fallback path used.)
 - [x] **1.5.4** Log the discovered mappings at plugin startup for verification.
 - [x] **1.5.5** Populate `BuiltInMappings` with all 34 tile entries; `LockedBuiltInIconIds` locks all.
-- [ ] **1.5.6** Verify in-game that all 34 tiles now resolve correctly in the UI state display.
+- [x] **1.5.6** Verify in-game that all 37 tiles now resolve correctly in the UI state display. (34 standard + 3 red fives confirmed.)
 
 **Fallback:** If `IDataManager` does not expose a Mahjong tile sheet, fall back to the `EmjModule.TileSet` field + icon ID range enumeration (76041–76074 sequential mapping). The sequential range is strongly suggested by observed icon IDs in gameplay, but the data manager approach is preferred because it's self-documenting and self-correcting.
 
@@ -117,8 +118,9 @@ Tile format: uppercase strings — `M1`–`M9`, `P1`–`P9`, `S1`–`S9`, `EAST`
 
 **Goal:** Reliably extract the full game state from the EmjL addon.
 
-- [ ] **2.1** Implement `GameStateReader` class that parses the ATK tree and returns a structured game state object (player hand tiles, drawn tile).
+- [x] **2.1** Implement `GameStateReader` class that parses the ATK tree and returns a structured game state object (player hand tiles, drawn tile).
 - [ ] **2.2** Identify and read discard pool nodes for each player (opponent discards, tsumogiri detection if possible).
+- [ ] **2.2a** Identify dora indicator tiles (visible on the dead wall / game board UI).
 - [ ] **2.3** Identify seat wind indicators and riichi status for each player.
 - [ ] **2.4** Identify call decision UI elements (when the game prompts for chi/pon/kan/ron/tsumo).
 - [ ] **2.5** Detect game phase: waiting for discard, waiting for draw, call decision prompt, between rounds, etc.
@@ -194,26 +196,32 @@ class GameState
 ```csharp
 enum TileType
 {
-    M1, M2, M3, M4, M5, M6, M7, M8, M9,  // Manzu
-    P1, P2, P3, P4, P5, P6, P7, P8, P9,  // Pinzu
-    S1, S2, S3, S4, S5, S6, S7, S8, S9,  // Souzu
-    EAST, SOUTH, WEST, NORTH,              // Winds
-    WHITE, GREEN, RED                       // Dragons
+    M1, M2, M3, M4, M5, M0, M6, M7, M8, M9,  // Manzu (M0 = red five)
+    P1, P2, P3, P4, P5, P0, P6, P7, P8, P9,  // Pinzu (P0 = red five)
+    S1, S2, S3, S4, S5, S0, S6, S7, S8, S9,  // Souzu (S0 = red five)
+    EAST, SOUTH, WEST, NORTH,                  // Winds
+    WHITE, GREEN, RED                           // Dragons
 }
 ```
 
 ### ImagePartId → TileType mapping
 
 ```
-// To be discovered in Phase 1
-// Format: Dictionary<int, TileType>
-// e.g. { 42: TileType.M1, 43: TileType.M2, ... }
+// DISCOVERED — sequential icon IDs 76041–76077
+// 76041–76049: M1–M9
+// 76050–76058: P1–P9
+// 76059–76067: S1–S9
+// 76068–76071: EAST, SOUTH, WEST, NORTH
+// 76072–76074: WHITE, GREEN, RED
+// 76075–76077: M0, P0, S0 (red fives / aka dora)
 ```
 
 ## Open Questions
 
-1. **Tile-back detection** — How are face-down tiles (opponents' hands) represented in the ATK tree? Likely a distinct image part ID or a hidden node.
+1. ~~**Tile-back detection**~~ — Face-down tiles use different node types/no icon. Player hand nodes 54–71 (type 1055, 42x55) hold the active hand; empty slots have no icon and pos=(0,0).
 2. **Call prompt structure** — What does the EmjL addon look like when prompting for chi/pon/kan? Need to identify the relevant nodes.
-3. **Red fives** — Doman Mahjong may use red five tiles (aka dora). Need to check if these have distinct image part IDs and whether the server supports them.
+3. ~~**Red fives**~~ — **Resolved.** Red fives use icon IDs 76075 (M0), 76076 (P0), 76077 (S0). The server tile format uses `M0`/`P0`/`S0` notation.
 4. **Multiple rounds** — How does the addon transition between rounds? Need to detect round boundaries to reset state.
 5. **Click simulation method** — Need to determine whether Dalamud provides a click/callback API for addon nodes, or if raw input simulation is needed.
+6. **Discard pool layout** — Need to identify which node types/indices hold each player's discard pool, and how to distinguish the 4 player positions (self, shimocha, toimen, kamicha).
+7. **Dora indicators** — Need to find the dead wall / dora indicator tiles in the node tree. These may be a separate set of tile component nodes.
