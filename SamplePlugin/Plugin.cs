@@ -30,6 +30,7 @@ public sealed class Plugin : IDalamudPlugin
     private static readonly string NormalizedStateExportPath = Path.Combine(CacheDirectory, "normalized_state_export.txt");
     private static readonly string ProbeSnippetExportPath = Path.Combine(CacheDirectory, "probe_snippet_export.txt");
     private static readonly string StartupDiagDumpPath = Path.Combine(CacheDirectory, "startup_diag.txt");
+    private static readonly string ActionProbePath = Path.Combine(CacheDirectory, "action_probe.log");
 
     [PluginService] internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
     [PluginService] internal static ITextureProvider TextureProvider { get; private set; } = null!;
@@ -94,13 +95,13 @@ public sealed class Plugin : IDalamudPlugin
     private AutoPlayManager _autoPlayManager = null!;
     private nint _lastAddonAddress;
     private EmjUiReader.UiState? _lastUiState;
+    private string _lastActionProbeSignature = string.Empty;
 
     public Plugin()
     {
         _iconCapture = new IconIdCapture(GameInterop);
         _iconMap = new MahjongIconMap();
         _serverClient = new MahjongServerClient();
-        _autoPlayManager = new AutoPlayManager(Configuration, _iconMap);
         _emjReader = new EmjAddonReader();
         _readerScheduler = new AddonReaderScheduler(GameGui);
         _readerScheduler.AddObservedAddon(_emjReader);
@@ -112,6 +113,7 @@ public sealed class Plugin : IDalamudPlugin
             OnMahjongDraw
         );
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
+        _autoPlayManager = new AutoPlayManager(Configuration, _iconMap);
 
         ConfigWindow = new ConfigWindow(this);
         MainWindow = new MainWindow(this);
@@ -123,7 +125,7 @@ public sealed class Plugin : IDalamudPlugin
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "/mj — toggle debug window | /mj overlay — toggle overlay | /mj compact — compact mode | /mj auto — toggle auto-play | /mj pause — pause auto-play"
+            HelpMessage = "/mj — toggle debug window | /mj overlay | /mj compact | /mj auto | /mj pause | /mj mark discard|call | /mj probecallback <a> <b> [run]"
         });
 
         // Tell the UI system that we want our windows to be drawn through the window system
@@ -882,6 +884,9 @@ public sealed class Plugin : IDalamudPlugin
 
         AppendRecentTransition(transition);
 
+        // Passive action-probe snapshot for callback discovery
+        LogActionProbe(merged, source);
+
         // Trigger server suggest-move when state changes
         TryRequestSuggestion(merged);
 
@@ -900,6 +905,45 @@ public sealed class Plugin : IDalamudPlugin
         catch (Exception ex)
         {
             RecordFailure($"Normalized transition log failed: {ex.Message}");
+        }
+    }
+
+    private void LogActionProbe(MahjongGameState state, string source)
+    {
+        try
+        {
+            var hand = state.HandDescription.Value ?? "";
+            var draw = state.DrawIconId.Value == 0 ? "" : state.DrawIconId.Value.ToString();
+            var calls = state.AvailableCalls.Value ?? "";
+            var phase = state.GamePhase.Value ?? "";
+            var turn = state.CurrentTurn.Value ?? "";
+            var pDis = state.PlayerDiscards.Value == null ? "" : string.Join(",", state.PlayerDiscards.Value);
+            var rDis = state.RightDiscards.Value == null ? "" : string.Join(",", state.RightDiscards.Value);
+            var oDis = state.OppositeDiscards.Value == null ? "" : string.Join(",", state.OppositeDiscards.Value);
+            var lDis = state.LeftDiscards.Value == null ? "" : string.Join(",", state.LeftDiscards.Value);
+
+            var sig = $"{source}|{phase}|{turn}|{calls}|{hand}|{draw}|{pDis}|{rDis}|{oDis}|{lDis}";
+            if (sig == _lastActionProbeSignature)
+                return;
+            _lastActionProbeSignature = sig;
+
+            Directory.CreateDirectory(CacheDirectory);
+            var line = $"[{DateTime.UtcNow:O}] src={source} phase={phase} turn={turn} calls={calls} hand='{hand}' draw={draw} " +
+                       $"discards(P/R/O/L)=({pDis})/({rDis})/({oDis})/({lDis})";
+            File.AppendAllText(ActionProbePath, line + Environment.NewLine);
+
+            if (_lastAddonAddress != 0)
+            {
+                unsafe
+                {
+                    var addon = (AtkUnitBase*)_lastAddonAddress;
+                    AddonClickHelper.LogAtkSnapshot(addon, $"merge-{source}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            RecordFailure($"Action probe log failed: {ex.Message}");
         }
     }
 
@@ -1301,27 +1345,58 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnCommand(string command, string args)
     {
-        var trimmed = args.Trim().ToLowerInvariant();
-        if (trimmed == "overlay")
+        var trimmed = args.Trim();
+        var lower = trimmed.ToLowerInvariant();
+
+        if (lower == "overlay")
         {
             Configuration.OverlayVisible = !Configuration.OverlayVisible;
             Configuration.Save();
         }
-        else if (trimmed == "compact")
+        else if (lower == "compact")
         {
             Configuration.OverlayCompactMode = !Configuration.OverlayCompactMode;
             Configuration.Save();
         }
-        else if (trimmed == "auto" || trimmed == "autoplay")
+        else if (lower == "auto" || lower == "autoplay")
         {
             Configuration.AutoPlayEnabled = !Configuration.AutoPlayEnabled;
             Configuration.Save();
             if (!Configuration.AutoPlayEnabled)
                 _autoPlayManager.ClearPending();
         }
-        else if (trimmed == "pause")
+        else if (lower == "pause")
         {
             _autoPlayManager.TogglePause();
+        }
+        else if (lower == "mark discard")
+        {
+            AnnotateComparisonEvent("manual_discard", "User manually discarded a tile");
+            AppendRecentTransition($"{DateTime.UtcNow:O} manual mark: discard");
+        }
+        else if (lower == "mark call")
+        {
+            AnnotateComparisonEvent("manual_call", "User manually accepted/declined a call");
+            AppendRecentTransition($"{DateTime.UtcNow:O} manual mark: call");
+        }
+        else if (lower.StartsWith("probecallback "))
+        {
+            // Usage: /mj probecallback <a> <b> [run]
+            var parts = lower.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 3 && int.TryParse(parts[1], out var a) && int.TryParse(parts[2], out var b))
+            {
+                var execute = parts.Length >= 4 && parts[3] == "run";
+                unsafe
+                {
+                    var addonPtr = _lastAddonAddress != 0 ? (AtkUnitBase*)_lastAddonAddress : null;
+                    AddonClickHelper.TryFireProbeCallback(addonPtr, a, b, execute);
+                }
+                AppendRecentTransition($"{DateTime.UtcNow:O} probe callback a={a} b={b} execute={execute}");
+            }
+            else
+            {
+                AppendRecentTransition($"{DateTime.UtcNow:O} invalid probecallback args: '{trimmed}'");
+            }
         }
         else
         {

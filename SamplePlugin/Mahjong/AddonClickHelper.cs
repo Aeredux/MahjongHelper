@@ -120,4 +120,37 @@ public static unsafe class AddonClickHelper
         }
         catch { }
     }
+
+    /// <summary>
+    /// Fires a raw callback probe to EmjL for discovery.
+    /// Intended for manual controlled testing only.
+    /// </summary>
+    public static bool TryFireProbeCallback(AtkUnitBase* addon, int a, int b, bool execute)
+    {
+        if (addon == null) return false;
+
+        try
+        {
+            if (!execute)
+            {
+                Log($"[DRY-RUN] Probe callback would fire: a={a}, b={b}");
+                LogAtkSnapshot(addon, $"probe-dryrun-a{a}-b{b}");
+                return true;
+            }
+
+            var values = stackalloc AtkValue[2];
+            values[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = a };
+            values[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = b };
+            addon->FireCallback(2, values);
+
+            Log($"[EXECUTE] Probe callback fired: a={a}, b={b}");
+            LogAtkSnapshot(addon, $"probe-exec-a{a}-b{b}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log($"ERROR probe callback a={a}, b={b}: {ex.Message}");
+            return false;
+        }
+    }
 }

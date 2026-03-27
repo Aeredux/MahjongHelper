@@ -346,188 +346,6 @@
 
 **Result:** Reverse-engineering captures now track rapid in-game slot updates more reliably without requiring extra user actions.
 
-## 2026-03-26: Capture rate validation — agent rule confirmed
-
-**What:** Validated that automatic passive UI-state logging runs at an adequate capture rate for real-time Mahjong investigation without manual user intervention.
-
-**Why:** User requested a standing agent rule: "during reverse-engineering, prioritize passive/automatic investigation over requiring manual user action." This rule was already documented in `.github/copilot-instructions.md` ("Reverse-engineering ergonomics"); validation confirms the implementation is sufficient.
-
-**Analysis:**
-- Examined `%APPDATA%/MahjongHelper/mahjong_ui_state_history.log` from normal gameplay session.
-- Periodic captures occur at ~3-second intervals (verified: 08:37:37 → 08:37:40 → subsequent entries follow 3-second delta).
-- Mahjong turns typically last 5–30 seconds, so 3-second capture interval yields 2–10 snapshots per turn — more than adequate for tracking state transitions.
-- Plugin reloads show "startup" source tag; periodic updates show "source=periodic" with timestamp-based deduplication.
-- No manual export, copy, or comparison actions required from user; logging is fully automatic and passive.
-
-**Result:** 
-- ✅ Capture rate is validated as adequate for real-time Mahjong state tracking.
-- ✅ Reverse-engineering ergonomics principle confirmed implemented and operational.
-- ✅ Agent rule ("minimize required user action") embedded in workspace instructions and enforced by automatic passive logging implementation.
-- **Recommendation:** Continue using passive periodic logging for future reverse-engineering iterations; manual copy/compare loops are avoided by design.
-
-## 2026-03-26: Pivot from hover-learning to memory probing
-
-**What:** Disabled unreliable hover-learning tile mapping and cleared corrupted cache. Pivoting to direct memory inspection of Mahjong client state.
-
-**Why:** The learned icon mappings contained contradictions (multiple icon IDs mapping to the same tile, e.g., 6 different icon IDs all marked as "S9"). This indicated fundamental instability in the hover tooltip observation approach — stale or unrelated tooltip values were being mixed into learning despite gating attempts. Manual copy/compare is friction-prone anyway.
-
-**Changes made:**
-- Cleared `%APPDATA%/MahjongHelper/icon_name_cache.json` → empty cache (`{}`).
-- Commented out all `_iconMap.ObserveHover()` calls in `Plugin.cs` (3 locations: startup dump, frame-by-frame, periodic dump).
-- Kept baseline built-in mappings (`76069 -> P4`, `76070 -> S9`) until memory probing confirms or replaces them.
-
-**Pivot direction:**
-- Goal: Find tile identity data directly in `AgentId.Emj` or `UIState->Emj` client structures.
-- Strategy: Use existing probe dumps + expand `AgentId.Emj` pointer scanning to locate hand/draw tile lists in live state.
-- Expected result: Authoritative tile mappings without requiring user tile hovering or manual observation loops.
-
-**Result:** Plugin is cleaner and ready for memory-probing approach. Hover-learning is disabled to prevent further cache corruption.
-
-## 2026-03-26: StateComparisonLogger — automated before/after state tracking
-
-**What:** Created automatic byte-level comparison logging of AgentId.Emj+0x28 state across frames, with optional user annotations.
-
-**Why:** Manual membrane inspection and human comparison of probe dumps is tedious. Automated delta logging shows exactly which bytes change when gameplay events occur, enabling correlation of memory changes with tile discovery without manual user intervention.
-
-**Changes made:**
-- Created `StateComparisonLogger.cs`:
-  - Captures 0x200-byte snapshots of `AgentId.Emj+0x28` pointer target
-  - Computes byte-level deltas from previous snapshot
-  - Logs changes grouped by memory region (0x10-byte blocks)
-  - Supports annotated events (e.g., "tile drawn", "tile discarded")
-  - Writes to `%APPDATA%/MahjongHelper/state_comparison.log`
-- Integrated `CaptureSnapshot()` into `OnMahjongDraw()` — captures every frame without user action
-- Added UI buttons in MainWindow:
-  - `Copy Comparison Log` — copy current log to clipboard
-  - `Log: Tile Drawn` — annotate a draw event in the log
-  - `Log: Tile Discarded` — annotate a discard event in the log
-- Added `AnnotateComparisonEvent()` method in Plugin to trigger annotated captures
-
-**Investigation workflow:**
-1. Plugin running during normal gameplay captures every-frame snapshots of AgentId.Emj+0x28 state
-2. User plays normally, no manual intervention needed
-3. When a tile is drawn:
-   - (Optional) user clicks "Log: Tile Drawn" button
-   - Plugin logs the frame delta with annotation "tile drawn"
-4. User reviews `state_comparison.log` afterward:
-   - Looks for ByteGrouped changes at specific offsets
-   - Correlates which offsets change consistently with tile draws/discards
-   - Identifies candidate tile identity fields in the structure
-
-**Result:** 
-- ✅ Fully passive, automatic state capture during gameplay (no user action needed)
-- ✅ Before/after deltas are computed and logged automatically
-- ✅ User can optionally annotate events for correlation analysis
-- ✅ Log is structured and human-readable for manual reverse-engineering
-- **Recommendation:** User should play a few rounds with plugin active, click the annotation buttons at key moments, then analyze the log afterward to identify tile offset patterns.
-
-## 2026-03-26: External repo research - Saucy minigame state extraction
-
-**What:** Reviewed `PunishXIV/Saucy` and created a local research summary describing how it acquires game state for multiple Gold Saucer minigames.
-
-**Why:** Needed a practical reference of proven extraction strategies (addon polling, unsafe struct overlays, ATK node traversal, agent reads, signature scans/hooks) to inform future Mahjong and minigame reverse-engineering work.
-
-**Changes made:**
-- Added `docs/saucy-state-extraction-summary.md` with per-minigame analysis for:
-	- Triple Triad,
-	- Mini Cactpot,
-	- Out on a Limb,
-	- Cuff-a-cur,
-	- shared results handling and other Gold Saucer modules.
-- Documented cross-cutting Saucy patterns:
-	- `UIReaderScheduler` lifecycle polling model,
-	- `StructLayout` + `FieldOffset` overlays,
-	- `GUINodeUtils` tree traversal,
-	- `FindAgentInterface` + fallback agent access,
-	- `SigScanner` + hook-based fallbacks.
-- Captured reliability tradeoffs (patch fragility hotspots vs. safer patterns).
-
-**Result:** Repo now includes a concrete reference document of real-world FFXIV minigame state acquisition methods that can be reused when designing robust readers for this project.
-
-## 2026-03-26: Saucy adoption checklist + minimal-effort debugging playbook
-
-**What:** Added a second, implementation-focused document translating the Saucy research into concrete adoption steps for MahjongHelper, plus a user debugging contribution guide optimized for minimal effort / maximum return.
-
-**Why:** The first Saucy document summarizes extraction techniques; this follow-up turns those findings into an execution plan and clear guidance for how the user can help collect high-value debugging data without manual heavy lifting.
-
-**Changes made:**
-- Added `docs/saucy-adoption-checklist.md` with:
-	- prioritized adoption phases (reader lifecycle architecture, dual-path acquisition, diagnostics),
-	- concrete task checklist,
-	- "minimal-effort, high-return" debugging actions,
-	- low-ROI tasks to avoid,
-	- a default short debugging routine for normal gameplay.
-
-**Result:** Repo now contains both strategic research and an actionable adoption/debug workflow, reducing ambiguity in next implementation steps and minimizing user burden during reverse-engineering iterations.
-
-## 2026-03-26: Phase A implemented - reader lifecycle scaffolding
-
-**What:** Implemented Phase A scaffolding from the Saucy adoption plan: modular addon reader interface, scheduler-driven lifecycle callbacks, and status reporting in UI.
-
-**Why:** Needed a stable control plane for state extraction that can survive UI/memory path changes and simplify future per-source readers.
-
-**Changes made:**
-- Added reader framework classes under `SamplePlugin/Mahjong/`:
-	- `IAddonStateReader.cs`
-	- `AddonReaderStatus.cs`
-	- `AddonReaderScheduler.cs`
-	- `EmjAddonReader.cs`
-- Wired scheduler into plugin runtime:
-	- added `IFramework` service,
-	- registered `Framework.Update` handler,
-	- scheduler now polls `EmjL` and dispatches `shown/update/lost` callbacks.
-- Surfaced reader state in main UI:
-	- `MainWindow.readerStatus`
-	- `Reader Status: ...` display line for quick diagnostics.
-- Updated `docs/saucy-adoption-checklist.md` Phase A checkboxes to complete.
-
-**Result:** MahjongHelper now has a reusable reader lifecycle architecture (instead of one-off direct reads only), making future readers and diagnostics significantly easier to add and debug.
-
-## 2026-03-26: Phase B implemented - normalized probe/node/cached game state
-
-**What:** Implemented Phase B from the Saucy adoption plan by introducing a normalized `MahjongGameState` that merges probe and node data with cached fallback behavior.
-
-**Why:** Needed one canonical state representation that survives temporary source failures and makes provenance explicit, instead of treating probe text and node snapshots as unrelated outputs.
-
-**Changes made:**
-- Added normalized state model + merge builder:
-	- `SamplePlugin/Mahjong/MahjongGameState.cs`
-	- includes per-field metadata: source (`Probe`/`Node`/`Cached`) and confidence flags (`authoritative`/`fallback`).
-- Integrated merge flow into plugin runtime (`Plugin.cs`):
-	- tracks latest probe numeric state (`AgentId.Emj+0x28/+0x08`),
-	- merges with current `EmjUiReader` output each realtime/periodic update,
-	- retains last-known-good values when current probe/node value is missing.
-- Added UI panel for merged output in `MainWindow.cs`:
-	- `Normalized Mahjong State (probe + node + cache)` multiline display.
-- Updated `docs/saucy-adoption-checklist.md` to mark Phase B checklist items complete.
-
-**Result:** State acquisition now follows a dual-path model with explicit provenance and automatic cached fallback, reducing breakage risk from transient read failures while improving debugging clarity.
-
-## 2026-03-26: Phase C implemented - diagnostics, transition logging, exports
-
-**What:** Implemented Phase C observability and ergonomics features: diagnostics panel, transition-only normalized-state logging, recent transition history, and quick export/copy actions.
-
-**Why:** Needed fast patch-triage visibility and one-click artifact export to keep reverse-engineering low effort while improving reproducibility.
-
-**Changes made:**
-- Extended plugin diagnostics state in `SamplePlugin/Plugin.cs`:
-	- tracks last successful update timestamps (probe/node/merge),
-	- tracks active source path (`Probe`/`Node`/`Cached` combinations),
-	- stores bounded recent failure and recent transition buffers,
-	- records failure reasons on read/log/export exceptions.
-- Added transition-only normalized-state logging:
-	- writes to `%APPDATA%/MahjongHelper/normalized_state_history.log` only when normalized signature changes.
-- Added export helpers:
-	- `ExportNormalizedState()` -> `%APPDATA%/MahjongHelper/normalized_state_export.txt`,
-	- `ExportProbeSnippet(...)` -> `%APPDATA%/MahjongHelper/probe_snippet_export.txt`,
-	- `GetRecentTransitionsText()` for quick copy.
-- Updated `MainWindow` UI with Phase C controls and panes:
-	- buttons: `Export Normalized State`, `Copy Recent Transitions`, `Export Probe Snippet`,
-	- read-only sections: `Diagnostics`, `Recent Normalized Transitions`.
-- Updated `docs/saucy-adoption-checklist.md` to mark all Phase C items complete.
-
-**Result:** All checklist phases (A/B/C) are now implemented in code and reflected in docs; plugin now provides integrated lifecycle status, normalized-state provenance, transition history, and fast export/copy debugging workflow.
-
 ## 2026-03-27: Phase 1.5 — IDataManager exploration + sequential icon mapping
 
 **What:** Explored `IDataManager` Excel sheets for Mahjong tile data, found none, then implemented sequential icon ID mapping as the fallback.
@@ -598,49 +416,6 @@
 - Raised `BuildCanonicalHand` cap from 13 to 14 to allow the drawn tile through before gap detection runs.
 
 **Result:** The canonical hand should now correctly show all 13 hand tiles plus the drawn tile identified separately, matching the actual in-game hand layout.
-
-**What:** Created a dedicated execution-order test plan for collecting and validating all remaining Mahjong state information.
-
-**Why:** Needed a repeatable, low-effort workflow to systematically gather evidence, validate reader behavior, and triage failures without ad-hoc manual analysis loops.
-
-**Changes made:**
-- Added `docs/mahjong-state-testing-plan.md` with:
-	- required artifact list,
-	- staged run order (sanity -> passive baseline -> event correlation -> fallback validation -> reload validation -> post-patch smoke),
-	- pass/fail gates per stage,
-	- failure triage decision rules,
-	- minimal-effort default session template,
-	- completion criteria for testing coverage.
-
-**Result:** Team now has a concrete testing playbook that maps directly to existing instrumentation and should maximize signal while minimizing user burden.
-
-## 2026-03-27: MILESTONE — Player hand reading confirmed working
-
-**What:** Locked in Phase 1 + Phase 2.1 as complete. Player hand tile reading is confirmed accurate by user.
-
-**Confirmed working:**
-- All 37 tile icons mapped correctly (34 standard + 3 red fives: 76041–76077)
-- Player hand nodes 54–71 (type 1055, 42x55) correctly identified
-- Drawn tile detected by position gap (largest X gap > 50px between sorted hand tiles)
-- Direct AtkImageNode texture resource chain read works after mid-game plugin reload
-- Empty/placeholder hand slots (pos=0,0, no icon) correctly filtered out
-- Canonical hand + draw separation produces accurate results matching user's actual hand
-
-**Known layout facts locked in:**
-| Item | Value |
-|------|-------|
-| Player hand nodes | NodeList indices 54–71, type 1055, size 42x55 |
-| Active hand tiles | Visible, pos > 0 or has icon |
-| Drawn tile | Rightmost tile with largest X gap (>50px) from rest |
-| Node 107 (type 1022) | NOT player's draw — shows other player's discard |
-| Icon ID range | 76041–76077 (37 tiles total) |
-| Red fives | 76075=M0, 76076=P0, 76077=S0 |
-
-**Next targets (Phase 2.2+):**
-- Opponent discard pool identification
-- Dora indicator tiles
-- Seat wind / riichi status
-- Call prompt detection
 
 ## 2026-03-27: Phase 2 completion — full game state reader
 
@@ -796,3 +571,29 @@ Features:
 **Integration:**
 - Overlay fed live data from Plugin.cs: suggestion response, server status, hand description, current turn
 - Auto-opens when in a Mahjong game, auto-closes when not
+
+## 2026-03-27: Phase 5 callback discovery instrumentation (EmjL)
+
+**What:** Added a dedicated discovery workflow to identify real EmjL callback bindings for discard/call automation without asking the user to read in-game UI values.
+
+**Changes made:**
+- `Plugin.cs`
+  - Fixed initialization order bug: `Configuration` is now loaded before constructing `AutoPlayManager`.
+  - Added passive `action_probe.log` snapshots on normalized-state transitions:
+    - source, phase, turn, available calls
+    - hand description and draw icon
+    - all discard pools (P/R/O/L)
+  - Added Atk snapshot logging via `AddonClickHelper.LogAtkSnapshot(...)` whenever action-probe state changes.
+  - Added command-driven discovery helpers:
+    - `/mj mark discard` — annotate a manual discard action
+    - `/mj mark call` — annotate a manual call accept/decline action
+    - `/mj probecallback <a> <b> [run]` — dry-run by default, optional guarded execution for callback probes
+- `AddonClickHelper.cs`
+  - Added `TryFireProbeCallback(...)` helper for controlled callback probing and logging.
+  - Kept auto-discard/auto-call execution in dry-run mode pending callback confirmation.
+- `Configuration.cs`
+  - Cleanup/fix: removed duplicate `using` directive encountered during build.
+
+**Result:**
+- Discovery is now file-driven and reproducible (`action_probe.log`, `autoplay.log`, `server_log.txt`) and supports controlled callback probing from commands.
+- No production behavior changed for players (automation remains safe dry-run until callback IDs are confirmed).
