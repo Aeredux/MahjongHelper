@@ -164,6 +164,7 @@ Tile format: uppercase strings — `M1`–`M9`, `P1`–`P9`, `S1`–`S9`, `EAST`
 - [ ] **6.3** Persist user settings via `Configuration.cs`.
 - [ ] **6.4** Clean up unused sample code (goat image, random config bools, sample territory/job display).
 - [ ] **6.5** Add a proper plugin icon and description for the Dalamud plugin list.
+- [ ] **6.6** Separate debug/node-exploration code from functional code — move dump utilities (`TileDataDumper`, `StateComparisonLogger`, raw node scanning), debug UI buttons, and discovery helpers into a `Debug/` subfolder or namespace. Keep `Plugin.cs`, `MainWindow.cs`, and the `Mahjong/` folder focused on production functionality.
 
 ## Key Technical Decisions
 
