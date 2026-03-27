@@ -584,6 +584,21 @@
 
 **Result:** All 37 Doman Mahjong tile icons are now mapped. The mapping progress report should show `37/37` known tile codes with no missing entries.
 
+## 2026-03-27: Fix hand node range and drawn tile detection
+
+**What:** Expanded player hand node indices from 54–66 to 54–71 and replaced the incorrect node 107 draw slot with position-gap-based drawn tile detection.
+
+**Why:** User confirmed that node 107 (type 1022, 34x45) shows **another player's discard**, not the local player's drawn tile. Meanwhile, the actual drawn tile (P2) appeared at node 54 (pos=556), separated from the sorted hand by a ~52px gap vs normal ~42px tile spacing. Additionally, only 9 of 14 tiles were being read because nodes 67–71 (containing M1, M1, M2, M0, M7) fell outside the old Range(54, 13) hand slot range.
+
+**Changes made:**
+- `PlayerHandNodeIndices` expanded from `Range(54, 13)` to `Range(54, 18)` to cover all player hand nodes 54–71.
+- Removed `PlayerDrawNodeIndex = 107` — this node is not the player's draw.
+- Rewrote `BuildCanonicalDraw` to detect the drawn tile by finding the largest X-position gap between consecutive tiles in the sorted canonical hand. Normal tile spacing is ~42px; the drawn tile gap is ~52px+. Threshold set at 50px.
+- After detecting the draw tile, it's removed from the canonical hand list and emitted as `CanonicalPlayerDraw` instead.
+- Raised `BuildCanonicalHand` cap from 13 to 14 to allow the drawn tile through before gap detection runs.
+
+**Result:** The canonical hand should now correctly show all 13 hand tiles plus the drawn tile identified separately, matching the actual in-game hand layout.
+
 **What:** Created a dedicated execution-order test plan for collecting and validating all remaining Mahjong state information.
 
 **Why:** Needed a repeatable, low-effort workflow to systematically gather evidence, validate reader behavior, and triage failures without ad-hoc manual analysis loops.

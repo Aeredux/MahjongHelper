@@ -8,9 +8,9 @@ namespace SamplePlugin.Mahjong;
 
 public static unsafe class EmjUiReader
 {
-    // First scaffold based on currently observed EmjL layout.
-    private static readonly int[] PlayerHandNodeIndices = Enumerable.Range(54, 13).ToArray();
-    private const int PlayerDrawNodeIndex = 107;
+    // Player hand area uses nodes 54–71 (18 raw slots; not all are active at once).
+    // The drawn tile is identified by position gap, not a fixed node index.
+    private static readonly int[] PlayerHandNodeIndices = Enumerable.Range(54, 18).ToArray();
 
     public enum SlotKind
     {
@@ -95,13 +95,6 @@ public static unsafe class EmjUiReader
             slots.Add(slot);
         }
 
-        UiSlot? rawDraw = null;
-        if (TryReadNodeSlot(uld, PlayerDrawNodeIndex, iconCapture, iconMap, SlotKind.PlayerDraw, 0, out var drawSlot))
-        {
-            rawDraw = drawSlot;
-            slots.Add(drawSlot);
-        }
-
         var visibleCandidates = new List<UiSlot>();
 
         for (int i = 0; i < uld.NodeListCount; i++)
@@ -148,9 +141,18 @@ public static unsafe class EmjUiReader
             slots.Add(source with { Kind = SlotKind.CanonicalPlayerHand, SlotIndex = i });
         }
 
-        var canonicalDraw = BuildCanonicalDraw(rawDraw, visibleCandidates);
+        var canonicalDraw = BuildCanonicalDraw(canonicalHand);
         if (canonicalDraw != null)
+        {
+            // Remove the draw tile from the canonical hand list so it's not double-counted.
+            // Rebuild canonical hand slots without the draw tile and re-add them.
+            slots.RemoveAll(s => s.Kind == SlotKind.CanonicalPlayerHand);
+            var handWithoutDraw = canonicalHand.Where(s => s.NodeIndex != canonicalDraw.NodeIndex).ToList();
+            for (var i = 0; i < handWithoutDraw.Count; i++)
+                slots.Add(handWithoutDraw[i] with { Kind = SlotKind.CanonicalPlayerHand, SlotIndex = i });
+
             slots.Add(canonicalDraw with { Kind = SlotKind.CanonicalPlayerDraw, SlotIndex = 0 });
+        }
 
         return new UiState(slots, DateTime.UtcNow);
     }
@@ -174,25 +176,46 @@ public static unsafe class EmjUiReader
                 .ToList();
         }
 
-        if (filtered.Count > 13)
-            filtered = filtered.TakeLast(13).ToList();
+        if (filtered.Count > 14)
+            filtered = filtered.TakeLast(14).ToList();
 
         return filtered;
     }
 
-    private static UiSlot? BuildCanonicalDraw(UiSlot? rawDraw, List<UiSlot> visibleCandidates)
+    /// <summary>
+    /// Detects the drawn tile by finding a position gap significantly larger than
+    /// the normal tile spacing. In Mahjong UI, the drawn tile is visually separated
+    /// from the sorted hand by a wider gap (typically ~10+ pixels vs ~42 normal).
+    /// </summary>
+    private static UiSlot? BuildCanonicalDraw(List<UiSlot> canonicalHand)
     {
-        if (rawDraw != null && rawDraw.Visible && (rawDraw.IconId > 0 || rawDraw.X > 0))
-            return rawDraw;
+        if (canonicalHand.Count < 2)
+            return null;
 
-        // Fallback: pick rightmost non-hand-sized candidate if draw slot moved.
-        var fallback = visibleCandidates
-            .Where(slot => slot.Visible)
-            .Where(slot => slot.Width <= 36 || slot.NodeType == 1022)
-            .OrderByDescending(slot => slot.X)
-            .FirstOrDefault();
+        // Tiles should already be sorted by X.
+        // Find the largest gap between consecutive tiles.
+        float maxGap = 0;
+        int maxGapIndex = -1;
 
-        return fallback;
+        for (int i = 1; i < canonicalHand.Count; i++)
+        {
+            var gap = canonicalHand[i].X - canonicalHand[i - 1].X;
+            if (gap > maxGap)
+            {
+                maxGap = gap;
+                maxGapIndex = i;
+            }
+        }
+
+        // Normal tile spacing is ~42px (tile width). A drawn tile gap is noticeably larger.
+        // Use a threshold of 1.2x normal spacing to detect.
+        const float gapThreshold = 50f;
+
+        if (maxGap < gapThreshold || maxGapIndex < 0)
+            return null;
+
+        // The drawn tile is the one after the largest gap (rightmost separated tile).
+        return canonicalHand[maxGapIndex];
     }
 
     private static bool TryReadNodeSlot(AtkUldManager uld, int nodeIndex, IconIdCapture? iconCapture, MahjongIconMap? iconMap, SlotKind kind, int slotIndex, out UiSlot slot)
