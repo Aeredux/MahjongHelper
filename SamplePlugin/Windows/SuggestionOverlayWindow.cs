@@ -24,6 +24,9 @@ public class SuggestionOverlayWindow : Window, IDisposable
     public int? CurrentTurnIndex { get; set; } // 0=player
     public string? CallRecommendation { get; set; }
     public bool IsPlayerTurn => CurrentTurnIndex == 0;
+    public bool AutoPlayEnabled { get; set; }
+    public bool AutoPlayPaused { get; set; }
+    public string? PendingAutoAction { get; set; }
 
     public SuggestionOverlayWindow(Configuration configuration)
         : base("Mahjong Helper##Overlay")
@@ -105,6 +108,9 @@ public class SuggestionOverlayWindow : Window, IDisposable
 
         // Call recommendation if present
         DrawCallRecommendation();
+
+        // Auto-play status
+        DrawAutoPlayStatus();
     }
 
     private void DrawFull()
@@ -134,6 +140,9 @@ public class SuggestionOverlayWindow : Window, IDisposable
 
         // Call recommendation if present
         DrawCallRecommendation();
+
+        // Auto-play status
+        DrawAutoPlayStatus();
     }
 
     private void DrawHeader(SuggestMoveResponse? suggestion)
@@ -229,6 +238,25 @@ public class SuggestionOverlayWindow : Window, IDisposable
         ImGui.TextColored(Gold, "Call:");
         ImGui.SameLine();
         ImGui.TextWrapped(CallRecommendation);
+    }
+
+    private void DrawAutoPlayStatus()
+    {
+        if (!AutoPlayEnabled) return;
+
+        ImGui.Separator();
+        if (AutoPlayPaused)
+        {
+            ImGui.TextColored(Gray, "Auto-Play: PAUSED");
+        }
+        else if (!string.IsNullOrEmpty(PendingAutoAction))
+        {
+            ImGui.TextColored(Gold, $"Auto-Play: {PendingAutoAction}...");
+        }
+        else
+        {
+            ImGui.TextColored(Green, "Auto-Play: ON");
+        }
     }
 
     // Color constants

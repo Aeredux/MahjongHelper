@@ -1,4 +1,5 @@
 using Dalamud.Configuration;
+using Dalamud.Configuration;
 using System;
 
 namespace SamplePlugin;
@@ -16,6 +17,20 @@ public class Configuration : IPluginConfiguration
 
     /// <summary>Compact mode shows only the top suggestion in one line.</summary>
     public bool OverlayCompactMode { get; set; } = false;
+
+    // ─── Auto-Play Settings ───
+
+    /// <summary>Master toggle for auto-play (off by default).</summary>
+    public bool AutoPlayEnabled { get; set; } = false;
+
+    /// <summary>Auto-discard the suggested tile when it's the player's turn.</summary>
+    public bool AutoDiscardEnabled { get; set; } = true;
+
+    /// <summary>Auto-accept or decline call prompts based on server evaluation.</summary>
+    public bool AutoCallEnabled { get; set; } = true;
+
+    /// <summary>Delay in milliseconds before auto-actions execute (to look natural).</summary>
+    public int AutoPlayDelayMs { get; set; } = 1500;
 
     // The below exists just to make saving less cumbersome
     public void Save()

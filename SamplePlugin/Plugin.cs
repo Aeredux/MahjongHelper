@@ -91,12 +91,16 @@ public sealed class Plugin : IDalamudPlugin
     private bool _suggestInFlight;
     private bool _callEvalInFlight;
     private string _lastCallEvalSignature = string.Empty;
+    private AutoPlayManager _autoPlayManager = null!;
+    private nint _lastAddonAddress;
+    private EmjUiReader.UiState? _lastUiState;
 
     public Plugin()
     {
         _iconCapture = new IconIdCapture(GameInterop);
         _iconMap = new MahjongIconMap();
         _serverClient = new MahjongServerClient();
+        _autoPlayManager = new AutoPlayManager(Configuration, _iconMap);
         _emjReader = new EmjAddonReader();
         _readerScheduler = new AddonReaderScheduler(GameGui);
         _readerScheduler.AddObservedAddon(_emjReader);
@@ -119,7 +123,7 @@ public sealed class Plugin : IDalamudPlugin
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "/mj — toggle debug window | /mj overlay — toggle overlay | /mj compact — toggle compact mode"
+            HelpMessage = "/mj — toggle debug window | /mj overlay — toggle overlay | /mj compact — compact mode | /mj auto — toggle auto-play | /mj pause — pause auto-play"
         });
 
         // Tell the UI system that we want our windows to be drawn through the window system
@@ -284,6 +288,19 @@ public sealed class Plugin : IDalamudPlugin
             };
         }
 
+        // Auto-play: feed status to overlay and execute scheduled actions
+        OverlayWindow.AutoPlayEnabled = Configuration.AutoPlayEnabled;
+        OverlayWindow.AutoPlayPaused = _autoPlayManager.IsPaused;
+        OverlayWindow.PendingAutoAction = _autoPlayManager.PendingAction;
+        if (Configuration.AutoPlayEnabled && _lastAddonAddress != 0)
+        {
+            unsafe
+            {
+                var addonPtr = (AtkUnitBase*)_lastAddonAddress;
+                _autoPlayManager.Update(addonPtr);
+            }
+        }
+
         // Periodic server health check (every 30 seconds)
         if (now >= _nextHealthCheckUtc)
         {
@@ -308,6 +325,7 @@ public sealed class Plugin : IDalamudPlugin
 
             var handSnapshot = MahjongHandReader.Read(addon, _iconCapture, _iconMap);
             var uiState = EmjUiReader.Read(addon, _iconCapture, _iconMap);
+            _lastUiState = uiState;
             var eligibleIconIds = BuildEligibleIconSet(handSnapshot);
             _lastEligibleIconIds = eligibleIconIds;
             // Hover-learning disabled: unreliable mappings. Pivoting to memory probing.
@@ -345,6 +363,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         var addon = (AtkUnitBase*)addonPtr.Address;
+        _lastAddonAddress = addonPtr.Address;
 
         // (Optional) quick safety checks
         if (addon == null || addon->RootNode == null)
@@ -384,6 +403,7 @@ public sealed class Plugin : IDalamudPlugin
             try
             {
                 var uiStateFast = EmjUiReader.Read(addon, _iconCapture, _iconMap);
+                _lastUiState = uiStateFast;
                 MainWindow.text3 = uiStateFast.ToDisplayText();
                 _lastSuccessfulNodeUpdateUtc = DateTime.UtcNow;
                 TrackUiState(uiStateFast, "realtime");
@@ -413,6 +433,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             var handSnapshot = MahjongHandReader.Read(addon, _iconCapture, _iconMap);
             var uiState = EmjUiReader.Read(addon, _iconCapture, _iconMap);
+            _lastUiState = uiState;
             var eligibleIconIds = BuildEligibleIconSet(handSnapshot);
             _lastEligibleIconIds = eligibleIconIds;
             // Hover-learning disabled: unreliable mappings. Pivoting to memory probing.
@@ -920,6 +941,9 @@ public sealed class Plugin : IDalamudPlugin
                 if (response != null)
                 {
                     MainWindow.serverSuggestionText = FormatSuggestion(response);
+                    _autoPlayManager.OnSuggestionReceived(response,
+                        _lastMergedState?.GamePhase.Value,
+                        _lastUiState?.Slots);
                 }
                 else
                 {
@@ -994,6 +1018,7 @@ public sealed class Plugin : IDalamudPlugin
                     var confText = response.Confidence.HasValue ? $" ({response.Confidence:P0})" : "";
                     var reason = !string.IsNullOrEmpty(response.Reasoning) ? $" — {response.Reasoning}" : "";
                     OverlayWindow.CallRecommendation = $"{callType.ToUpperInvariant()} {callTile ?? "?"}: {action}{confText}{reason}";
+                    _autoPlayManager.OnCallEvalReceived(response, _lastMergedState?.GamePhase.Value);
                 }
                 else
                 {
@@ -1286,6 +1311,17 @@ public sealed class Plugin : IDalamudPlugin
         {
             Configuration.OverlayCompactMode = !Configuration.OverlayCompactMode;
             Configuration.Save();
+        }
+        else if (trimmed == "auto" || trimmed == "autoplay")
+        {
+            Configuration.AutoPlayEnabled = !Configuration.AutoPlayEnabled;
+            Configuration.Save();
+            if (!Configuration.AutoPlayEnabled)
+                _autoPlayManager.ClearPending();
+        }
+        else if (trimmed == "pause")
+        {
+            _autoPlayManager.TogglePause();
         }
         else
         {
