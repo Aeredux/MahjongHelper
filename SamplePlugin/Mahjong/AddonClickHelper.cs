@@ -37,18 +37,48 @@ public static unsafe class AddonClickHelper
 
     /// <summary>
     /// Fires a callback on the EmjL addon to accept or decline a call.
-    /// Currently in DISCOVERY MODE — logs the intended action but does NOT fire the callback.
-    /// callIndex: 0 = accept the call, 1 = pass/skip.
+    /// Currently in DISCOVERY MODE — logs the intended action but does NOT fire/click.
+    /// callIndex: 0 = accept, 1 = pass/skip.
     /// </summary>
     public static bool TryRespondToCall(AtkUnitBase* addon, int callIndex)
     {
         if (addon == null || callIndex < 0) return false;
 
-        // DISCOVERY MODE: log only, do not fire callback yet
         var action = callIndex == 0 ? "accept" : "pass";
         Log($"[DRY-RUN] Would respond to call: {action} (callIndex={callIndex})");
         LogAtkSnapshot(addon, $"pre-call-{action}");
-        return false; // Return false to indicate no action was taken
+        return false;
+    }
+
+    /// <summary>
+    /// Reads the visible text label from a call button component.
+    /// </summary>
+    private static string? FindButtonText(AtkComponentBase* comp)
+    {
+        if (comp == null) return null;
+
+        try
+        {
+            var childUld = comp->UldManager;
+            for (int i = 0; i < childUld.NodeListCount && i < 16; i++)
+            {
+                var cn = childUld.NodeList[i];
+                if (cn == null || cn->Type != NodeType.Text)
+                    continue;
+
+                bool vis = false;
+                try { vis = cn->IsVisible(); } catch { }
+                if (!vis) continue;
+
+                var txt = (AtkTextNode*)cn;
+                var text = System.Runtime.InteropServices.Marshal.PtrToStringUTF8((nint)txt->NodeText.StringPtr.Value);
+                if (!string.IsNullOrWhiteSpace(text))
+                    return text.Trim();
+            }
+        }
+        catch { }
+
+        return null;
     }
 
     /// <summary>
