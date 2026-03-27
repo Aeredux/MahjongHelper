@@ -95,6 +95,9 @@ public static unsafe class TileDataDumper
         // ─── Section 1g: Dora indicator discovery (center board area) ───
         DumpDoraDiscovery(sb, addon, iconCapture, iconMap);
 
+        // ─── Section 1h: Call prompt discovery ───
+        DumpCallPromptDiscovery(sb, addon);
+
         // ─── Section 2: Complete node list ───
         sb.AppendLine("--- FULL NODE LIST ---");
         sb.AppendLine("idx | nodeId | vis | pos(x,y) | size(w,h) | type | flags | color");
@@ -666,6 +669,102 @@ public static unsafe class TileDataDumper
     }
 
     // ─── Spatial tile classification for discard pool / dora discovery ───
+
+    /// <summary>
+    /// Dumps all visible non-tile component nodes and their text/image children
+    /// to help identify call prompt buttons (chi, pon, kan, ron, tsumo, riichi, skip).
+    /// </summary>
+    private static void DumpCallPromptDiscovery(StringBuilder sb, AtkUnitBase* addon)
+    {
+        sb.AppendLine("--- CALL PROMPT DISCOVERY ---");
+        try
+        {
+            var uld = addon->UldManager;
+            for (int i = 0; i < uld.NodeListCount; i++)
+            {
+                try
+                {
+                    var n = uld.NodeList[i];
+                    if (n == null) continue;
+                    var type = (int)n->Type;
+                    if (type < 1000) continue;
+
+                    // Skip known tile types
+                    if (type == 1021 || type == 1022 || type == 1023 || type == 1024 || type == 1055)
+                        continue;
+
+                    bool vis = false;
+                    try { vis = n->IsVisible(); } catch { }
+                    if (!vis) continue;
+
+                    // Skip tile-sized nodes
+                    if ((n->Width == 34 && n->Height == 45) || (n->Width == 42 && n->Height == 55))
+                        continue;
+
+                    var comp = (AtkComponentNode*)n;
+                    if (comp->Component == null) continue;
+                    var childUld = comp->Component->UldManager;
+
+                    // Collect text and image info from children
+                    var childInfo = new List<string>();
+                    for (int j = 0; j < childUld.NodeListCount && j < 64; j++)
+                    {
+                        try
+                        {
+                            var cn = childUld.NodeList[j];
+                            if (cn == null) continue;
+
+                            bool cVis = false;
+                            try { cVis = cn->IsVisible(); } catch { }
+
+                            if (cn->Type == NodeType.Text)
+                            {
+                                var txt = (AtkTextNode*)cn;
+                                string text = "";
+                                try { text = Marshal.PtrToStringUTF8((nint)txt->NodeText.StringPtr.Value) ?? ""; } catch { }
+                                if (!string.IsNullOrWhiteSpace(text))
+                                    childInfo.Add($"text[{j}]={text.Trim()} vis={cVis} id={cn->NodeId}");
+                            }
+                            else if (cn->Type == NodeType.Image)
+                            {
+                                uint iconId = 0;
+                                try
+                                {
+                                    var img = (AtkImageNode*)cn;
+                                    if (img->PartsList != null && img->PartId < img->PartsList->PartCount)
+                                    {
+                                        var part = img->PartsList->Parts[img->PartId];
+                                        if (part.UldAsset != null && part.UldAsset->AtkTexture.Resource != null)
+                                            iconId = part.UldAsset->AtkTexture.Resource->IconId;
+                                    }
+                                }
+                                catch { }
+                                if (iconId > 0)
+                                    childInfo.Add($"img[{j}]=icon{iconId} vis={cVis} id={cn->NodeId}");
+                            }
+                        }
+                        catch { }
+                    }
+
+                    // Only dump components that have text or icon children
+                    if (childInfo.Count > 0)
+                    {
+                        uint parentId = 0;
+                        try { if (n->ParentNode != null) parentId = n->ParentNode->NodeId; } catch { }
+                        sb.AppendLine($"  [{i,3}] id={n->NodeId} type={type} pos=({n->X:F0},{n->Y:F0}) size=({n->Width},{n->Height}) parent={parentId}");
+                        foreach (var info in childInfo)
+                            sb.AppendLine($"      {info}");
+                    }
+                }
+                catch { }
+            }
+        }
+        catch (Exception ex)
+        {
+            sb.AppendLine($"  ERROR: {ex.Message}");
+        }
+        sb.AppendLine();
+    }
 
     /// <summary>
     /// Scans for potential dora indicator tiles by walking the RootNode child tree.

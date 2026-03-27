@@ -461,6 +461,9 @@ public static unsafe class EmjUiReader
         // Detect call prompts from visible button-like components
         var availableCalls = ReadCallPrompts(addon);
 
+        // Log AtkValues changes for call prompt discovery
+        LogAtkValuesIfChanged(addon);
+
         // Infer game phase from available signals
         var phase = InferGamePhase(addon, availableCalls, rawAtkInts);
 
@@ -707,9 +710,41 @@ public static unsafe class EmjUiReader
     /// offers a call decision. The presence/visibility of these components indicates
     /// which calls are available.
     /// </summary>
+    private static string _lastCallDebugSignature = "";
+    private static string _lastAtkValuesSignature = "";
+
+    /// <summary>
+    /// Logs the first 16 AtkValues whenever they change, to discover which
+    /// indices encode call prompt availability.
+    /// </summary>
+    private static void LogAtkValuesIfChanged(AtkUnitBase* addon)
+    {
+        try
+        {
+            var count = Math.Min((int)addon->AtkValuesCount, 16);
+            var vals = new int[count];
+            for (int i = 0; i < count; i++)
+            {
+                try { vals[i] = addon->AtkValues[i].Int; }
+                catch { vals[i] = -1; }
+            }
+
+            var sig = string.Join(",", vals);
+            if (sig == _lastAtkValuesSignature) return;
+            _lastAtkValuesSignature = sig;
+
+            var logDir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MahjongHelper");
+            System.IO.Directory.CreateDirectory(logDir);
+            var line = $"[{DateTime.UtcNow:O}] AtkValues[0..{count - 1}]: {sig}\n";
+            System.IO.File.AppendAllText(System.IO.Path.Combine(logDir, "atkvalues_changes.log"), line);
+        }
+        catch { }
+    }
+
     private static CallOptions ReadCallPrompts(AtkUnitBase* addon)
     {
         var calls = CallOptions.None;
+        var debugTexts = new List<string>();
 
         try
         {
@@ -758,6 +793,8 @@ public static unsafe class EmjUiReader
                             if (string.IsNullOrWhiteSpace(text)) continue;
                             var lower = text.Trim().ToLowerInvariant();
 
+                            debugTexts.Add($"[{i}:{j}] type={(int)n->Type} size=({n->Width},{n->Height}) id={n->NodeId} text=\"{text.Trim()}\"");
+
                             // Match common call prompt text (English and Japanese)
                             if (lower.Contains("chi") || lower.Contains("チー"))
                                 calls |= CallOptions.Chi;
@@ -782,6 +819,25 @@ public static unsafe class EmjUiReader
             }
         }
         catch { }
+
+        // Log text found for debugging call detection issues (throttled — only on change)
+        if (debugTexts.Count > 0)
+        {
+            var currentSig = $"{calls}|{debugTexts.Count}|{string.Join("|", debugTexts)}";
+            if (currentSig != _lastCallDebugSignature)
+            {
+                _lastCallDebugSignature = currentSig;
+                try
+                {
+                    var logDir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MahjongHelper");
+                    System.IO.Directory.CreateDirectory(logDir);
+                    var entry = $"[{DateTime.UtcNow:O}] calls={calls} texts={debugTexts.Count}\n" +
+                                string.Join("\n", debugTexts) + "\n\n";
+                    System.IO.File.AppendAllText(System.IO.Path.Combine(logDir, "call_prompt_debug.log"), entry);
+                }
+                catch { }
+            }
+        }
 
         return calls;
     }
