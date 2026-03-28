@@ -1004,10 +1004,13 @@ public static unsafe class EmjUiReader
 
     private static List<UiSlot> BuildCanonicalHand(List<UiSlot> rawHand)
     {
-        // Known noisy pattern: some fixed hand indices are placeholders at x=0 with no icon.
-        // Canonical view prioritizes visible, positioned slots and falls back to icon-positive slots.
+        // Real hand tiles are nodes 59-71 (ids 134, 1340001-1340012).
+        // Nodes 54-58 (ids 135, 1340013-1340016) are placeholders/overflow that can have
+        // stale icons and X=0 position — they must be excluded from the canonical hand.
+        // Node 54 (id=135) is the drawn tile slot, handled separately by DetectDrawnTile.
         var filtered = rawHand
             .Where(slot => slot.Visible)
+            .Where(slot => slot.NodeIndex >= 59 && slot.NodeIndex <= 71)
             .Where(slot => slot.X > 0 || slot.IconId > 0)
             .OrderBy(slot => slot.X)
             .ThenBy(slot => slot.SlotIndex)
@@ -1017,13 +1020,13 @@ public static unsafe class EmjUiReader
         {
             filtered = rawHand
                 .Where(slot => slot.Visible)
+                .Where(slot => slot.NodeIndex >= 59 && slot.NodeIndex <= 71)
                 .OrderBy(slot => slot.SlotIndex)
                 .ToList();
         }
 
         // Remove duplicate tiles at the same X position (lingering discards).
         // When multiple tiles appear at the same X, keep only the one with the lowest SlotIndex.
-        // This filters out discards that haven't been moved to the discard pool yet.
         var deduped = filtered
             .GroupBy(slot => slot.X)
             .Select(g => g.OrderBy(s => s.SlotIndex).First())
