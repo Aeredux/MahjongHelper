@@ -953,20 +953,11 @@ public static unsafe class EmjUiReader
     /// </summary>
     private static GamePhase InferGamePhase(AtkUnitBase* addon, CallOptions availableCalls, IReadOnlyList<int> rawAtkInts)
     {
-        // If call prompts are visible, we're in a call decision
-        if (availableCalls.HasFlag(CallOptions.Ron))
-            return GamePhase.RonDecisionPrompt;
-        if (availableCalls.HasFlag(CallOptions.Tsumo))
-            return GamePhase.TsumoDecisionPrompt;
-        if (availableCalls.HasFlag(CallOptions.Riichi))
-            return GamePhase.RiichiDecisionPrompt;
-        if (availableCalls != CallOptions.None && availableCalls != CallOptions.Skip)
-            return GamePhase.CallDecisionPrompt;
-
-        // AtkValues[0] encodes the game phase:
+        // AtkValues[0] is the most reliable phase indicator:
         //   30 = player's turn to discard (drawn tile received)
-        //   6  = call decision prompt (already handled above via call options)
+        //   6  = call decision prompt
         //   15 = turn in progress (opponent playing or animation)
+        // Check this FIRST — call button visibility can be stale.
         if (rawAtkInts.Count > 0)
         {
             switch (rawAtkInts[0])
@@ -975,8 +966,29 @@ public static unsafe class EmjUiReader
                     return GamePhase.WaitingForDiscard;
                 case 15:
                     return GamePhase.OpponentTurn;
+                case 6:
+                    // AtkValues confirms call prompt — use call options to determine type
+                    if (availableCalls.HasFlag(CallOptions.Ron))
+                        return GamePhase.RonDecisionPrompt;
+                    if (availableCalls.HasFlag(CallOptions.Tsumo))
+                        return GamePhase.TsumoDecisionPrompt;
+                    if (availableCalls.HasFlag(CallOptions.Riichi))
+                        return GamePhase.RiichiDecisionPrompt;
+                    if (availableCalls != CallOptions.None && availableCalls != CallOptions.Skip)
+                        return GamePhase.CallDecisionPrompt;
+                    return GamePhase.CallDecisionPrompt; // AtkValues says call prompt even if buttons not detected
             }
         }
+
+        // Fallback: use call options if AtkValues not available
+        if (availableCalls.HasFlag(CallOptions.Ron))
+            return GamePhase.RonDecisionPrompt;
+        if (availableCalls.HasFlag(CallOptions.Tsumo))
+            return GamePhase.TsumoDecisionPrompt;
+        if (availableCalls.HasFlag(CallOptions.Riichi))
+            return GamePhase.RiichiDecisionPrompt;
+        if (availableCalls != CallOptions.None && availableCalls != CallOptions.Skip)
+            return GamePhase.CallDecisionPrompt;
 
         return GamePhase.Unknown;
     }
