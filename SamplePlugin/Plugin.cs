@@ -956,6 +956,11 @@ public sealed class Plugin : IDalamudPlugin
         if (_serverClient.IsHealthy != true || _suggestInFlight)
             return;
 
+        // Only request during actual gameplay phases
+        var phase = state.GamePhase.Value;
+        if (phase == "BetweenRounds" || phase == "GameOver" || phase == "Unknown")
+            return;
+
         // Only request when player has a hand with tiles
         var request = GameStateMapper.BuildSuggestMoveRequest(state, _iconMap);
         if (request == null || request.Hand.Count == 0)

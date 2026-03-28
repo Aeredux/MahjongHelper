@@ -1004,13 +1004,12 @@ public static unsafe class EmjUiReader
 
     private static List<UiSlot> BuildCanonicalHand(List<UiSlot> rawHand)
     {
-        // Real hand tiles are nodes 59-71 (ids 134, 1340001-1340012).
-        // Nodes 54-58 (ids 135, 1340013-1340016) are placeholders/overflow that can have
-        // stale icons and X=0 position — they must be excluded from the canonical hand.
-        // Node 54 (id=135) is the drawn tile slot, handled separately by DetectDrawnTile.
+        // Real hand tiles are nodes 59-71 (ids 134, 1340001-1340012) = 13 hand slots.
+        // Node 54 (id=135) is the drawn tile slot — include it so BuildCanonicalDraw can detect the gap.
+        // Nodes 55-58 (ids 1340013-1340016) are placeholders that can have stale icons — exclude them.
         var filtered = rawHand
             .Where(slot => slot.Visible)
-            .Where(slot => slot.NodeIndex >= 59 && slot.NodeIndex <= 71)
+            .Where(slot => slot.NodeIndex == 54 || (slot.NodeIndex >= 59 && slot.NodeIndex <= 71))
             .Where(slot => slot.X > 0 || slot.IconId > 0)
             .OrderBy(slot => slot.X)
             .ThenBy(slot => slot.SlotIndex)
@@ -1020,7 +1019,7 @@ public static unsafe class EmjUiReader
         {
             filtered = rawHand
                 .Where(slot => slot.Visible)
-                .Where(slot => slot.NodeIndex >= 59 && slot.NodeIndex <= 71)
+                .Where(slot => slot.NodeIndex == 54 || (slot.NodeIndex >= 59 && slot.NodeIndex <= 71))
                 .OrderBy(slot => slot.SlotIndex)
                 .ToList();
         }
