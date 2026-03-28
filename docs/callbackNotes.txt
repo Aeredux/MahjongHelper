@@ -3,6 +3,7 @@ Callback ID sweep results (using /mj firecb <id> <slot> run):
 
 7: DISCARD SPECIFIC TILE — second value is hand position (0 = leftmost tile in sorted hand)
 8: DISCARD DRAWN TILE (tsumogiri) — always discards the drawn tile regardless of second value
+   ALSO: skip/pass on call prompts (any second value works)
 10: causes a "draw" (ryuukyoku/tie screen) — forces end-of-round with no winner. Game gets stuck after.
 16: causes a withdraw from the match prompt
 18: tries to resize the HUD
@@ -13,4 +14,4 @@ Other IDs (0-6, 9, 11-15, 17): no visible effect
 
 Usage:
   FireCallback(2, [7, handPos], true)  — discard tile at handPos (0-based from left)
-  FireCallback(2, [8, 0], true)        — discard drawn tile (tsumogiri)
+  FireCallback(2, [8, 0], true)        — discard drawn tile (tsumogiri) OR skip call prompt

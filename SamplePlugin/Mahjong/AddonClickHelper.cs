@@ -21,7 +21,8 @@ public static unsafe class AddonClickHelper
 
     private const int CallbackIdDiscardTile = 7;
     private const int CallbackIdDiscardDrawn = 8;
-    private const int CallbackIdSkipCall = 9;
+    // Callback 8 also works as skip/pass on call prompts
+    private const int CallbackIdSkipCall = 8;
 
     /// <summary>
     /// Discards a tile at the given hand position (0 = leftmost in sorted hand).
