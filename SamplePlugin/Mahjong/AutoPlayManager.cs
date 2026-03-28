@@ -72,6 +72,23 @@ public sealed class AutoPlayManager
     }
 
     /// <summary>
+    /// Called on every game state update (every frame the addon is drawn).
+    /// Re-checks scheduling in case the phase changed after a suggestion was already cached.
+    /// </summary>
+    public void OnGameStateUpdate(string? gamePhase, IReadOnlyList<EmjUiReader.UiSlot>? handSlots)
+    {
+        var prevPhase = _lastGamePhase;
+        _lastGamePhase = gamePhase;
+        _lastHandSlots = handSlots;
+
+        // If phase just changed to WaitingForDiscard and we have a pending suggestion, try scheduling
+        if (gamePhase == "WaitingForDiscard" && prevPhase != "WaitingForDiscard")
+        {
+            TryScheduleDiscard();
+        }
+    }
+
+    /// <summary>
     /// Called every frame from OnFrameworkUpdate. Executes scheduled actions when the delay expires.
     /// Returns true if an action was executed this frame.
     /// </summary>
@@ -232,10 +249,18 @@ public sealed class AutoPlayManager
 
     private unsafe bool ExecuteCallResponse(AtkUnitBase* addon, int callIndex)
     {
-        var action = callIndex == 0 ? "accept" : "pass";
-        Log($"[DRY-RUN] Executing call response: {action}");
-        // Call response still in dry-run mode
-        return false;
+        if (callIndex == 0)
+        {
+            // Accept call — not yet implemented, need to discover callback IDs for Pon/Chi/Kan/Ron
+            Log($"[DRY-RUN] Accepting call not yet implemented");
+            return false;
+        }
+        else
+        {
+            // Skip/pass — use callback 9
+            Log($"Executing call response: skip/pass");
+            return AddonClickHelper.TrySkipCall(addon);
+        }
     }
 
     private static void Log(string message)

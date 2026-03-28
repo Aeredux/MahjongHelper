@@ -887,6 +887,9 @@ public sealed class Plugin : IDalamudPlugin
         // Passive action-probe snapshot for callback discovery
         LogActionProbe(merged, source);
 
+        // Update auto-play manager with latest game state (for scheduling)
+        _autoPlayManager.OnGameStateUpdate(merged.GamePhase.Value, _lastUiState?.Slots);
+
         // Trigger server suggest-move when state changes
         TryRequestSuggestion(merged);
 

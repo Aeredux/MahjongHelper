@@ -21,6 +21,7 @@ public static unsafe class AddonClickHelper
 
     private const int CallbackIdDiscardTile = 7;
     private const int CallbackIdDiscardDrawn = 8;
+    private const int CallbackIdSkipCall = 9;
 
     /// <summary>
     /// Discards a tile at the given hand position (0 = leftmost in sorted hand).
@@ -74,6 +75,34 @@ public static unsafe class AddonClickHelper
         catch (Exception ex)
         {
             Log($"ERROR discarding drawn tile: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Skips/passes on a call prompt (Pon, Chi, Kan, Ron, etc.).
+    /// Uses FireCallback(2, [9, 0], true).
+    /// </summary>
+    public static bool TrySkipCall(AtkUnitBase* addon)
+    {
+        if (addon == null) return false;
+
+        try
+        {
+            LogAtkSnapshot(addon, "pre-skip-call");
+
+            var values = stackalloc AtkValue[2];
+            values[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = CallbackIdSkipCall };
+            values[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 0 };
+            addon->FireCallback(2, values, true);
+
+            Log($"[CALL] Fired callback 9 (skip/pass)");
+            LogAtkSnapshot(addon, "post-skip-call");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log($"ERROR skipping call: {ex.Message}");
             return false;
         }
     }
