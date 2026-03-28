@@ -597,3 +597,19 @@ Features:
 **Result:**
 - Discovery is now file-driven and reproducible (`action_probe.log`, `autoplay.log`, `server_log.txt`) and supports controlled callback probing from commands.
 - No production behavior changed for players (automation remains safe dry-run until callback IDs are confirmed).
+
+## 2026-03-27: Fix Stale Icon ID Reading in Hand Tiles
+
+**What:** Fixed incorrect hand tile readings caused by stale hook-captured icon IDs.
+
+**Why:** Users reported hand tiles showing wrong tile codes (e.g., SOUTH instead of M2). Root cause: `TryFindIconRecursive` in `EmjUiReader.cs` prioritized the `IconIdCapture` hook cache over the direct struct read. When the game reuses image node addresses for different tiles without re-calling `LoadIconTexture`, the hook cache retains stale icon IDs from previous tile states. The struct-based read (`TryReadIconIdFromStruct`) reads the ground truth from the texture resource chain and always reflects the currently loaded texture.
+
+**Changes:**
+- `EmjUiReader.cs`
+  - Swapped icon read priority in `TryFindIconRecursive`: struct-based read (`TryReadIconIdFromStruct`) now runs first as ground truth; hook-based `IconIdCapture` is used as fallback only (useful after mid-game plugin reload when struct chain may not yet be populated).
+  - Added `TryReadIconIdFromStructPublic` public wrapper so `MahjongHandReader` can also use the struct-based read.
+- `MahjongHandReader.cs`
+  - Applied same fix to `TryFindCapturedIconRecursive`: struct read first, hook capture as fallback.
+- `MahjongIconMap.cs`
+  - Added diagnostic logging in `Resolve`: when an icon ID in the mahjong range (76041-76150) has no mapping, logs it to `%APPDATA%/MahjongHelper/unmapped_icons.log` (deduplicated per session).
+  - This enables self-serve discovery of alternate tile set icon IDs (e.g., icon 76127 observed for what should be NORTH).

@@ -120,8 +120,27 @@ public sealed unsafe class MahjongIconMap
         }
     }
 
+    private static readonly string UnmappedIconLogPath = Path.Combine(CacheDirectory, "unmapped_icons.log");
+    private static readonly HashSet<uint> _loggedUnmappedIcons = new();
+
     public string? Resolve(uint iconId)
-        => _iconIdToTileCode.TryGetValue(iconId, out var tileCode) ? tileCode : null;
+    {
+        if (_iconIdToTileCode.TryGetValue(iconId, out var tileCode))
+            return tileCode;
+
+        if (IsLikelyMahjongIconId(iconId) && _loggedUnmappedIcons.Add(iconId))
+        {
+            try
+            {
+                Directory.CreateDirectory(CacheDirectory);
+                var line = $"[{DateTime.UtcNow:O}] Unmapped mahjong icon ID: {iconId}\n";
+                File.AppendAllText(UnmappedIconLogPath, line);
+            }
+            catch { }
+        }
+
+        return null;
+    }
 
     public IReadOnlyDictionary<uint, string> Snapshot()
         => new Dictionary<uint, string>(_iconIdToTileCode);

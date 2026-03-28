@@ -247,6 +247,13 @@ public static unsafe class MahjongHandReader
             if (root->Type == NodeType.Image)
             {
                 var image = (AtkImageNode*)root;
+
+                // Primary: read ground-truth icon ID from the texture resource chain.
+                iconId = EmjUiReader.TryReadIconIdFromStructPublic(image);
+                if (iconId > 0)
+                    return true;
+
+                // Fallback: hook-based capture (useful after mid-game plugin reload).
                 iconId = capture.GetIconId((nint)image);
                 if (iconId > 0)
                     return true;

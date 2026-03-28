@@ -1138,20 +1138,22 @@ public static unsafe class EmjUiReader
             {
                 var image = (AtkImageNode*)root;
 
-                // Primary path: hook-based capture (fastest, works when hook has fired)
+                // Primary path: read icon ID directly from the texture resource chain.
+                // This is the ground truth — it reflects the currently loaded texture,
+                // even when the game reuses image nodes for different tiles without
+                // re-calling LoadIconTexture (which would leave the hook cache stale).
+                iconId = TryReadIconIdFromStruct(image);
+                if (iconId > 0)
+                    return true;
+
+                // Fallback: hook-based capture (useful after mid-game plugin reload
+                // when the struct chain may not yet be populated).
                 if (capture != null)
                 {
                     iconId = capture.GetIconId((nint)image);
                     if (iconId > 0)
                         return true;
                 }
-
-                // Fallback: read icon ID directly from the texture resource chain.
-                // This works even after mid-game plugin reload when the LoadIconTexture
-                // hook hasn't fired yet for already-loaded tile textures.
-                iconId = TryReadIconIdFromStruct(image);
-                if (iconId > 0)
-                    return true;
             }
 
             for (var child = root->ChildNode; child != null; child = child->NextSiblingNode)
@@ -1182,6 +1184,12 @@ public static unsafe class EmjUiReader
 
         return false;
     }
+
+    /// <summary>
+    /// Public wrapper for TryReadIconIdFromStruct, used by MahjongHandReader.
+    /// </summary>
+    public static uint TryReadIconIdFromStructPublic(AtkImageNode* image)
+        => TryReadIconIdFromStruct(image);
 
     /// <summary>
     /// Reads the icon ID directly from the AtkImageNode texture resource chain:
