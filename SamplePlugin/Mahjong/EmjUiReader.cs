@@ -966,41 +966,10 @@ public static unsafe class EmjUiReader
     {
         var atkPhase = rawAtkInts.Count > 0 ? rawAtkInts[0] : -1;
 
-        // AtkValues[0]=6 is the authoritative call decision indicator
-        if (atkPhase == 6)
-        {
-            if (availableCalls.HasFlag(CallOptions.Ron))
-                return GamePhase.RonDecisionPrompt;
-            if (availableCalls.HasFlag(CallOptions.Tsumo))
-                return GamePhase.TsumoDecisionPrompt;
-            if (availableCalls.HasFlag(CallOptions.Riichi))
-                return GamePhase.RiichiDecisionPrompt;
-            if (availableCalls != CallOptions.None && availableCalls != CallOptions.Skip)
-                return GamePhase.CallDecisionPrompt;
-            return GamePhase.CallDecisionPrompt;
-        }
-
-        // AtkValues[0]=30 usually means player's discard turn,
-        // BUT if Ron/Tsumo/Riichi buttons are visible, the game is still in a call prompt.
-        // Call button visibility can lag behind AtkValues changes.
-        if (atkPhase == 30)
-        {
-            if (availableCalls.HasFlag(CallOptions.Ron))
-                return GamePhase.RonDecisionPrompt;
-            if (availableCalls.HasFlag(CallOptions.Tsumo))
-                return GamePhase.TsumoDecisionPrompt;
-            if (availableCalls.HasFlag(CallOptions.Riichi))
-                return GamePhase.RiichiDecisionPrompt;
-            // Chi/Pon/Kan with Skip is a normal call prompt — but only trust it
-            // if AtkValues[0] was recently 6 (not 30). Since we can't track history here,
-            // ignore non-critical calls when AtkValues says discard turn.
-            return GamePhase.WaitingForDiscard;
-        }
-
-        if (atkPhase == 15)
-            return GamePhase.OpponentTurn;
-
-        // Fallback: use call options if AtkValues not recognized
+        // PRIORITY: If call buttons are visible, we are ALWAYS in a call decision,
+        // regardless of what AtkValues[0] says. AtkValues[0] can be 6, 15, 29, or 30
+        // during active call prompts — it does NOT reliably distinguish call prompts
+        // from other phases.
         if (availableCalls.HasFlag(CallOptions.Ron))
             return GamePhase.RonDecisionPrompt;
         if (availableCalls.HasFlag(CallOptions.Tsumo))
@@ -1009,6 +978,16 @@ public static unsafe class EmjUiReader
             return GamePhase.RiichiDecisionPrompt;
         if (availableCalls != CallOptions.None && availableCalls != CallOptions.Skip)
             return GamePhase.CallDecisionPrompt;
+
+        // No call buttons visible — use AtkValues[0] for phase detection
+        if (atkPhase == 6)
+            return GamePhase.CallDecisionPrompt; // rare: AtkValues says call but no buttons found
+
+        if (atkPhase == 30)
+            return GamePhase.WaitingForDiscard;
+
+        if (atkPhase == 15)
+            return GamePhase.OpponentTurn;
 
         return GamePhase.Unknown;
     }

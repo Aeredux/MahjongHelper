@@ -522,10 +522,97 @@ public static unsafe class AddonClickHelper
                     break;
 
                 default:
-                    // Method 0: diagnostic only — log button info, don't click
-                    Log($"[CALL-CLICK] Method 0: info only. Use '/mj clickcall {callName} <1-5> run' to test individual methods.");
-                    Log($"[CALL-CLICK]   1=ButtonClick(25) on comp, 2=ButtonClick(25) on addon, " +
-                        $"3=MouseClick(9) on addon, 4=Press+Release+Click sequence, 5=ListItemClick(35)");
+                    // Method 0: deep diagnostic — dump button info, parent chain, event registrations
+                    Log($"[CALL-CLICK] Method 0: DIAGNOSTIC for {callName}");
+                    Log($"[CALL-CLICK]   node: id={node->NodeId} type={nodeType} flags={(uint)node->NodeFlags:X} " +
+                        $"drawFlags={(uint)node->DrawFlags:X}");
+                    
+                    // Walk parent chain
+                    try
+                    {
+                        var parent = node->ParentNode;
+                        int parentDepth = 0;
+                        while (parent != null && parentDepth < 10)
+                        {
+                            var pType = (int)parent->Type;
+                            var pVis = false;
+                            try { pVis = parent->IsVisible(); } catch { }
+                            Log($"[CALL-CLICK]   parent[{parentDepth}]: id={parent->NodeId} type={pType} " +
+                                $"visible={pVis} pos=({parent->X},{parent->Y}) size=({parent->Width}x{parent->Height})");
+                            parent = parent->ParentNode;
+                            parentDepth++;
+                        }
+                    }
+                    catch (Exception pex) { Log($"[CALL-CLICK]   parent walk error: {pex.Message}"); }
+
+                    // Dump ALL AtkValues (not just first 20)
+                    try
+                    {
+                        var totalVals = (int)addon->AtkValuesCount;
+                        Log($"[CALL-CLICK]   AtkValues total count: {totalVals}");
+                        var sb = new System.Text.StringBuilder();
+                        for (int i = 0; i < totalVals && i < 200; i++)
+                        {
+                            try
+                            {
+                                var v = addon->AtkValues[i];
+                                var typeStr = v.Type.ToString();
+                                if (v.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int)
+                                    sb.Append($"[{i}]i={v.Int} ");
+                                else if (v.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.UInt)
+                                    sb.Append($"[{i}]u={v.UInt} ");
+                                else if (v.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String)
+                                {
+                                    string s;
+                                    try { s = Marshal.PtrToStringUTF8((nint)v.String.Value) ?? "null"; }
+                                    catch { s = "err"; }
+                                    sb.Append($"[{i}]s=\"{s}\" ");
+                                }
+                                else
+                                    sb.Append($"[{i}]{typeStr}={v.Int} ");
+
+                                // Log in chunks to avoid line length issues
+                                if (sb.Length > 300)
+                                {
+                                    Log($"[CALL-CLICK]   AtkVals: {sb}");
+                                    sb.Clear();
+                                }
+                            }
+                            catch { sb.Append($"[{i}]=? "); }
+                        }
+                        if (sb.Length > 0)
+                            Log($"[CALL-CLICK]   AtkVals: {sb}");
+                    }
+                    catch (Exception vex) { Log($"[CALL-CLICK]   AtkValues dump error: {vex.Message}"); }
+
+                    // Dump button's child nodes
+                    try
+                    {
+                        var btnUld = comp->UldManager;
+                        Log($"[CALL-CLICK]   button child nodes: {btnUld.NodeListCount}");
+                        for (int ci = 0; ci < btnUld.NodeListCount && ci < 20; ci++)
+                        {
+                            var cn = btnUld.NodeList[ci];
+                            if (cn == null) continue;
+                            var cnVis = false;
+                            try { cnVis = cn->IsVisible(); } catch { }
+                            var cnText = "";
+                            if (cn->Type == NodeType.Text)
+                            {
+                                try
+                                {
+                                    var tn = (AtkTextNode*)cn;
+                                    cnText = $" text=\"{Marshal.PtrToStringUTF8((nint)tn->NodeText.StringPtr.Value)}\"";
+                                }
+                                catch { }
+                            }
+                            Log($"[CALL-CLICK]   child[{ci}]: id={cn->NodeId} type={(int)cn->Type} " +
+                                $"visible={cnVis} pos=({cn->X},{cn->Y}) size=({cn->Width}x{cn->Height}){cnText}");
+                        }
+                    }
+                    catch (Exception cex) { Log($"[CALL-CLICK]   child dump error: {cex.Message}"); }
+
+                    Log($"[CALL-CLICK]   Use '/mj clickcall {callName} <1-5> run' to test click methods.");
                     result = false;
                     break;
             }
@@ -546,48 +633,61 @@ public static unsafe class AddonClickHelper
     private static int _sweepIndex = 0;
 
     // Candidate callback patterns to try during a call prompt.
-    // Based on known IDs: 7=discard, 8=tsumogiri/skip, 10=draw, 16=withdraw, 19/20=close
-    // Untested during call prompts: 0-6, 9, 11-15
-    // Also try 3-value patterns and different second values.
+    // Phase 1 (exhausted): IDs 0-6, 9, 11-15 with values 0-2
+    // Phase 2: higher IDs, 3-value patterns, known working IDs with unusual second values
     private static readonly int[][] SweepCandidates = new[]
     {
-        // IDs that showed "no effect" during normal play — may work during call prompt
-        new[] { 0, 0 },
-        new[] { 1, 0 },
-        new[] { 2, 0 },
-        new[] { 3, 0 },
-        new[] { 4, 0 },
-        new[] { 5, 0 },
-        new[] { 6, 0 },
-        new[] { 9, 0 },
-        new[] { 11, 0 },
-        new[] { 12, 0 },
-        new[] { 13, 0 },
-        new[] { 14, 0 },
-        new[] { 15, 0 },
-        // Try with second value = 1 (might select specific call option)
-        new[] { 0, 1 },
-        new[] { 1, 1 },
-        new[] { 2, 1 },
-        new[] { 3, 1 },
-        new[] { 4, 1 },
-        new[] { 5, 1 },
-        new[] { 6, 1 },
-        new[] { 9, 1 },
-        new[] { 11, 1 },
-        new[] { 12, 1 },
-        new[] { 13, 1 },
-        new[] { 14, 1 },
-        new[] { 15, 1 },
-        // Try with second value = 2
-        new[] { 0, 2 },
-        new[] { 1, 2 },
-        new[] { 2, 2 },
-        new[] { 3, 2 },
-        new[] { 4, 2 },
-        new[] { 5, 2 },
-        new[] { 6, 2 },
-        new[] { 9, 2 },
+        // Higher callback IDs not yet tested
+        new[] { 17, 0 },
+        new[] { 18, 0 },
+        new[] { 21, 0 },
+        new[] { 22, 0 },
+        new[] { 23, 0 },
+        new[] { 24, 0 },
+        new[] { 25, 0 },
+        new[] { 26, 0 },
+        new[] { 27, 0 },
+        new[] { 28, 0 },
+        new[] { 29, 0 },
+        new[] { 30, 0 },
+        // Single-value patterns (some addons use 1-arg callbacks)
+        new[] { 1 },
+        new[] { 2 },
+        new[] { 3 },
+        new[] { 4 },
+        new[] { 5 },
+        new[] { 6 },
+        new[] { 9 },
+        new[] { 10 },
+        new[] { 11 },
+        new[] { 12 },
+        // 3-value patterns: [callbackId, callType, detail]
+        // callType might encode chi=0, pon=1, kan=2, ron=3 or similar
+        new[] { 7, 0, 0 },
+        new[] { 7, 0, 1 },
+        new[] { 7, 1, 0 },
+        new[] { 7, 1, 1 },
+        new[] { 7, 2, 0 },
+        new[] { 7, 3, 0 },
+        new[] { 8, 1, 0 },
+        new[] { 8, 1, 1 },
+        new[] { 8, 2, 0 },
+        new[] { 8, 3, 0 },
+        new[] { 9, 0, 0 },
+        new[] { 9, 1, 0 },
+        new[] { 9, 2, 0 },
+        new[] { 9, 3, 0 },
+        new[] { 10, 1, 0 },
+        new[] { 10, 2, 0 },
+        // Try ID 7 with larger second values (hand position might correlate to call selection)
+        new[] { 7, 13 },
+        new[] { 7, 14 },
+        new[] { 7, 15 },
+        new[] { 7, 16 },
+        new[] { 7, 17 },
+        new[] { 7, 18 },
+        new[] { 7, 19 },
+        new[] { 7, 20 },
     };
 
     /// <summary>
