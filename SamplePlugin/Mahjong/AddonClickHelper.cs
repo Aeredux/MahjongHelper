@@ -629,6 +629,130 @@ public static unsafe class AddonClickHelper
                     }
                     break;
 
+                case 9:
+                    // Fire ListItemClick from PARENT list node through addon, with button's item index as param.
+                    // This is the correct ATK list-click pattern: list has ListItemClick event with the addon's
+                    // handler as listener. The param arg tells the handler which item was clicked.
+                    {
+                        var resNode9 = (AtkResNode*)compNode;
+                        // Get button's list item index from its registered events
+                        uint buttonParam = 0;
+                        var btnEvt9 = resNode9->AtkEventManager.Event;
+                        if (btnEvt9 != null)
+                            buttonParam = btnEvt9->Param;
+                        Log($"[CALL-CLICK] Method 9: button item param={buttonParam}");
+
+                        var parentNode9 = resNode9->ParentNode;
+                        if (parentNode9 != null)
+                        {
+                            Log($"[CALL-CLICK] Method 9: parent id={parentNode9->NodeId} type={(int)parentNode9->Type}");
+                            // Find ListItemClick event on the parent list node
+                            var listEvt = parentNode9->AtkEventManager.Event;
+                            AtkEvent* listItemClickEvt = null;
+                            int idx9 = 0;
+                            while (listEvt != null && idx9 < 20)
+                            {
+                                Log($"[CALL-CLICK] Method 9: parent event[{idx9}] type={listEvt->State.EventType} " +
+                                    $"param={listEvt->Param} listener={(nint)listEvt->Listener:X}");
+                                if (listEvt->State.EventType == AtkEventType.ListItemClick)
+                                {
+                                    listItemClickEvt = listEvt;
+                                    break;
+                                }
+                                listEvt = listEvt->NextEvent;
+                                idx9++;
+                            }
+
+                            if (listItemClickEvt != null)
+                            {
+                                LogAtkSnapshot(addon, "pre-m9");
+                                Log($"[CALL-CLICK] Method 9: Firing ListItemClick through addon with param={buttonParam} " +
+                                    $"(event listener={(nint)listItemClickEvt->Listener:X})");
+                                addon->ReceiveEvent(AtkEventType.ListItemClick, (int)buttonParam, listItemClickEvt);
+                                LogAtkSnapshot(addon, "post-m9");
+                                Log($"[CALL-CLICK] Method 9: Done");
+                            }
+                            else
+                            {
+                                Log($"[CALL-CLICK] Method 9: No ListItemClick event found on parent list node");
+                            }
+                        }
+                        else
+                        {
+                            Log($"[CALL-CLICK] Method 9: No parent node found");
+                        }
+                        result = true;
+                    }
+                    break;
+
+                case 10:
+                    // Fire ListItemClick from parent list with param=0 (in case item index is 0-based differently)
+                    {
+                        var resNode10 = (AtkResNode*)compNode;
+                        var parentNode10 = resNode10->ParentNode;
+                        if (parentNode10 != null)
+                        {
+                            var listEvt10 = parentNode10->AtkEventManager.Event;
+                            AtkEvent* lic10 = null;
+                            while (listEvt10 != null)
+                            {
+                                if (listEvt10->State.EventType == AtkEventType.ListItemClick)
+                                {
+                                    lic10 = listEvt10;
+                                    break;
+                                }
+                                listEvt10 = listEvt10->NextEvent;
+                            }
+                            if (lic10 != null)
+                            {
+                                LogAtkSnapshot(addon, "pre-m10");
+                                Log($"[CALL-CLICK] Method 10: Firing ListItemClick through addon with param=0");
+                                addon->ReceiveEvent(AtkEventType.ListItemClick, 0, lic10);
+                                LogAtkSnapshot(addon, "post-m10");
+                                Log($"[CALL-CLICK] Method 10: Done");
+                            }
+                            else
+                            {
+                                Log($"[CALL-CLICK] Method 10: No ListItemClick on parent");
+                            }
+                        }
+                        result = true;
+                    }
+                    break;
+
+                case 11:
+                    // Fire ButtonClick from button's own registered events through addon (not first event)
+                    {
+                        var resNode11 = (AtkResNode*)compNode;
+                        var evt11 = resNode11->AtkEventManager.Event;
+                        AtkEvent* buttonClickEvt = null;
+                        int idx11 = 0;
+                        while (evt11 != null && idx11 < 20)
+                        {
+                            if (evt11->State.EventType == AtkEventType.ButtonClick)
+                            {
+                                buttonClickEvt = evt11;
+                                break;
+                            }
+                            evt11 = evt11->NextEvent;
+                            idx11++;
+                        }
+                        if (buttonClickEvt != null)
+                        {
+                            LogAtkSnapshot(addon, "pre-m11");
+                            Log($"[CALL-CLICK] Method 11: Firing ButtonClick through addon param={buttonClickEvt->Param}");
+                            addon->ReceiveEvent(AtkEventType.ButtonClick, (int)buttonClickEvt->Param, buttonClickEvt);
+                            LogAtkSnapshot(addon, "post-m11");
+                            Log($"[CALL-CLICK] Method 11: Done");
+                        }
+                        else
+                        {
+                            Log($"[CALL-CLICK] Method 11: No ButtonClick event found on button node");
+                        }
+                        result = true;
+                    }
+                    break;
+
                 default:
                     // Method 0: deep diagnostic — dump button info, parent chain, event registrations
                     Log($"[CALL-CLICK] Method 0: DIAGNOSTIC for {callName}");
@@ -746,7 +870,7 @@ public static unsafe class AddonClickHelper
                     }
                     catch (Exception cex) { Log($"[CALL-CLICK]   child dump error: {cex.Message}"); }
 
-                    Log($"[CALL-CLICK]   Use '/mj clickcall {callName} <1-8> run' to test click methods.");
+                    Log($"[CALL-CLICK]   Use '/mj clickcall {callName} <1-11> run' to test click methods.");
                     result = false;
                     break;
             }

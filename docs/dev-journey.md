@@ -666,3 +666,17 @@ addon->ReceiveEvent((AtkEventType)25, 0, evt, eventData);  // fabricated params
   - `ExecuteCallResponse()` now uses method 6 (ECommons-style) instead of method 1 (ButtonClick 25)
 - `PluginDebugHelpers.cs`
   - Added `LogToFile(filename, message)` helper for writing to specific log files
+
+## 2026-03-31: ListItemClick From Parent List Node (Call Accept Fix)
+
+**What:** Discovered why methods 6-8 failed during user testing: method 6 replayed MouseOver (first event on button), causing a tile hover. Method 7 replayed all button events including MouseOut, cancelling the hover. Method 8 walked parent chain but only replayed the FIRST event at each depth, missing the critical ListItemClick at event[4] on the list node.
+
+**Root cause:** The captured Chi button node (type=1029, nodeId=2) is a list item inside a type=1030 List component. Its registered events (MouseOver, ButtonClick, DragDrop*, etc.) are standard list-item events with param=1 (the item's index). The actual call-acceptance event is **ListItemClick** on the PARENT list node (depth=1), which has a different listener (the addon handler at 2C6BAAC3810) than the button's events (listener 2C726009F60).
+
+**Key insight:** In FFXIV's ATK system, when a user clicks a list item, the game fires `ListItemClick` through the list component's registered event to the addon handler. The param argument to `ReceiveEvent` specifies WHICH item was clicked. The button node and list node have DIFFERENT listeners — the button's listener handles visual state, the list's ListItemClick listener handles the actual selection logic.
+
+**Changes:**
+- `AddonClickHelper.cs`
+  - Method 9: Navigate to parent list node, find its ListItemClick event, fire through addon with button's item param (e.g., 1 for Chi)
+  - Method 10: Same as 9 but fires with param=0 (to test if indexing differs)
+  - Method 11: Fire ButtonClick (not MouseOver) from button's own events through addon
