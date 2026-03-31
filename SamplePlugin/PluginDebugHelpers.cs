@@ -1,0 +1,723 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
+using FFXIVClientStructs.FFXIV.Component.GUI;
+using SamplePlugin.Mahjong;
+using SamplePlugin.Mahjong.Debug;
+using SamplePlugin.Windows;
+
+namespace SamplePlugin;
+
+/// <summary>
+/// Debug, diagnostic, and investigation helpers split out from Plugin.cs.
+/// These methods handle startup diagnostics, probe tracking, state comparison logging,
+/// mapping export/reset, and file-based debug output. They are not part of the
+/// core gameplay pipeline (server communication, suggestion display, auto-play).
+/// </summary>
+public sealed partial class Plugin
+{
+    private void DumpStartupDiagnostics()
+    {
+        try
+        {
+            Directory.CreateDirectory(CacheDirectory);
+            var sb = new StringBuilder();
+            sb.AppendLine($"=== Startup Diagnostics {DateTime.UtcNow:O} ===");
+            sb.AppendLine();
+
+            // 1) Icon map state
+            var mapSnapshot = _iconMap.Snapshot();
+            sb.AppendLine($"[MahjongIconMap] Active mappings: {mapSnapshot.Count}");
+            foreach (var pair in mapSnapshot.OrderBy(p => p.Key))
+                sb.AppendLine($"  {pair.Key} -> {pair.Value}");
+            sb.AppendLine();
+
+            // 2) Icon map progress report (no observed icons at startup)
+            sb.AppendLine("[MahjongIconMap] Progress Report:");
+            sb.AppendLine(_iconMap.BuildProgressReport(Array.Empty<uint>()));
+            sb.AppendLine();
+
+            // 3) IconIdCapture state
+            var capturedEntries = _iconCapture.IconMap;
+            sb.AppendLine($"[IconIdCapture] Cached image-node entries: {capturedEntries.Count}");
+            var mahjongRange = new List<(nint addr, uint iconId)>();
+            foreach (var pair in capturedEntries)
+            {
+                if (pair.Value >= 76041 && pair.Value <= 76150)
+                    mahjongRange.Add((pair.Key, pair.Value));
+            }
+            sb.AppendLine($"[IconIdCapture] Entries in Mahjong icon range (76041-76150): {mahjongRange.Count}");
+            foreach (var (addr, iconId) in mahjongRange.OrderBy(e => e.iconId))
+            {
+                var tileCode = _iconMap.Resolve(iconId);
+                sb.AppendLine($"  0x{addr:X} -> iconId={iconId} tile={tileCode ?? "(unmapped)"}");
+            }
+            sb.AppendLine();
+
+            var recentCaptures = _iconCapture.GetRecentCaptures();
+            sb.AppendLine($"[IconIdCapture] Recent captures (ring buffer): {recentCaptures.Count}");
+            foreach (var (time, addr, iconId) in recentCaptures.TakeLast(20))
+                sb.AppendLine($"  {time:O} 0x{addr:X} -> {iconId}");
+            sb.AppendLine();
+
+            // 4) Cache file contents
+            var iconCachePath = Path.Combine(CacheDirectory, "icon_capture_cache.json");
+            if (File.Exists(iconCachePath))
+            {
+                var cacheJson = File.ReadAllText(iconCachePath);
+                sb.AppendLine($"[IconIdCapture] Cache file ({iconCachePath}):");
+                sb.AppendLine(cacheJson.Length > 2000 ? cacheJson[..2000] + "..." : cacheJson);
+            }
+            else
+            {
+                sb.AppendLine("[IconIdCapture] Cache file: (not found)");
+            }
+            sb.AppendLine();
+
+            var nameCachePath = Path.Combine(CacheDirectory, "icon_name_cache.json");
+            if (File.Exists(nameCachePath))
+            {
+                var nameJson = File.ReadAllText(nameCachePath);
+                sb.AppendLine($"[MahjongIconMap] Cache file ({nameCachePath}):");
+                sb.AppendLine(nameJson.Length > 2000 ? nameJson[..2000] + "..." : nameJson);
+            }
+            else
+            {
+                sb.AppendLine("[MahjongIconMap] Cache file: (not found)");
+            }
+            sb.AppendLine();
+
+            // 5) Normalized state
+            sb.AppendLine($"[NormalizedState] Last merged state:");
+            sb.AppendLine(_lastMergedState?.ToDisplayText() ?? "(none — no merge has occurred yet)");
+            sb.AppendLine();
+
+            // 6) EmjL addon presence
+            unsafe
+            {
+                var addonPtr = GameGui.GetAddonByName("EmjL");
+                sb.AppendLine($"[Addon] EmjL present: {!addonPtr.IsNull}");
+                if (!addonPtr.IsNull)
+                {
+                    var addon = (AtkUnitBase*)addonPtr.Address;
+                    sb.AppendLine($"[Addon] RootNode present: {addon != null && addon->RootNode != null}");
+                    if (addon != null)
+                        sb.AppendLine($"[Addon] NodeListCount: {addon->UldManager.NodeListCount}");
+                }
+            }
+
+            sb.AppendLine();
+            sb.AppendLine("=== End Startup Diagnostics ===");
+
+            File.WriteAllText(StartupDiagDumpPath, sb.ToString());
+            Log.Information($"Startup diagnostics written to {StartupDiagDumpPath}");
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Failed to write startup diagnostics: {ex.Message}");
+        }
+    }
+
+    public void ExportMappingReport()
+    {
+        try
+        {
+            Directory.CreateDirectory(CacheDirectory);
+            var report = _iconMap.BuildProgressReport(_iconCapture.IconMap.Values);
+            File.WriteAllText(MappingReportPath, report);
+            MainWindow.mappingReport = report + Environment.NewLine + $"Exported to: {MappingReportPath}";
+        }
+        catch (Exception ex)
+        {
+            MainWindow.mappingReport = $"Export failed: {ex.Message}";
+        }
+    }
+
+    public void ResetLearnedMappings()
+    {
+        _iconMap.ResetLearnedMappings();
+        MainWindow.mappingReport = _iconMap.BuildProgressReport(_iconCapture.IconMap.Values);
+    }
+
+    public bool ResetLearnedMapping(uint iconId)
+    {
+        var removed = _iconMap.ResetLearnedMapping(iconId);
+        MainWindow.mappingReport = _iconMap.BuildProgressReport(_iconCapture.IconMap.Values);
+        return removed;
+    }
+
+    public void ResetAllData()
+    {
+        _iconMap.ResetLearnedMappings();
+        _iconCapture.ResetCapturedIcons();
+        MahjongHandReader.ResetCachedSnapshot();
+        _lastEligibleIconIds.Clear();
+        _lastMergedState = null;
+        _latestProbeAgentState = null;
+        _lastNormalizedStateSignature = string.Empty;
+        _activeSourcePath = "Unknown";
+        _recentFailures.Clear();
+        _recentTransitions.Clear();
+        _lastSuccessfulProbeUpdateUtc = null;
+        _lastSuccessfulNodeUpdateUtc = null;
+        _lastSuccessfulMergeUpdateUtc = null;
+
+        try
+        {
+            if (File.Exists(MappingReportPath))
+                File.Delete(MappingReportPath);
+        }
+        catch
+        {
+        }
+
+        MainWindow.text = "All MahjongHelper cached data cleared.";
+        MainWindow.text2 = "Mahjong Hand Snapshot\nHand tiles: 0\nDrawn: (none)";
+        MainWindow.text3 = "Captured: (none)\nCanonical player hand slots: 0\nCanonical player draw slot:\n  (missing)\nPlayer hand slots: 0\nPlayer draw slot:\n  (missing)\nVisible tile candidates: 0";
+        MainWindow.normalizedStateText = "Captured: (none)\nNormalized Mahjong State\nAgentState: (missing) [src=Unknown, non-authoritative]";
+        MainWindow.diagnosticsText = BuildDiagnosticsText();
+        MainWindow.recentTransitionsText = BuildRecentTransitionsText();
+        MainWindow.mappingReport = _iconMap.BuildProgressReport(Array.Empty<uint>());
+    }
+
+    private static HashSet<uint> BuildEligibleIconSet(MahjongHandReader.MahjongHandSnapshot snapshot)
+    {
+        var set = new HashSet<uint>();
+        foreach (var tile in snapshot.HandTiles)
+        {
+            if (tile.IconId > 0)
+                set.Add(tile.IconId);
+        }
+
+        if (snapshot.DrawnTile != null && snapshot.DrawnTile.IconId > 0)
+            set.Add(snapshot.DrawnTile.IconId);
+
+        return set;
+    }
+
+    private void TrackProbeState(string? dumpContent)
+    {
+        var probeSection = ExtractProbeSection(dumpContent);
+        if (string.IsNullOrWhiteSpace(probeSection))
+            return;
+
+        _lastSuccessfulProbeUpdateUtc = DateTime.UtcNow;
+
+        var signature = NormalizeProbeSection(probeSection);
+        if (signature == _lastProbeStateSignature)
+            return;
+
+        _lastProbeStateSignature = signature;
+
+        try
+        {
+            Directory.CreateDirectory(CacheDirectory);
+            var entry =
+                $"=== Probe State Change {DateTime.UtcNow:O} ==={Environment.NewLine}" +
+                probeSection + Environment.NewLine +
+                "========================================" + Environment.NewLine + Environment.NewLine;
+            File.AppendAllText(ProbeHistoryPath, entry);
+
+            var emj28State = TryGetAgentEmj28State(probeSection);
+            _latestProbeAgentState = emj28State;
+            if (emj28State.HasValue && emj28State != _lastAgentEmj28State)
+            {
+                var previous = _lastAgentEmj28State.HasValue ? _lastAgentEmj28State.Value.ToString() : "(none)";
+                var signal = $"{DateTime.UtcNow:O} AgentId.Emj+0x28/+0x08 i32 changed: {previous} -> {emj28State.Value}";
+                File.AppendAllText(ProbeSignalsPath, signal + Environment.NewLine);
+                _lastAgentEmj28State = emj28State;
+            }
+
+            var emj28Bytes = TryExtractAgentEmj28Bytes(probeSection);
+            if (emj28Bytes != null)
+                TrackTileCandidates(emj28Bytes, emj28State);
+        }
+        catch (Exception ex)
+        {
+            // Never break gameplay flow due to probe logging.
+            RecordFailure($"TrackProbeState failed: {ex.Message}");
+        }
+    }
+
+    private static string ExtractProbeSection(string? dumpContent)
+    {
+        if (string.IsNullOrWhiteSpace(dumpContent))
+            return string.Empty;
+
+        const string startMarker = "--- CLIENT MAHJONG STATE PROBES ---";
+        const string endMarker = "--- FULL NODE LIST ---";
+
+        var startIndex = dumpContent.IndexOf(startMarker, StringComparison.Ordinal);
+        if (startIndex < 0)
+            return string.Empty;
+
+        var endIndex = dumpContent.IndexOf(endMarker, startIndex + startMarker.Length, StringComparison.Ordinal);
+        if (endIndex < 0)
+            endIndex = dumpContent.Length;
+
+        return dumpContent.Substring(startIndex, endIndex - startIndex).TrimEnd();
+    }
+
+    private static string NormalizeProbeSection(string probeSection)
+    {
+        var lines = probeSection.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+        var filtered = lines.Where(static line =>
+            !line.StartsWith("  ProbeSequence=", StringComparison.Ordinal) &&
+            !line.StartsWith("  ProbeUtcTimestamp=", StringComparison.Ordinal) &&
+            !line.StartsWith("  ProbeTickCount64=", StringComparison.Ordinal));
+
+        return string.Join("\n", filtered).Trim();
+    }
+
+    private static int? TryGetAgentEmj28State(string probeSection)
+    {
+        var lines = probeSection.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+        bool inEmj28Block = false;
+
+        foreach (var line in lines)
+        {
+            if (line.StartsWith("  AgentId.Emj+0x28 @", StringComparison.Ordinal))
+            {
+                inEmj28Block = true;
+                continue;
+            }
+
+            if (inEmj28Block && line.StartsWith("  AgentId.Emj+0x", StringComparison.Ordinal))
+                break;
+
+            if (!inEmj28Block)
+                continue;
+
+            const string marker = "+0x08: i32=";
+            var markerIndex = line.IndexOf(marker, StringComparison.Ordinal);
+            if (markerIndex < 0)
+                continue;
+
+            var valueStart = markerIndex + marker.Length;
+            var valueEnd = line.IndexOf(' ', valueStart);
+            if (valueEnd < 0)
+                valueEnd = line.Length;
+
+            var token = line.Substring(valueStart, valueEnd - valueStart).Trim();
+            if (int.TryParse(token, out var parsed))
+                return parsed;
+        }
+
+        return null;
+    }
+
+    private static byte[]? TryExtractAgentEmj28Bytes(string probeSection)
+    {
+        var lines = probeSection.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+        bool inEmj28Block = false;
+        byte[] bytes = new byte[0x200];
+        bool sawAnyBytes = false;
+
+        foreach (var line in lines)
+        {
+            if (line.StartsWith("  AgentId.Emj+0x28 @", StringComparison.Ordinal))
+            {
+                inEmj28Block = true;
+                continue;
+            }
+
+            if (!inEmj28Block)
+                continue;
+
+            if (line.StartsWith("    dwords:", StringComparison.Ordinal) ||
+                line.StartsWith("  AgentId.Emj+0x", StringComparison.Ordinal))
+            {
+                break;
+            }
+
+            if (!line.StartsWith("    +", StringComparison.Ordinal))
+                continue;
+
+            var colon = line.IndexOf(':');
+            if (colon < 0)
+                continue;
+
+            var offsetToken = line.Substring(5, colon - 5).Trim();
+            if (!int.TryParse(offsetToken, System.Globalization.NumberStyles.HexNumber, null, out var baseOffset))
+                continue;
+
+            var bar = line.IndexOf('|', colon + 1);
+            var hexSegment = (bar > colon ? line.Substring(colon + 1, bar - colon - 1) : line[(colon + 1)..]).Trim();
+            if (string.IsNullOrWhiteSpace(hexSegment))
+                continue;
+
+            var groups = hexSegment.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var byteOffset = baseOffset;
+            foreach (var group in groups)
+            {
+                if (group.Length % 2 != 0)
+                    continue;
+
+                for (var i = 0; i < group.Length; i += 2)
+                {
+                    if (byteOffset < 0 || byteOffset >= bytes.Length)
+                        break;
+
+                    if (!byte.TryParse(group.Substring(i, 2), System.Globalization.NumberStyles.HexNumber, null, out var value))
+                        break;
+
+                    bytes[byteOffset++] = value;
+                    sawAnyBytes = true;
+                }
+            }
+        }
+
+        return sawAnyBytes ? bytes : null;
+    }
+
+    private void TrackTileCandidates(byte[] emj28Bytes, int? emj28State)
+    {
+        if (_lastAgentEmj28Bytes == null || _lastAgentEmj28Bytes.Length != emj28Bytes.Length)
+        {
+            _lastAgentEmj28Bytes = emj28Bytes;
+            return;
+        }
+
+        var byteChanges = new List<string>();
+        var u16Changes = new List<string>();
+
+        // Focus on regions that look data-like instead of pointer-heavy headers.
+        CollectByteChanges(_lastAgentEmj28Bytes, emj28Bytes, 0x70, 0x120, byteChanges);
+        CollectByteChanges(_lastAgentEmj28Bytes, emj28Bytes, 0x120, 0x1F0, byteChanges);
+        CollectU16Changes(_lastAgentEmj28Bytes, emj28Bytes, 0x70, 0x120, u16Changes);
+
+        if (byteChanges.Count == 0 && u16Changes.Count == 0)
+        {
+            _lastAgentEmj28Bytes = emj28Bytes;
+            return;
+        }
+
+        var stateText = emj28State.HasValue ? emj28State.Value.ToString() : "unknown";
+        var lines = new List<string>
+        {
+            $"=== Tile Candidate Delta {DateTime.UtcNow:O} state={stateText} ===",
+            "Byte changes (filtered 0x01..0x40):"
+        };
+
+        lines.AddRange(byteChanges.Take(40));
+        if (byteChanges.Count > 40)
+            lines.Add($"... {byteChanges.Count - 40} more byte changes omitted");
+
+        lines.Add("u16 changes (filtered <=0x0200):");
+        lines.AddRange(u16Changes.Take(30));
+        if (u16Changes.Count > 30)
+            lines.Add($"... {u16Changes.Count - 30} more u16 changes omitted");
+
+        lines.Add(string.Empty);
+
+        File.AppendAllText(TileCandidatesPath, string.Join(Environment.NewLine, lines));
+        _lastAgentEmj28Bytes = emj28Bytes;
+    }
+
+    private static void CollectByteChanges(byte[] previous, byte[] current, int start, int end, List<string> output)
+    {
+        var max = Math.Min(end, Math.Min(previous.Length, current.Length));
+        for (var offset = Math.Max(0, start); offset < max; offset++)
+        {
+            var oldValue = previous[offset];
+            var newValue = current[offset];
+            if (oldValue == newValue)
+                continue;
+
+            // Keep only plausible compact value flips likely to encode tile-ish or count-ish values.
+            if (!InCandidateByteRange(oldValue) && !InCandidateByteRange(newValue))
+                continue;
+
+            output.Add($"  +0x{offset:X3}: 0x{oldValue:X2} ({oldValue}) -> 0x{newValue:X2} ({newValue})");
+        }
+    }
+
+    private static void CollectU16Changes(byte[] previous, byte[] current, int start, int end, List<string> output)
+    {
+        var max = Math.Min(end, Math.Min(previous.Length, current.Length));
+        var alignedStart = Math.Max(0, start);
+        if ((alignedStart & 1) != 0)
+            alignedStart++;
+
+        for (var offset = alignedStart; offset + 1 < max; offset += 2)
+        {
+            var oldValue = (ushort)(previous[offset] | (previous[offset + 1] << 8));
+            var newValue = (ushort)(current[offset] | (current[offset + 1] << 8));
+            if (oldValue == newValue)
+                continue;
+
+            if (oldValue > 0x0200 && newValue > 0x0200)
+                continue;
+
+            output.Add($"  +0x{offset:X3}: {oldValue} (0x{oldValue:X4}) -> {newValue} (0x{newValue:X4})");
+        }
+    }
+
+    private static bool InCandidateByteRange(byte value)
+    {
+        return value >= 0x01 && value <= 0x40;
+    }
+
+    private void TrackUiState(EmjUiReader.UiState uiState, string source)
+    {
+        try
+        {
+            var signature = BuildUiStateSignature(uiState);
+            if (signature == _lastUiStateSignature)
+                return;
+
+            _lastUiStateSignature = signature;
+
+            Directory.CreateDirectory(CacheDirectory);
+            var entry =
+                $"=== Mahjong UI State Change {DateTime.UtcNow:O} source={source} ==={Environment.NewLine}" +
+                uiState.ToDisplayText() + Environment.NewLine +
+                "============================================================" + Environment.NewLine + Environment.NewLine;
+
+            File.AppendAllText(UiStateHistoryPath, entry);
+        }
+        catch
+        {
+            // Keep investigation tooling non-intrusive for gameplay.
+        }
+    }
+
+    private static string BuildUiStateSignature(EmjUiReader.UiState uiState)
+    {
+        // Omit capture timestamp and keep stable ordering for change detection.
+        var lines = uiState.Slots
+            .OrderBy(slot => slot.Kind)
+            .ThenBy(slot => slot.SlotIndex)
+            .ThenBy(slot => slot.NodeIndex)
+            .Select(slot =>
+                $"{slot.Kind}|{slot.SlotIndex}|{slot.NodeIndex}|{slot.NodeId}|{slot.NodeType}|{slot.Visible}|{slot.X:F0}|{slot.Y:F0}|{slot.Width}|{slot.Height}|{slot.IconId}|{slot.TileCode ?? string.Empty}");
+
+        return string.Join("\n", lines);
+    }
+
+    private void UpdateHandIconDisplay(EmjUiReader.UiState uiState)
+    {
+        try
+        {
+            // Extract canonical hand icon IDs in order
+            var canonicalHand = uiState.Slots
+                .Where(s => s.Kind == EmjUiReader.SlotKind.CanonicalPlayerHand)
+                .OrderBy(s => s.SlotIndex)
+                .Select(s => s.IconId.ToString())
+                .ToList();
+
+            if (canonicalHand.Count > 0)
+            {
+                MainWindow.handIconIds = string.Join(", ", canonicalHand);
+            }
+            else
+            {
+                MainWindow.handIconIds = "(no hand slots)";
+            }
+        }
+        catch
+        {
+            MainWindow.handIconIds = "(error reading hand)";
+        }
+    }
+
+    private static readonly string CallPromptLogPath = Path.Combine(CacheDirectory, "call_prompt_atkvalues.log");
+    private string _lastCallPromptAtkSignature = string.Empty;
+
+    private void LogActionProbe(MahjongGameState state, string source)
+    {
+        try
+        {
+            var hand = state.HandDescription.Value ?? "";
+            var draw = state.DrawIconId.Value == 0 ? "" : state.DrawIconId.Value.ToString();
+            var calls = state.AvailableCalls.Value ?? "";
+            var phase = state.GamePhase.Value ?? "";
+            var turn = state.CurrentTurn.Value ?? "";
+            var pDis = state.PlayerDiscards.Value == null ? "" : string.Join(",", state.PlayerDiscards.Value);
+            var rDis = state.RightDiscards.Value == null ? "" : string.Join(",", state.RightDiscards.Value);
+            var oDis = state.OppositeDiscards.Value == null ? "" : string.Join(",", state.OppositeDiscards.Value);
+            var lDis = state.LeftDiscards.Value == null ? "" : string.Join(",", state.LeftDiscards.Value);
+
+            var sig = $"{source}|{phase}|{turn}|{calls}|{hand}|{draw}|{pDis}|{rDis}|{oDis}|{lDis}";
+            if (sig == _lastActionProbeSignature)
+                return;
+            _lastActionProbeSignature = sig;
+
+            Directory.CreateDirectory(CacheDirectory);
+            var line = $"[{DateTime.UtcNow:O}] src={source} phase={phase} turn={turn} calls={calls} hand='{hand}' draw={draw} " +
+                       $"discards(P/R/O/L)=({pDis})/({rDis})/({oDis})/({lDis})";
+            File.AppendAllText(ActionProbePath, line + Environment.NewLine);
+
+            if (_lastAddonAddress != 0)
+            {
+                unsafe
+                {
+                    var addon = (AtkUnitBase*)_lastAddonAddress;
+                    AddonClickHelper.LogAtkSnapshot(addon, $"merge-{source}");
+                }
+            }
+
+            // Passive call-prompt AtkValues dump: captures full AtkValues when entering a call prompt
+            if (phase.Contains("DecisionPrompt") || phase.Contains("CallDecision"))
+            {
+                LogCallPromptAtkValues(calls, phase);
+            }
+        }
+        catch (Exception ex)
+        {
+            RecordFailure($"Action probe log failed: {ex.Message}");
+        }
+    }
+
+    private unsafe void LogCallPromptAtkValues(string calls, string phase)
+    {
+        if (_lastAddonAddress == 0) return;
+
+        try
+        {
+            var addon = (AtkUnitBase*)_lastAddonAddress;
+            var count = (int)addon->AtkValuesCount;
+            var sb = new StringBuilder();
+            sb.AppendLine($"[{DateTime.UtcNow:O}] CALL PROMPT phase={phase} calls={calls} atkCount={count}");
+
+            for (int i = 0; i < count && i < 500; i++)
+            {
+                try
+                {
+                    var v = addon->AtkValues[i];
+                    var typeStr = v.Type.ToString();
+                    if (v.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int ||
+                        v.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.UInt)
+                        sb.AppendLine($"  [{i}] {typeStr} = {v.Int}");
+                    else if (v.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String)
+                    {
+                        var str = v.String.ToString() ?? "(null)";
+                        sb.AppendLine($"  [{i}] {typeStr} = \"{str}\"");
+                    }
+                    else
+                        sb.AppendLine($"  [{i}] {typeStr} = {v.Int}");
+                }
+                catch { sb.AppendLine($"  [{i}] (error)"); }
+            }
+
+            var signature = sb.ToString();
+            if (signature == _lastCallPromptAtkSignature) return;
+            _lastCallPromptAtkSignature = signature;
+
+            Directory.CreateDirectory(CacheDirectory);
+            File.AppendAllText(CallPromptLogPath, sb.ToString() + Environment.NewLine);
+        }
+        catch { }
+    }
+
+    private void RecordFailure(string message)
+    {
+        var line = $"{DateTime.UtcNow:O} {message}";
+        _recentFailures.Add(line);
+        if (_recentFailures.Count > MaxRecentFailures)
+            _recentFailures.RemoveAt(0);
+    }
+
+    private void AppendRecentTransition(string message)
+    {
+        _recentTransitions.Add(message);
+        if (_recentTransitions.Count > MaxRecentTransitions)
+            _recentTransitions.RemoveAt(0);
+    }
+
+    private string BuildDiagnosticsText()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("Phase C Diagnostics");
+        sb.AppendLine($"ReaderStatus: {_emjReader.Status}");
+        sb.AppendLine($"ActiveSourcePath: {_activeSourcePath}");
+        sb.AppendLine($"LastSuccessfulProbeUpdate: {FormatTimestamp(_lastSuccessfulProbeUpdateUtc)}");
+        sb.AppendLine($"LastSuccessfulNodeUpdate: {FormatTimestamp(_lastSuccessfulNodeUpdateUtc)}");
+        sb.AppendLine($"LastSuccessfulMergeUpdate: {FormatTimestamp(_lastSuccessfulMergeUpdateUtc)}");
+        sb.AppendLine($"ServerStatus: {_serverClient.GetStatusText()}");
+        sb.AppendLine("RecentFailures:");
+
+        if (_recentFailures.Count == 0)
+        {
+            sb.AppendLine("  (none)");
+        }
+        else
+        {
+            foreach (var failure in _recentFailures)
+                sb.AppendLine($"  {failure}");
+        }
+
+        return sb.ToString();
+    }
+
+    private string BuildRecentTransitionsText()
+    {
+        if (_recentTransitions.Count == 0)
+            return "(no normalized transitions yet)";
+
+        return string.Join(Environment.NewLine, _recentTransitions);
+    }
+
+    private static string FormatTimestamp(DateTime? timestamp)
+        => timestamp.HasValue ? timestamp.Value.ToString("O") : "(none)";
+
+    private static string SafeFieldValue<T>(T? value)
+        => value == null ? "(none)" : value.ToString() ?? "(none)";
+
+    public void ExportNormalizedState()
+    {
+        try
+        {
+            Directory.CreateDirectory(CacheDirectory);
+            var content = _lastMergedState?.ToDisplayText() ?? "(no normalized state yet)";
+            File.WriteAllText(NormalizedStateExportPath, content);
+            AppendRecentTransition($"{DateTime.UtcNow:O} export normalized state -> {NormalizedStateExportPath}");
+        }
+        catch (Exception ex)
+        {
+            RecordFailure($"ExportNormalizedState failed: {ex.Message}");
+        }
+    }
+
+    public string GetRecentTransitionsText() => BuildRecentTransitionsText();
+
+    public void ExportProbeSnippet(string? dumpText)
+    {
+        try
+        {
+            Directory.CreateDirectory(CacheDirectory);
+            var snippet = ExtractProbeSection(dumpText);
+            if (string.IsNullOrWhiteSpace(snippet))
+                snippet = "(no probe snippet found in current dump)";
+
+            File.WriteAllText(ProbeSnippetExportPath, snippet);
+            AppendRecentTransition($"{DateTime.UtcNow:O} export probe snippet -> {ProbeSnippetExportPath}");
+        }
+        catch (Exception ex)
+        {
+            RecordFailure($"ExportProbeSnippet failed: {ex.Message}");
+        }
+    }
+
+    public unsafe void AnnotateComparisonEvent(string eventName, string description)
+    {
+        try
+        {
+            var agentModule = FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentModule.Instance();
+            if (agentModule != null)
+            {
+                var emjAgent = agentModule->GetAgentByInternalId(FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentId.Emj);
+                if (emjAgent != null)
+                {
+                    StateComparisonLogger.LogAnnotatedEvent(eventName, description, (nint)emjAgent);
+                }
+            }
+        }
+        catch
+        {
+            // Never crash from UI actions
+        }
+    }
+}

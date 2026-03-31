@@ -27,6 +27,7 @@ public sealed class AutoPlayManager
     private EvaluateCallResponse? _lastCallEval;
     private string? _lastGamePhase;
     private IReadOnlyList<EmjUiReader.UiSlot>? _lastHandSlots;
+    private Dictionary<EmjUiReader.CallOptions, nint>? _lastCallButtonNodes;
 
     private static readonly string LogDir = System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MahjongHelper");
@@ -75,11 +76,13 @@ public sealed class AutoPlayManager
     /// Called on every game state update (every frame the addon is drawn).
     /// Re-checks scheduling in case the phase changed after a suggestion was already cached.
     /// </summary>
-    public void OnGameStateUpdate(string? gamePhase, IReadOnlyList<EmjUiReader.UiSlot>? handSlots)
+    public void OnGameStateUpdate(string? gamePhase, IReadOnlyList<EmjUiReader.UiSlot>? handSlots,
+        Dictionary<EmjUiReader.CallOptions, nint>? callButtonNodes = null)
     {
         var prevPhase = _lastGamePhase;
         _lastGamePhase = gamePhase;
         _lastHandSlots = handSlots;
+        _lastCallButtonNodes = callButtonNodes;
 
         // If phase just changed to WaitingForDiscard and we have a pending suggestion, try scheduling
         if (gamePhase == "WaitingForDiscard" && prevPhase != "WaitingForDiscard")
@@ -251,13 +254,40 @@ public sealed class AutoPlayManager
     {
         if (callIndex == 0)
         {
-            // Accept call — not yet implemented, need to discover callback IDs for Pon/Chi/Kan/Ron
-            Log($"[DRY-RUN] Accepting call not yet implemented");
+            // Accept call — click the best available call button
+            if (_lastCallButtonNodes == null || _lastCallButtonNodes.Count == 0)
+            {
+                Log($"Cannot accept call: no button nodes captured");
+                return false;
+            }
+
+            // Pick the highest-priority call button available
+            // Priority: Ron > Tsumo > Kan > Pon > Chi > Riichi
+            var priority = new[]
+            {
+                EmjUiReader.CallOptions.Ron,
+                EmjUiReader.CallOptions.Tsumo,
+                EmjUiReader.CallOptions.Kan,
+                EmjUiReader.CallOptions.Pon,
+                EmjUiReader.CallOptions.Chi,
+                EmjUiReader.CallOptions.Riichi,
+            };
+
+            foreach (var call in priority)
+            {
+                if (_lastCallButtonNodes.TryGetValue(call, out var btnPtr) && btnPtr != 0)
+                {
+                    Log($"Executing call accept: clicking {call} button (ptr={btnPtr:X})");
+                    return AddonClickHelper.TryClickCallButton(addon, btnPtr, call.ToString());
+                }
+            }
+
+            Log($"Cannot accept call: no matching button node found in captured nodes");
             return false;
         }
         else
         {
-            // Skip/pass — use callback 9
+            // Skip/pass
             Log($"Executing call response: skip/pass");
             return AddonClickHelper.TrySkipCall(addon);
         }

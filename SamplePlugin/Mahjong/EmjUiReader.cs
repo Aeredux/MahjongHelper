@@ -68,7 +68,8 @@ public static unsafe class EmjUiReader
         CallOptions AvailableCalls,
         GamePhase Phase,
         int? CurrentTurn,
-        IReadOnlyList<int> RawAtkInts)
+        IReadOnlyList<int> RawAtkInts,
+        Dictionary<CallOptions, nint>? CallButtonNodes = null)
     {
         public string ToDisplayText()
         {
@@ -460,7 +461,7 @@ public static unsafe class EmjUiReader
         }
 
         // Detect call prompts from visible button-like components
-        var availableCalls = ReadCallPrompts(addon);
+        var availableCalls = ReadCallPrompts(addon, out var callButtonNodes);
 
         // Log AtkValues changes for call prompt discovery
         LogAtkValuesIfChanged(addon);
@@ -474,7 +475,7 @@ public static unsafe class EmjUiReader
         return new UiGameInfo(
             seatWind, roundWind, roundNumber, honba, riichiSticks,
             playerScore, rightScore, oppositeScore, leftScore,
-            riichiStatus, availableCalls, phase, currentTurn, rawAtkInts);
+            riichiStatus, availableCalls, phase, currentTurn, rawAtkInts, callButtonNodes);
     }
 
     /// <summary>
@@ -841,9 +842,10 @@ public static unsafe class EmjUiReader
         catch { }
     }
 
-    private static CallOptions ReadCallPrompts(AtkUnitBase* addon)
+    private static CallOptions ReadCallPrompts(AtkUnitBase* addon, out Dictionary<CallOptions, nint> buttonNodes)
     {
         var calls = CallOptions.None;
+        buttonNodes = new Dictionary<CallOptions, nint>();
 
         try
         {
@@ -874,7 +876,7 @@ public static unsafe class EmjUiReader
                     if (comp->Component == null) continue;
 
                     // Scan up to 3 levels deep: container(1032) → list(1030) → button(1029) → text
-                    ScanComponentForCalls(comp->Component, ref calls, 0, 3);
+                    ScanComponentForCalls(comp->Component, ref calls, buttonNodes, 0, 3);
                 }
                 catch { }
             }
@@ -884,7 +886,8 @@ public static unsafe class EmjUiReader
         return calls;
     }
 
-    private static void ScanComponentForCalls(AtkComponentBase* comp, ref CallOptions calls, int depth, int maxDepth)
+    private static void ScanComponentForCalls(AtkComponentBase* comp, ref CallOptions calls,
+        Dictionary<CallOptions, nint> buttonNodes, int depth, int maxDepth)
     {
         if (comp == null || depth > maxDepth) return;
 
@@ -917,27 +920,35 @@ public static unsafe class EmjUiReader
 
                     var lower = trimmed.ToLowerInvariant();
 
+                    CallOptions? matched = null;
                     if (lower.Contains("chi") || lower.Contains("チー"))
-                        calls |= CallOptions.Chi;
+                        matched = CallOptions.Chi;
                     else if (lower.Contains("pon") || lower.Contains("ポン"))
-                        calls |= CallOptions.Pon;
+                        matched = CallOptions.Pon;
                     else if (lower.Contains("kan") || lower.Contains("カン"))
-                        calls |= CallOptions.Kan;
+                        matched = CallOptions.Kan;
                     else if (lower.Contains("ron") || lower.Contains("ロン"))
-                        calls |= CallOptions.Ron;
+                        matched = CallOptions.Ron;
                     else if (lower.Contains("tsumo") || lower.Contains("ツモ"))
-                        calls |= CallOptions.Tsumo;
+                        matched = CallOptions.Tsumo;
                     else if (lower.Contains("riichi") || lower.Contains("リーチ") || lower.Contains("reach"))
-                        calls |= CallOptions.Riichi;
+                        matched = CallOptions.Riichi;
                     else if (lower.Contains("skip") || lower.Contains("pass") || lower.Contains("cancel")
                              || lower.Contains("スキップ") || lower.Contains("キャンセル"))
-                        calls |= CallOptions.Skip;
+                        matched = CallOptions.Skip;
+
+                    if (matched.HasValue)
+                    {
+                        calls |= matched.Value;
+                        // Store the parent component pointer as the clickable button node
+                        buttonNodes.TryAdd(matched.Value, (nint)comp);
+                    }
                 }
                 else if ((int)cn->Type >= 1000)
                 {
                     var subComp = (AtkComponentNode*)cn;
                     if (subComp->Component != null)
-                        ScanComponentForCalls(subComp->Component, ref calls, depth + 1, maxDepth);
+                        ScanComponentForCalls(subComp->Component, ref calls, buttonNodes, depth + 1, maxDepth);
                 }
             }
             catch { }

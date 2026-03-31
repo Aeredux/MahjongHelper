@@ -613,3 +613,25 @@ Features:
 - `MahjongIconMap.cs`
   - Added diagnostic logging in `Resolve`: when an icon ID in the mahjong range (76041-76150) has no mapping, logs it to `%APPDATA%/MahjongHelper/unmapped_icons.log` (deduplicated per session).
   - This enables self-serve discovery of alternate tile set icon IDs (e.g., icon 76127 observed for what should be NORTH).
+
+## 2026-03-27: Call-accept via button node clicking (Phase 5.2)
+
+**What:** Implemented a new approach for accepting call prompts (Pon/Chi/Kan/Ron/Tsumo/Riichi) by clicking the actual UI button component nodes, after confirming FireCallback doesn't work for call acceptance.
+
+**Why:** The callsweep instrumentation (FireCallback probing with IDs 0-6, 9, 11-15 and values 0-2) was executed during a live Pon prompt but had zero effect — confirming FireCallback is a dead end for accepting calls. The EmjL addon uses real button components (type 1029) inside container/list hierarchies (1032→1030→1029) that need ReceiveEvent-based clicking.
+
+**Changes:**
+- `EmjUiReader.cs`
+  - Added `CallButtonNodes` optional parameter to `UiGameInfo` record to carry captured button pointers
+  - Modified `ReadCallPrompts()` to output `Dictionary<CallOptions, nint>` mapping each detected call to its button component pointer
+  - Modified `ScanComponentForCalls()` to store `(nint)comp` when a call text match is found, using `buttonNodes.TryAdd(matched.Value, (nint)comp)`
+  - Updated `ReadGameInfo()` call site to pass `callButtonNodes` into `UiGameInfo`
+- `AddonClickHelper.cs`
+  - Added `TryClickCallButton()` method with 4 click strategies: (1) component MouseClick, (2) addon MouseClick, (3) event 0x17 (Saucy pattern), (4) event 0x09 (ButtonClick)
+  - Method 0 (auto) tries all 4 in sequence for discovery
+- `AutoPlayManager.cs`
+  - Added `_lastCallButtonNodes` field, updated `OnGameStateUpdate()` to accept button nodes
+  - Replaced dry-run stub in `ExecuteCallResponse()` with actual button clicking using priority order: Ron > Tsumo > Kan > Pon > Chi > Riichi
+- `Plugin.cs`
+  - Added `/mj clickcall [type] [method] run` command for manual testing of individual call button clicks
+  - Passes `CallButtonNodes` from `_lastUiState` to `AutoPlayManager.OnGameStateUpdate()`

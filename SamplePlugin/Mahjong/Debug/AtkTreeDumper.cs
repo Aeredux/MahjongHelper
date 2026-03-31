@@ -4,7 +4,7 @@ using System.Text;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using FFXIVClientStructs.FFXIV.Client.System.String;
 
-namespace SamplePlugin.Mahjong;
+namespace SamplePlugin.Mahjong.Debug;
 
 public static unsafe class AtkTreeDumper
 {

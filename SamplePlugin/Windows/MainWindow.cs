@@ -3,6 +3,7 @@ using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Windowing;
+using SamplePlugin.Mahjong.Debug;
 
 namespace SamplePlugin.Windows;
 
@@ -113,7 +114,7 @@ public class MainWindow : Window, IDisposable
         {
             try
             {
-                var logPath = SamplePlugin.Mahjong.StateComparisonLogger.GetLogPath();
+                var logPath = StateComparisonLogger.GetLogPath();
                 if (System.IO.File.Exists(logPath))
                 {
                     var content = System.IO.File.ReadAllText(logPath);

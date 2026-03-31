@@ -97,7 +97,7 @@ public static unsafe class AddonClickHelper
             values[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 0 };
             addon->FireCallback(2, values, true);
 
-            Log($"[CALL] Fired callback 9 (skip/pass)");
+            Log($"[CALL] Fired callback 8 (skip/pass)");
             LogAtkSnapshot(addon, "post-skip-call");
             return true;
         }
@@ -381,4 +381,219 @@ public static unsafe class AddonClickHelper
         }
         catch { }
     }
+
+    // --- Call-accept via button node click ---
+
+    /// <summary>
+    /// Attempts to accept a call by clicking its button component node.
+    /// Tries multiple ReceiveEvent approaches in sequence and logs which (if any) succeeds.
+    /// buttonComponentPtr must be the AtkComponentButton* captured from ScanComponentForCalls.
+    /// Returns true if the click was dispatched (doesn't guarantee game accepted it).
+    /// </summary>
+    public static bool TryClickCallButton(AtkUnitBase* addon, nint buttonComponentPtr, string callName, int method = 0)
+    {
+        if (addon == null || buttonComponentPtr == 0)
+        {
+            Log($"[CALL-CLICK] Cannot click {callName}: addon={addon != null} ptr={buttonComponentPtr:X}");
+            return false;
+        }
+
+        var compNode = (AtkComponentNode*)buttonComponentPtr;
+        var comp = compNode->Component;
+        var node = (AtkResNode*)compNode;
+
+        if (comp == null)
+        {
+            Log($"[CALL-CLICK] {callName}: component is null at ptr {buttonComponentPtr:X}");
+            return false;
+        }
+
+        Log($"[CALL-CLICK] {callName}: ptr={buttonComponentPtr:X} nodeId={node->NodeId} " +
+            $"visible={node->IsVisible()} method={method}");
+        LogAtkSnapshot(addon, $"pre-callclick-{callName}-m{method}");
+
+        try
+        {
+            bool result = false;
+            switch (method)
+            {
+                case 1:
+                    // Component ReceiveEvent with MouseClick
+                    {
+                        var evt = stackalloc AtkEvent[1];
+                        evt->Param = (uint)node->NodeId;
+                        evt->Target = (AtkEventTarget*)node;
+                        evt->Listener = (AtkEventListener*)comp;
+                        evt->NextEvent = null;
+                        comp->ReceiveEvent(AtkEventType.MouseClick, (int)node->NodeId, evt);
+                        Log($"[CALL-CLICK] Method 1: component MouseClick nodeId={node->NodeId}");
+                        result = true;
+                    }
+                    break;
+
+                case 2:
+                    // Addon ReceiveEvent with MouseClick
+                    {
+                        var evt = stackalloc AtkEvent[1];
+                        evt->Param = (uint)node->NodeId;
+                        evt->Target = (AtkEventTarget*)node;
+                        evt->Listener = (AtkEventListener*)addon;
+                        evt->NextEvent = null;
+                        addon->ReceiveEvent(AtkEventType.MouseClick, (int)node->NodeId, evt, null);
+                        Log($"[CALL-CLICK] Method 2: addon MouseClick nodeId={node->NodeId}");
+                        result = true;
+                    }
+                    break;
+
+                case 3:
+                    // Component ReceiveEvent with event type 0x17 (Saucy CuffACur pattern)
+                    {
+                        var evt = stackalloc AtkEvent[1];
+                        evt->Param = 0;
+                        evt->Target = (AtkEventTarget*)node;
+                        evt->Listener = (AtkEventListener*)comp;
+                        evt->NextEvent = null;
+                        comp->ReceiveEvent((AtkEventType)0x17, 0, evt);
+                        Log($"[CALL-CLICK] Method 3: component event 0x17");
+                        result = true;
+                    }
+                    break;
+
+                case 4:
+                    // Addon ReceiveEvent with ButtonClick (0x09)
+                    {
+                        var evt = stackalloc AtkEvent[1];
+                        evt->Param = (uint)node->NodeId;
+                        evt->Target = (AtkEventTarget*)node;
+                        evt->Listener = (AtkEventListener*)addon;
+                        evt->NextEvent = null;
+                        addon->ReceiveEvent((AtkEventType)0x09, (int)node->NodeId, evt, null);
+                        Log($"[CALL-CLICK] Method 4: addon ButtonClick 0x09 nodeId={node->NodeId}");
+                        result = true;
+                    }
+                    break;
+
+                default:
+                    // Method 0 / auto: try methods 1-4 in sequence
+                    Log($"[CALL-CLICK] Auto: trying methods 1-4 for {callName}");
+                    for (int m = 1; m <= 4; m++)
+                    {
+                        TryClickCallButton(addon, buttonComponentPtr, callName, m);
+                    }
+                    result = true;
+                    break;
+            }
+
+            LogAtkSnapshot(addon, $"post-callclick-{callName}-m{method}");
+            return result;
+        }
+        catch (Exception ex)
+        {
+            Log($"[CALL-CLICK] ERROR clicking {callName} method={method}: {ex.Message}");
+            return false;
+        }
+    }
+
+    // --- Call-accept discovery helpers ---
+
+    // Tracks which (callbackId, secondVal) pair to try next during callsweep
+    private static int _sweepIndex = 0;
+
+    // Candidate callback patterns to try during a call prompt.
+    // Based on known IDs: 7=discard, 8=tsumogiri/skip, 10=draw, 16=withdraw, 19/20=close
+    // Untested during call prompts: 0-6, 9, 11-15
+    // Also try 3-value patterns and different second values.
+    private static readonly int[][] SweepCandidates = new[]
+    {
+        // IDs that showed "no effect" during normal play — may work during call prompt
+        new[] { 0, 0 },
+        new[] { 1, 0 },
+        new[] { 2, 0 },
+        new[] { 3, 0 },
+        new[] { 4, 0 },
+        new[] { 5, 0 },
+        new[] { 6, 0 },
+        new[] { 9, 0 },
+        new[] { 11, 0 },
+        new[] { 12, 0 },
+        new[] { 13, 0 },
+        new[] { 14, 0 },
+        new[] { 15, 0 },
+        // Try with second value = 1 (might select specific call option)
+        new[] { 0, 1 },
+        new[] { 1, 1 },
+        new[] { 2, 1 },
+        new[] { 3, 1 },
+        new[] { 4, 1 },
+        new[] { 5, 1 },
+        new[] { 6, 1 },
+        new[] { 9, 1 },
+        new[] { 11, 1 },
+        new[] { 12, 1 },
+        new[] { 13, 1 },
+        new[] { 14, 1 },
+        new[] { 15, 1 },
+        // Try with second value = 2
+        new[] { 0, 2 },
+        new[] { 1, 2 },
+        new[] { 2, 2 },
+        new[] { 3, 2 },
+        new[] { 4, 2 },
+        new[] { 5, 2 },
+        new[] { 6, 2 },
+        new[] { 9, 2 },
+    };
+
+    /// <summary>
+    /// Dry-run: log all candidates and current sweep index.
+    /// </summary>
+    public static void LogCallSweepDryRun(AtkUnitBase* addon)
+    {
+        Log($"[CALLSWEEP] DRY-RUN — {SweepCandidates.Length} candidates, next index={_sweepIndex}");
+        for (int i = 0; i < SweepCandidates.Length; i++)
+        {
+            var c = SweepCandidates[i];
+            var marker = i == _sweepIndex ? " <-- NEXT" : "";
+            Log($"[CALLSWEEP]   [{i}] values=[{string.Join(",", c)}]{marker}");
+        }
+    }
+
+    /// <summary>
+    /// Execute the next untried callback probe in the sweep sequence.
+    /// Logs AtkValues before and after to detect game response.
+    /// Advances the sweep index so the next call tries the next candidate.
+    /// </summary>
+    public static void ExecuteNextCallSweepProbe(AtkUnitBase* addon)
+    {
+        if (_sweepIndex >= SweepCandidates.Length)
+        {
+            Log($"[CALLSWEEP] All {SweepCandidates.Length} candidates exhausted. Use '/mj callsweep' to see results. Reset with next game.");
+            _sweepIndex = 0;
+            return;
+        }
+
+        var candidate = SweepCandidates[_sweepIndex];
+        Log($"[CALLSWEEP] Executing candidate [{_sweepIndex}]: values=[{string.Join(",", candidate)}]");
+
+        // Snapshot AtkValues BEFORE
+        LogAtkSnapshot(addon, $"callsweep-pre-{_sweepIndex}");
+
+        // Fire the callback
+        var atkVals = stackalloc AtkValue[candidate.Length];
+        for (int i = 0; i < candidate.Length; i++)
+            atkVals[i] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = candidate[i] };
+
+        addon->FireCallback((uint)candidate.Length, atkVals, true);
+
+        // Snapshot AtkValues AFTER
+        LogAtkSnapshot(addon, $"callsweep-post-{_sweepIndex}");
+
+        Log($"[CALLSWEEP] Candidate [{_sweepIndex}] fired. Check game for visible effect.");
+        _sweepIndex++;
+    }
+
+    /// <summary>
+    /// Reset sweep index (for starting a new sweep session).
+    /// </summary>
+    public static void ResetCallSweep() => _sweepIndex = 0;
 }
