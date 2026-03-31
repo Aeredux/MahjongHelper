@@ -277,8 +277,8 @@ public sealed class AutoPlayManager
             {
                 if (_lastCallButtonNodes.TryGetValue(call, out var btnPtr) && btnPtr != 0)
                 {
-                    Log($"Executing call accept: clicking {call} button (ptr={btnPtr:X})");
-                    return AddonClickHelper.TryClickCallButton(addon, btnPtr, call.ToString());
+                    Log($"Executing call accept: clicking {call} button (ptr={btnPtr:X}) method=1(ButtonClick25)");
+                    return AddonClickHelper.TryClickCallButton(addon, btnPtr, call.ToString(), 1);
                 }
             }
 

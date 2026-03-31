@@ -408,8 +408,23 @@ public static unsafe class AddonClickHelper
             return false;
         }
 
+        var nodeType = (int)node->Type;
         Log($"[CALL-CLICK] {callName}: ptr={buttonComponentPtr:X} nodeId={node->NodeId} " +
-            $"visible={node->IsVisible()} method={method}");
+            $"type={nodeType} visible={node->IsVisible()} pos=({node->X},{node->Y}) " +
+            $"size=({node->Width}x{node->Height}) method={method}");
+
+        // Log the component's event list for diagnostics
+        try
+        {
+            var ownerNode = comp->OwnerNode;
+            Log($"[CALL-CLICK] comp->OwnerNode={(nint)ownerNode:X} " +
+                $"compNode={(nint)compNode:X} match={((nint)ownerNode == (nint)compNode)}");
+        }
+        catch (Exception ex)
+        {
+            Log($"[CALL-CLICK] Error reading OwnerNode: {ex.Message}");
+        }
+
         LogAtkSnapshot(addon, $"pre-callclick-{callName}-m{method}");
 
         try
@@ -418,69 +433,100 @@ public static unsafe class AddonClickHelper
             switch (method)
             {
                 case 1:
-                    // Component ReceiveEvent with MouseClick
+                    // ButtonClick (type 25) on the component — the correct event type for AtkComponentButton
                     {
+                        var eventData = stackalloc byte[0x28]; // AtkEventData zeroed
                         var evt = stackalloc AtkEvent[1];
-                        evt->Param = (uint)node->NodeId;
+                        *evt = default;
+                        evt->Param = 0;
                         evt->Target = (AtkEventTarget*)node;
                         evt->Listener = (AtkEventListener*)comp;
                         evt->NextEvent = null;
-                        comp->ReceiveEvent(AtkEventType.MouseClick, (int)node->NodeId, evt);
-                        Log($"[CALL-CLICK] Method 1: component MouseClick nodeId={node->NodeId}");
+                        comp->ReceiveEvent((AtkEventType)25, 0, evt, (AtkEventData*)eventData);
+                        Log($"[CALL-CLICK] Method 1: component ButtonClick(25) nodeId={node->NodeId}");
                         result = true;
                     }
                     break;
 
                 case 2:
-                    // Addon ReceiveEvent with MouseClick
+                    // ButtonClick (type 25) dispatched through the addon
                     {
+                        var eventData = stackalloc byte[0x28];
                         var evt = stackalloc AtkEvent[1];
+                        *evt = default;
                         evt->Param = (uint)node->NodeId;
                         evt->Target = (AtkEventTarget*)node;
                         evt->Listener = (AtkEventListener*)addon;
                         evt->NextEvent = null;
-                        addon->ReceiveEvent(AtkEventType.MouseClick, (int)node->NodeId, evt, null);
-                        Log($"[CALL-CLICK] Method 2: addon MouseClick nodeId={node->NodeId}");
+                        addon->ReceiveEvent((AtkEventType)25, (int)node->NodeId, evt, (AtkEventData*)eventData);
+                        Log($"[CALL-CLICK] Method 2: addon ButtonClick(25) nodeId={node->NodeId}");
                         result = true;
                     }
                     break;
 
                 case 3:
-                    // Component ReceiveEvent with event type 0x17 (Saucy CuffACur pattern)
+                    // MouseClick (type 9) on addon with mouse data at button center
                     {
+                        var eventData = stackalloc byte[0x28];
+                        // Set mouse position to center of the button
+                        var mouseData = (short*)eventData;
+                        mouseData[0] = (short)(node->X + node->Width / 2);  // PosX
+                        mouseData[1] = (short)(node->Y + node->Height / 2); // PosY
                         var evt = stackalloc AtkEvent[1];
-                        evt->Param = 0;
+                        *evt = default;
+                        evt->Param = (uint)node->NodeId;
                         evt->Target = (AtkEventTarget*)node;
-                        evt->Listener = (AtkEventListener*)comp;
+                        evt->Listener = (AtkEventListener*)addon;
                         evt->NextEvent = null;
-                        comp->ReceiveEvent((AtkEventType)0x17, 0, evt);
-                        Log($"[CALL-CLICK] Method 3: component event 0x17");
+                        addon->ReceiveEvent(AtkEventType.MouseClick, (int)node->NodeId, evt, (AtkEventData*)eventData);
+                        Log($"[CALL-CLICK] Method 3: addon MouseClick(9) at center nodeId={node->NodeId}");
                         result = true;
                     }
                     break;
 
                 case 4:
-                    // Addon ReceiveEvent with ButtonClick (0x09)
+                    // Full button press sequence: ButtonPress(23) → ButtonRelease(24) → ButtonClick(25)
                     {
+                        var eventData4 = stackalloc byte[0x28];
+                        var evts4 = stackalloc AtkEvent[3];
+                        for (int i = 0; i < 3; i++)
+                        {
+                            evts4[i] = default;
+                            evts4[i].Param = 0;
+                            evts4[i].Target = (AtkEventTarget*)node;
+                            evts4[i].Listener = (AtkEventListener*)comp;
+                            evts4[i].NextEvent = null;
+                        }
+                        comp->ReceiveEvent((AtkEventType)23, 0, &evts4[0], (AtkEventData*)eventData4);
+                        comp->ReceiveEvent((AtkEventType)24, 0, &evts4[1], (AtkEventData*)eventData4);
+                        comp->ReceiveEvent((AtkEventType)25, 0, &evts4[2], (AtkEventData*)eventData4);
+                        Log($"[CALL-CLICK] Method 4: component Press(23)+Release(24)+Click(25)");
+                        result = true;
+                    }
+                    break;
+
+                case 5:
+                    // ListItemClick (type 35) — call buttons may be list items inside a list component
+                    {
+                        var eventData = stackalloc byte[0x28];
                         var evt = stackalloc AtkEvent[1];
-                        evt->Param = (uint)node->NodeId;
+                        *evt = default;
+                        evt->Param = 0;
                         evt->Target = (AtkEventTarget*)node;
-                        evt->Listener = (AtkEventListener*)addon;
+                        evt->Listener = (AtkEventListener*)comp;
                         evt->NextEvent = null;
-                        addon->ReceiveEvent((AtkEventType)0x09, (int)node->NodeId, evt, null);
-                        Log($"[CALL-CLICK] Method 4: addon ButtonClick 0x09 nodeId={node->NodeId}");
+                        comp->ReceiveEvent((AtkEventType)35, 0, evt, (AtkEventData*)eventData);
+                        Log($"[CALL-CLICK] Method 5: component ListItemClick(35)");
                         result = true;
                     }
                     break;
 
                 default:
-                    // Method 0 / auto: try methods 1-4 in sequence
-                    Log($"[CALL-CLICK] Auto: trying methods 1-4 for {callName}");
-                    for (int m = 1; m <= 4; m++)
-                    {
-                        TryClickCallButton(addon, buttonComponentPtr, callName, m);
-                    }
-                    result = true;
+                    // Method 0: diagnostic only — log button info, don't click
+                    Log($"[CALL-CLICK] Method 0: info only. Use '/mj clickcall {callName} <1-5> run' to test individual methods.");
+                    Log($"[CALL-CLICK]   1=ButtonClick(25) on comp, 2=ButtonClick(25) on addon, " +
+                        $"3=MouseClick(9) on addon, 4=Press+Release+Click sequence, 5=ListItemClick(35)");
+                    result = false;
                     break;
             }
 
@@ -489,7 +535,7 @@ public static unsafe class AddonClickHelper
         }
         catch (Exception ex)
         {
-            Log($"[CALL-CLICK] ERROR clicking {callName} method={method}: {ex.Message}");
+            Log($"[CALL-CLICK] ERROR clicking {callName} method={method}: {ex.Message}\n{ex.StackTrace}");
             return false;
         }
     }
