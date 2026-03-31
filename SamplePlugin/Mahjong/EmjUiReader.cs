@@ -876,7 +876,7 @@ public static unsafe class EmjUiReader
                     if (comp->Component == null) continue;
 
                     // Scan up to 3 levels deep: container(1032) → list(1030) → button(1029) → text
-                    ScanComponentForCalls(comp->Component, ref calls, buttonNodes, 0, 3);
+                    ScanComponentForCalls(comp->Component, comp, ref calls, buttonNodes, 0, 3);
                 }
                 catch { }
             }
@@ -886,8 +886,8 @@ public static unsafe class EmjUiReader
         return calls;
     }
 
-    private static void ScanComponentForCalls(AtkComponentBase* comp, ref CallOptions calls,
-        Dictionary<CallOptions, nint> buttonNodes, int depth, int maxDepth)
+    private static void ScanComponentForCalls(AtkComponentBase* comp, AtkComponentNode* ownerNode,
+        ref CallOptions calls, Dictionary<CallOptions, nint> buttonNodes, int depth, int maxDepth)
     {
         if (comp == null || depth > maxDepth) return;
 
@@ -940,15 +940,15 @@ public static unsafe class EmjUiReader
                     if (matched.HasValue)
                     {
                         calls |= matched.Value;
-                        // Store the parent component pointer as the clickable button node
-                        buttonNodes.TryAdd(matched.Value, (nint)comp);
+                        // Store the owning AtkComponentNode* as the clickable button node
+                        buttonNodes.TryAdd(matched.Value, (nint)ownerNode);
                     }
                 }
                 else if ((int)cn->Type >= 1000)
                 {
                     var subComp = (AtkComponentNode*)cn;
                     if (subComp->Component != null)
-                        ScanComponentForCalls(subComp->Component, ref calls, buttonNodes, depth + 1, maxDepth);
+                        ScanComponentForCalls(subComp->Component, subComp, ref calls, buttonNodes, depth + 1, maxDepth);
                 }
             }
             catch { }
