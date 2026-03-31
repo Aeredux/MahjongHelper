@@ -24,6 +24,34 @@ public static unsafe class AddonClickHelper
     // Callback 8 also works as skip/pass on call prompts
     private const int CallbackIdSkipCall = 8;
 
+    // P/Invoke for SendInput mouse click
+    [DllImport("user32.dll")] private static extern bool SetCursorPos(int X, int Y);
+    [DllImport("user32.dll")] private static extern bool GetCursorPos(out POINT lpPoint);
+    [DllImport("user32.dll")] private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+    [DllImport("user32.dll")] private static extern bool ClientToScreen(nint hWnd, ref POINT lpPoint);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT { public int X, Y; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MOUSEINPUT
+    {
+        public int dx, dy;
+        public uint mouseData, dwFlags, time;
+        public nint dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct INPUT
+    {
+        public uint type;
+        public MOUSEINPUT mi;
+    }
+
+    private const uint INPUT_MOUSE = 0;
+    private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+    private const uint MOUSEEVENTF_LEFTUP = 0x0004;
+
     /// <summary>
     /// Discards a tile at the given hand position (0 = leftmost in sorted hand).
     /// Uses FireCallback(2, [7, handPos], true).
@@ -630,204 +658,104 @@ public static unsafe class AddonClickHelper
                     break;
 
                 case 9:
-                    // Construct a NEW AtkEvent on the stack with ListItemClick fields copied from
-                    // the parent list's registered event, but with Node set to the button node.
-                    // Previous version crashed: passing the raw registered event had Node=null,
-                    // and AddonEmj.ReceiveEvent dereferences Node at offset 0x10.
+                    // SelectString-style: FireCallback(1, [0]) — select first list item (index 0)
+                    // This common pattern was NEVER tested in callsweep (sweep started at value 1, not 0)
                     {
-                        var resNode9 = (AtkResNode*)compNode;
-                        // Get button's list item index from its registered events
-                        uint buttonParam = 0;
-                        var btnEvt9 = resNode9->AtkEventManager.Event;
-                        if (btnEvt9 != null)
-                            buttonParam = btnEvt9->Param;
-                        Log($"[CALL-CLICK] Method 9: button item param={buttonParam}");
-
-                        var parentNode9 = resNode9->ParentNode;
-                        if (parentNode9 != null)
-                        {
-                            Log($"[CALL-CLICK] Method 9: parent id={parentNode9->NodeId} type={(int)parentNode9->Type}");
-                            // Find ListItemClick event on the parent list node
-                            var listEvt = parentNode9->AtkEventManager.Event;
-                            AtkEvent* listItemClickEvt = null;
-                            int idx9 = 0;
-                            while (listEvt != null && idx9 < 20)
-                            {
-                                Log($"[CALL-CLICK] Method 9: parent event[{idx9}] type={listEvt->State.EventType} " +
-                                    $"param={listEvt->Param} target={(nint)listEvt->Target:X} " +
-                                    $"listener={(nint)listEvt->Listener:X} node={(nint)listEvt->Node:X}");
-                                if (listEvt->State.EventType == AtkEventType.ListItemClick)
-                                {
-                                    listItemClickEvt = listEvt;
-                                    break;
-                                }
-                                listEvt = listEvt->NextEvent;
-                                idx9++;
-                            }
-
-                            if (listItemClickEvt != null)
-                            {
-                                // Construct a safe copy with Node pointing to the button node (not null)
-                                var safeEvt = stackalloc AtkEvent[1];
-                                *safeEvt = *listItemClickEvt;       // copy all fields
-                                safeEvt->Node = resNode9;           // set Node to button (the clicked item)
-                                safeEvt->Param = buttonParam;       // item index
-                                safeEvt->NextEvent = null;          // don't chain
-
-                                LogAtkSnapshot(addon, "pre-m9");
-                                Log($"[CALL-CLICK] Method 9: Firing ListItemClick with safe event: " +
-                                    $"param={buttonParam} target={(nint)safeEvt->Target:X} " +
-                                    $"listener={(nint)safeEvt->Listener:X} node={(nint)safeEvt->Node:X}");
-                                addon->ReceiveEvent(AtkEventType.ListItemClick, (int)buttonParam, safeEvt);
-                                LogAtkSnapshot(addon, "post-m9");
-                                Log($"[CALL-CLICK] Method 9: Done");
-                            }
-                            else
-                            {
-                                Log($"[CALL-CLICK] Method 9: No ListItemClick event found on parent list node");
-                            }
-                        }
-                        else
-                        {
-                            Log($"[CALL-CLICK] Method 9: No parent node found");
-                        }
+                        LogAtkSnapshot(addon, "pre-m9");
+                        var v9 = stackalloc AtkValue[1];
+                        v9[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 0 };
+                        addon->FireCallback(1, v9, true);
+                        LogAtkSnapshot(addon, "post-m9");
+                        Log($"[CALL-CLICK] Method 9: FireCallback(1, [0]) — SelectString pattern index=0");
                         result = true;
                     }
                     break;
 
                 case 10:
-                    // Same as method 9 but with param=0 (alternate item index)
+                    // SelectString-style: FireCallback(1, [1]) — select second list item (index 1)
                     {
-                        var resNode10 = (AtkResNode*)compNode;
-                        var parentNode10 = resNode10->ParentNode;
-                        if (parentNode10 != null)
-                        {
-                            var listEvt10 = parentNode10->AtkEventManager.Event;
-                            AtkEvent* lic10 = null;
-                            while (listEvt10 != null)
-                            {
-                                if (listEvt10->State.EventType == AtkEventType.ListItemClick)
-                                {
-                                    lic10 = listEvt10;
-                                    break;
-                                }
-                                listEvt10 = listEvt10->NextEvent;
-                            }
-                            if (lic10 != null)
-                            {
-                                var safeEvt10 = stackalloc AtkEvent[1];
-                                *safeEvt10 = *lic10;
-                                safeEvt10->Node = (AtkResNode*)compNode;
-                                safeEvt10->Param = 0;
-                                safeEvt10->NextEvent = null;
-
-                                LogAtkSnapshot(addon, "pre-m10");
-                                Log($"[CALL-CLICK] Method 10: Firing ListItemClick with safe event param=0 " +
-                                    $"node={(nint)safeEvt10->Node:X}");
-                                addon->ReceiveEvent(AtkEventType.ListItemClick, 0, safeEvt10);
-                                LogAtkSnapshot(addon, "post-m10");
-                                Log($"[CALL-CLICK] Method 10: Done");
-                            }
-                            else
-                            {
-                                Log($"[CALL-CLICK] Method 10: No ListItemClick on parent");
-                            }
-                        }
+                        LogAtkSnapshot(addon, "pre-m10");
+                        var v10 = stackalloc AtkValue[1];
+                        v10[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 1 };
+                        addon->FireCallback(1, v10, true);
+                        LogAtkSnapshot(addon, "post-m10");
+                        Log($"[CALL-CLICK] Method 10: FireCallback(1, [1]) — SelectString pattern index=1");
                         result = true;
                     }
                     break;
 
                 case 11:
-                    // Fire ButtonClick from button's own registered events through addon
-                    // (the button's registered events have valid Node fields, unlike ListItemClick)
+                    // SelectString-style with button's event param minus 1 (in case it's 1-indexed)
                     {
                         var resNode11 = (AtkResNode*)compNode;
-                        var evt11 = resNode11->AtkEventManager.Event;
-                        AtkEvent* buttonClickEvt = null;
-                        int idx11 = 0;
-                        while (evt11 != null && idx11 < 20)
-                        {
-                            if (evt11->State.EventType == AtkEventType.ButtonClick)
-                            {
-                                buttonClickEvt = evt11;
-                                break;
-                            }
-                            evt11 = evt11->NextEvent;
-                            idx11++;
-                        }
-                        if (buttonClickEvt != null)
-                        {
-                            LogAtkSnapshot(addon, "pre-m11");
-                            Log($"[CALL-CLICK] Method 11: Firing ButtonClick through addon param={buttonClickEvt->Param} " +
-                                $"node={(nint)buttonClickEvt->Node:X}");
-                            addon->ReceiveEvent(AtkEventType.ButtonClick, (int)buttonClickEvt->Param, buttonClickEvt);
-                            LogAtkSnapshot(addon, "post-m11");
-                            Log($"[CALL-CLICK] Method 11: Done");
-                        }
-                        else
-                        {
-                            Log($"[CALL-CLICK] Method 11: No ButtonClick event found on button node");
-                        }
+                        uint btnParam11 = 0;
+                        var be11 = resNode11->AtkEventManager.Event;
+                        if (be11 != null) btnParam11 = be11->Param;
+                        int idx11 = (int)btnParam11 > 0 ? (int)btnParam11 - 1 : (int)btnParam11;
+
+                        LogAtkSnapshot(addon, "pre-m11");
+                        var v11 = stackalloc AtkValue[1];
+                        v11[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = idx11 };
+                        addon->FireCallback(1, v11, true);
+                        LogAtkSnapshot(addon, "post-m11");
+                        Log($"[CALL-CLICK] Method 11: FireCallback(1, [{idx11}]) — adjusted from button param={btnParam11}");
                         result = true;
                     }
                     break;
 
                 case 12:
-                    // Fire ListItemClick through list COMPONENT's ReceiveEvent (not addon)
-                    // The list component may handle item selection internally
+                    // Real mouse click via SendInput at computed screen position
                     {
-                        var resNode12 = (AtkResNode*)compNode;
-                        uint btnParam12 = 0;
-                        var be12 = resNode12->AtkEventManager.Event;
-                        if (be12 != null) btnParam12 = be12->Param;
-
-                        var parentNode12 = resNode12->ParentNode;
-                        if (parentNode12 != null && (int)parentNode12->Type >= 1000)
+                        // Walk parent chain to compute game-client position
+                        float clientX = node->X;
+                        float clientY = node->Y;
+                        var p12 = node->ParentNode;
+                        int d12 = 0;
+                        while (p12 != null)
                         {
-                            var parentCompNode12 = (AtkComponentNode*)parentNode12;
-                            var parentComp12 = parentCompNode12->Component;
-                            if (parentComp12 != null)
-                            {
-                                // Find ListItemClick on parent
-                                var le12 = parentNode12->AtkEventManager.Event;
-                                AtkEvent* lic12 = null;
-                                while (le12 != null)
-                                {
-                                    if (le12->State.EventType == AtkEventType.ListItemClick)
-                                    { lic12 = le12; break; }
-                                    le12 = le12->NextEvent;
-                                }
-                                if (lic12 != null)
-                                {
-                                    var safeEvt12 = stackalloc AtkEvent[1];
-                                    *safeEvt12 = *lic12;
-                                    safeEvt12->Node = resNode12;
-                                    safeEvt12->Param = btnParam12;
-                                    safeEvt12->NextEvent = null;
+                            Log($"[CALL-CLICK] Method 12: parent[{d12}] id={p12->NodeId} offset=({p12->X},{p12->Y})");
+                            clientX += p12->X;
+                            clientY += p12->Y;
+                            p12 = p12->ParentNode;
+                            d12++;
+                        }
 
-                                    LogAtkSnapshot(addon, "pre-m12");
-                                    Log($"[CALL-CLICK] Method 12: Firing ListItemClick through list COMPONENT param={btnParam12}");
-                                    parentComp12->ReceiveEvent(AtkEventType.ListItemClick, (int)btnParam12, safeEvt12);
-                                    LogAtkSnapshot(addon, "post-m12");
-                                    Log($"[CALL-CLICK] Method 12: Done");
-                                }
-                                else
-                                {
-                                    Log($"[CALL-CLICK] Method 12: No ListItemClick on parent list");
-                                }
-                            }
-                        }
-                        else
-                        {
-                            Log($"[CALL-CLICK] Method 12: Parent is not a component");
-                        }
+                        int centerX = (int)(clientX + node->Width / 2.0f);
+                        int centerY = (int)(clientY + node->Height / 2.0f);
+
+                        Log($"[CALL-CLICK] Method 12: client pos=({clientX},{clientY}) center=({centerX},{centerY}) " +
+                            $"addon=({addon->X},{addon->Y}) scale={addon->Scale}");
+
+                        // Convert from game client coordinates to screen coordinates
+                        var hwnd = System.Diagnostics.Process.GetCurrentProcess().MainWindowHandle;
+                        var screenPt = new POINT { X = centerX, Y = centerY };
+                        ClientToScreen(hwnd, ref screenPt);
+
+                        Log($"[CALL-CLICK] Method 12: screen=({screenPt.X},{screenPt.Y}) hwnd={hwnd:X}");
+
+                        // Save cursor, move to target, click, restore
+                        GetCursorPos(out var prevPos);
+                        SetCursorPos(screenPt.X, screenPt.Y);
+
+                        var inputs = new INPUT[2];
+                        inputs[0] = new INPUT { type = INPUT_MOUSE, mi = new MOUSEINPUT { dwFlags = MOUSEEVENTF_LEFTDOWN } };
+                        inputs[1] = new INPUT { type = INPUT_MOUSE, mi = new MOUSEINPUT { dwFlags = MOUSEEVENTF_LEFTUP } };
+                        var sent = SendInput(2, inputs, Marshal.SizeOf<INPUT>());
+
+                        Log($"[CALL-CLICK] Method 12: SendInput returned {sent} (expected 2)");
+
+                        // Restore cursor after a brief delay to let the click register
+                        System.Threading.Thread.Sleep(50);
+                        SetCursorPos(prevPos.X, prevPos.Y);
+
+                        LogAtkSnapshot(addon, "post-m12");
+                        Log($"[CALL-CLICK] Method 12: Click sent at screen ({screenPt.X},{screenPt.Y})");
                         result = true;
                     }
                     break;
 
                 case 13:
-                    // SelectString-style: FireCallback with item index
-                    // Many FFXIV list addons accept Callback(true, itemIndex) 
+                    // FireCallback(2, [9, itemIndex]) — callback 9 with item index
                     {
                         var resNode13 = (AtkResNode*)compNode;
                         uint btnParam13 = 0;
@@ -835,7 +763,6 @@ public static unsafe class AddonClickHelper
                         if (be13 != null) btnParam13 = be13->Param;
 
                         LogAtkSnapshot(addon, "pre-m13");
-                        // Try FireCallback(2, [9, itemIndex]) — callback 9 with item index
                         var v13 = stackalloc AtkValue[2];
                         v13[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 9 };
                         v13[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = (int)btnParam13 };
@@ -847,7 +774,7 @@ public static unsafe class AddonClickHelper
                     break;
 
                 case 14:
-                    // FireCallback with [9, 0] — accept first call option
+                    // FireCallback(2, [9, 0]) — accept first call option
                     {
                         LogAtkSnapshot(addon, "pre-m14");
                         var v14 = stackalloc AtkValue[2];
