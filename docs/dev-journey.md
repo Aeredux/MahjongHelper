@@ -635,3 +635,34 @@ Features:
 - `Plugin.cs`
   - Added `/mj clickcall [type] [method] run` command for manual testing of individual call button clicks
   - Passes `CallButtonNodes` from `_lastUiState` to `AutoPlayManager.OnGameStateUpdate()`
+
+## 2026-03-31: ECommons-Style Button Click (Call Accept Breakthrough)
+
+**What:** Researched ECommons/ClickLib Dalamud community patterns for clicking addon buttons. Discovered that all previous click methods (1-5) were fundamentally wrong — they fabricated events from scratch with arbitrary parameters. The correct approach reads pre-registered events from `AtkResNode.AtkEventManager.Event` and replays them.
+
+**Why:** Methods 1-5 (ButtonClick 25, MouseClick 9, Press+Release+Click, ListItemClick 35) all dispatched cleanly but had zero effect on call prompt buttons. The ECommons `ClickAddonButton` extension method revealed the correct pattern: buttons store their own registered events (type, param, target, listener) in a linked list, and the correct click simulation replays those registered events through the addon.
+
+**Key discovery:**
+```csharp
+// ECommons pattern (what works):
+var evt = resNode->AtkEventManager.Event;  // read registered event
+addon->ReceiveEvent(evt->State.EventType, (int)evt->Param, evt);
+
+// Our old pattern (what didn't work):
+var evt = new AtkEvent { Param = 0, Target = ..., Listener = ... };
+addon->ReceiveEvent((AtkEventType)25, 0, evt, eventData);  // fabricated params
+```
+
+**Changes:**
+- `AddonClickHelper.cs`
+  - Method 6: ECommons-style — reads registered events from AtkEventManager, replays first through addon
+  - Method 7: Replays ALL registered events individually with AtkSnapshots between each
+  - Method 8: Walks parent chain (button → list → container) and replays events from each ancestor
+  - Method 0 diagnostic: now dumps all registered events on button node and parent chain (event type, param, target, listener, flags)
+- `Plugin.cs`
+  - clickcall command: method 0 (diagnostic) now auto-executes without requiring 'run' keyword
+  - clickcall command: all output now also written to autoplay.log for reliable debugging
+- `AutoPlayManager.cs`
+  - `ExecuteCallResponse()` now uses method 6 (ECommons-style) instead of method 1 (ButtonClick 25)
+- `PluginDebugHelpers.cs`
+  - Added `LogToFile(filename, message)` helper for writing to specific log files
