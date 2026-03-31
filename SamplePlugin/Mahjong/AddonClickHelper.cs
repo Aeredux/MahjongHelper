@@ -521,6 +521,114 @@ public static unsafe class AddonClickHelper
                     }
                     break;
 
+                case 6:
+                    // ECommons-style ClickAddonButton: read the button's registered events and replay through addon
+                    {
+                        var resNode = (AtkResNode*)compNode;
+                        var regEvt = resNode->AtkEventManager.Event;
+                        
+                        // Log all registered events
+                        var e = regEvt;
+                        int evtIdx = 0;
+                        while (e != null && evtIdx < 20)
+                        {
+                            Log($"[CALL-CLICK] RegisteredEvent[{evtIdx}]: type={e->State.EventType} param={e->Param} " +
+                                $"target={(nint)e->Target:X} listener={(nint)e->Listener:X} node={(nint)e->Node:X}");
+                            e = e->NextEvent;
+                            evtIdx++;
+                        }
+
+                        if (regEvt == null)
+                        {
+                            Log($"[CALL-CLICK] Method 6: No events registered on button node! Trying parent nodes...");
+                            // Try the parent node (list component)
+                            var parentNode = node->ParentNode;
+                            if (parentNode != null)
+                            {
+                                regEvt = parentNode->AtkEventManager.Event;
+                                e = regEvt;
+                                evtIdx = 0;
+                                while (e != null && evtIdx < 20)
+                                {
+                                    Log($"[CALL-CLICK] ParentEvent[{evtIdx}]: type={e->State.EventType} param={e->Param} " +
+                                        $"target={(nint)e->Target:X} listener={(nint)e->Listener:X}");
+                                    e = e->NextEvent;
+                                    evtIdx++;
+                                }
+                            }
+                        }
+
+                        if (regEvt != null)
+                        {
+                            Log($"[CALL-CLICK] Method 6: Replaying first registered event type={regEvt->State.EventType} param={regEvt->Param}");
+                            addon->ReceiveEvent(regEvt->State.EventType, (int)regEvt->Param, regEvt);
+                            Log($"[CALL-CLICK] Method 6: Done");
+                        }
+                        else
+                        {
+                            Log($"[CALL-CLICK] Method 6: No registered events found on button or parent!");
+                        }
+                        result = true;
+                    }
+                    break;
+
+                case 7:
+                    // Replay each registered event individually with AtkSnapshot between them
+                    {
+                        var resNode7 = (AtkResNode*)compNode;
+                        var evt7 = resNode7->AtkEventManager.Event;
+                        int idx7 = 0;
+                        while (evt7 != null && idx7 < 20)
+                        {
+                            LogAtkSnapshot(addon, $"pre-regevt-{idx7}");
+                            Log($"[CALL-CLICK] Method 7: Firing event[{idx7}] type={evt7->State.EventType} param={evt7->Param}");
+                            addon->ReceiveEvent(evt7->State.EventType, (int)evt7->Param, evt7);
+                            LogAtkSnapshot(addon, $"post-regevt-{idx7}");
+                            evt7 = evt7->NextEvent;
+                            idx7++;
+                        }
+                        if (idx7 == 0)
+                            Log($"[CALL-CLICK] Method 7: No registered events on button node");
+                        result = true;
+                    }
+                    break;
+
+                case 8:
+                    // Walk parent chain and replay registered events from each ancestor (list → container → addon root)
+                    {
+                        var walkNode = node;
+                        int depth8 = 0;
+                        while (walkNode != null && depth8 < 5)
+                        {
+                            var walkEvt = walkNode->AtkEventManager.Event;
+                            int idx8 = 0;
+                            while (walkEvt != null && idx8 < 10)
+                            {
+                                Log($"[CALL-CLICK] Method 8: depth={depth8} event[{idx8}] type={walkEvt->State.EventType} " +
+                                    $"param={walkEvt->Param} target={(nint)walkEvt->Target:X} listener={(nint)walkEvt->Listener:X}");
+                                idx8++;
+                                walkEvt = walkEvt->NextEvent;
+                            }
+                            if (idx8 > 0)
+                            {
+                                // Replay the first event from this node
+                                var firstEvt = walkNode->AtkEventManager.Event;
+                                LogAtkSnapshot(addon, $"pre-parent{depth8}");
+                                Log($"[CALL-CLICK] Method 8: Replaying from depth={depth8} type={firstEvt->State.EventType} param={firstEvt->Param}");
+                                addon->ReceiveEvent(firstEvt->State.EventType, (int)firstEvt->Param, firstEvt);
+                                LogAtkSnapshot(addon, $"post-parent{depth8}");
+                            }
+                            else
+                            {
+                                Log($"[CALL-CLICK] Method 8: depth={depth8} — no events registered");
+                            }
+                            walkNode = walkNode->ParentNode;
+                            depth8++;
+                        }
+                        result = true;
+                    }
+                    break;
+
                 default:
                     // Method 0: deep diagnostic — dump button info, parent chain, event registrations
                     Log($"[CALL-CLICK] Method 0: DIAGNOSTIC for {callName}");
@@ -544,6 +652,32 @@ public static unsafe class AddonClickHelper
                         }
                     }
                     catch (Exception pex) { Log($"[CALL-CLICK]   parent walk error: {pex.Message}"); }
+
+                    // Dump registered events on button node AND its parents
+                    try
+                    {
+                        Log($"[CALL-CLICK]   --- Registered Events ---");
+                        var diagNode = node;
+                        int diagDepth = 0;
+                        while (diagNode != null && diagDepth < 5)
+                        {
+                            var diagEvt = diagNode->AtkEventManager.Event;
+                            int diagIdx = 0;
+                            while (diagEvt != null && diagIdx < 15)
+                            {
+                                Log($"[CALL-CLICK]   events[depth={diagDepth}][{diagIdx}]: type={diagEvt->State.EventType} " +
+                                    $"param={diagEvt->Param} target={(nint)diagEvt->Target:X} listener={(nint)diagEvt->Listener:X} " +
+                                    $"flags={diagEvt->State.StateFlags}");
+                                diagEvt = diagEvt->NextEvent;
+                                diagIdx++;
+                            }
+                            if (diagIdx == 0)
+                                Log($"[CALL-CLICK]   events[depth={diagDepth}]: (none)");
+                            diagNode = diagNode->ParentNode;
+                            diagDepth++;
+                        }
+                    }
+                    catch (Exception eex) { Log($"[CALL-CLICK]   event dump error: {eex.Message}"); }
 
                     // Dump ALL AtkValues (not just first 20)
                     try
@@ -612,7 +746,7 @@ public static unsafe class AddonClickHelper
                     }
                     catch (Exception cex) { Log($"[CALL-CLICK]   child dump error: {cex.Message}"); }
 
-                    Log($"[CALL-CLICK]   Use '/mj clickcall {callName} <1-5> run' to test click methods.");
+                    Log($"[CALL-CLICK]   Use '/mj clickcall {callName} <1-8> run' to test click methods.");
                     result = false;
                     break;
             }

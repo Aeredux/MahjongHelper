@@ -860,8 +860,8 @@ public sealed partial class Plugin : IDalamudPlugin
         else if (lower.StartsWith("clickcall"))
         {
             // Usage: /mj clickcall [pon|chi|kan|ron|tsumo|riichi] [method] [run]
-            // If no call type specified, clicks the highest-priority available call button.
-            // method: 0=auto(all), 1=comp MouseClick, 2=addon MouseClick, 3=event 0x17, 4=event 0x09
+            // 'run' is required for methods 1-8 (click actions). Method 0 (diagnostic) always runs.
+            // Methods: 0=diagnostic, 1-5=legacy, 6=ECommons-style, 7=replay-all-events, 8=parent-chain-events
             var parts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             EmjUiReader.CallOptions? targetCall = null;
             var method = 0;
@@ -880,17 +880,28 @@ public sealed partial class Plugin : IDalamudPlugin
                 else if (p == "riichi") targetCall = EmjUiReader.CallOptions.Riichi;
             }
 
+            // Method 0 (diagnostic) always executes even without 'run'
+            if (method == 0) execute = true;
+
             var buttonNodes = _lastUiState?.GameInfo?.CallButtonNodes;
             if (buttonNodes == null || buttonNodes.Count == 0)
             {
-                AppendRecentTransition($"{DateTime.UtcNow:O} clickcall: no call button nodes captured (is a call prompt visible?)");
+                var msg = $"{DateTime.UtcNow:O} clickcall: no call button nodes captured (is a call prompt visible?)";
+                AppendRecentTransition(msg);
+                LogToFile("autoplay.log", msg);
             }
             else if (!execute)
             {
                 // Dry run: log available buttons
                 foreach (var kvp in buttonNodes)
-                    AppendRecentTransition($"{DateTime.UtcNow:O} clickcall DRY-RUN: {kvp.Key} ptr={kvp.Value:X}");
-                AppendRecentTransition($"{DateTime.UtcNow:O} clickcall: use '/mj clickcall [type] [method] run' to execute");
+                {
+                    var msg = $"{DateTime.UtcNow:O} clickcall DRY-RUN: {kvp.Key} ptr={kvp.Value:X}";
+                    AppendRecentTransition(msg);
+                    LogToFile("autoplay.log", msg);
+                }
+                var hint = $"{DateTime.UtcNow:O} clickcall: use '/mj clickcall [type] [method] run' to execute (method 0=diag always runs)";
+                AppendRecentTransition(hint);
+                LogToFile("autoplay.log", hint);
             }
             else
             {
@@ -899,7 +910,9 @@ public sealed partial class Plugin : IDalamudPlugin
                     var addonPtr = _lastAddonAddress != 0 ? (AtkUnitBase*)_lastAddonAddress : null;
                     if (addonPtr == null)
                     {
-                        AppendRecentTransition($"{DateTime.UtcNow:O} clickcall: no addon");
+                        var msg = $"{DateTime.UtcNow:O} clickcall: no addon";
+                        AppendRecentTransition(msg);
+                        LogToFile("autoplay.log", msg);
                     }
                     else
                     {
@@ -933,11 +946,15 @@ public sealed partial class Plugin : IDalamudPlugin
                         if (btnPtr != 0)
                         {
                             AddonClickHelper.TryClickCallButton(addonPtr, btnPtr, callName, method);
-                            AppendRecentTransition($"{DateTime.UtcNow:O} clickcall EXECUTE {callName} method={method}");
+                            var msg = $"{DateTime.UtcNow:O} clickcall EXECUTE {callName} method={method}";
+                            AppendRecentTransition(msg);
+                            LogToFile("autoplay.log", msg);
                         }
                         else
                         {
-                            AppendRecentTransition($"{DateTime.UtcNow:O} clickcall: target call '{targetCall}' not found in captured buttons");
+                            var msg = $"{DateTime.UtcNow:O} clickcall: target call '{targetCall}' not found in captured buttons";
+                            AppendRecentTransition(msg);
+                            LogToFile("autoplay.log", msg);
                         }
                     }
                 }

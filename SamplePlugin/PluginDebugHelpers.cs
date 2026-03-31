@@ -627,6 +627,18 @@ public sealed partial class Plugin
             _recentTransitions.RemoveAt(0);
     }
 
+    private static void LogToFile(string filename, string message)
+    {
+        try
+        {
+            Directory.CreateDirectory(CacheDirectory);
+            File.AppendAllText(
+                Path.Combine(CacheDirectory, filename),
+                $"[{DateTime.UtcNow:O}] {message}\n");
+        }
+        catch { }
+    }
+
     private string BuildDiagnosticsText()
     {
         var sb = new StringBuilder();
