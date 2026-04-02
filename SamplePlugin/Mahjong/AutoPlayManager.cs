@@ -21,6 +21,7 @@ public sealed class AutoPlayManager
     private ISuggestionProvider _activeProvider;
 
     // State tracking
+    private readonly Random _rng = new();
     private DateTime _actionScheduledAtUtc;
     private DateTime _actionExecuteAtUtc;
     private string? _pendingAction; // "discard:TILE" or "call:accept" or "call:pass"
@@ -281,9 +282,10 @@ public sealed class AutoPlayManager
         _lastActionSignature = sig;
         _pendingAction = sig;
         _actionScheduledAtUtc = DateTime.UtcNow;
-        _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(_config.AutoPlayDelayMs);
+        var delayMs = _rng.Next(_config.AutoDiscardDelayMinMs, _config.AutoDiscardDelayMaxMs + 1);
+        _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(delayMs);
 
-        Log($"Scheduled: {sig} provider={_activeProvider.GetType().Name} (execute at +{_config.AutoPlayDelayMs}ms)");
+        Log($"Scheduled: {sig} provider={_activeProvider.GetType().Name} (execute at +{delayMs}ms)");
     }
 
     private void TryScheduleCallResponse()
@@ -313,9 +315,10 @@ public sealed class AutoPlayManager
         _lastActionSignature = action;
         _pendingAction = action;
         _actionScheduledAtUtc = DateTime.UtcNow;
-        _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(_config.AutoPlayDelayMs);
+        var callDelayMs = _rng.Next(_config.AutoCallDelayMinMs, _config.AutoCallDelayMaxMs + 1);
+        _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(callDelayMs);
 
-        Log($"Scheduled: {action} provider={_activeProvider.GetType().Name} (execute at +{_config.AutoPlayDelayMs}ms)");
+        Log($"Scheduled: {action} provider={_activeProvider.GetType().Name} (execute at +{callDelayMs}ms)");
     }
 
     private int _scoreAdvanceAttempts; // track retry count for score screen

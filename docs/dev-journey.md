@@ -537,6 +537,35 @@
 **Plugin integration:**
 - Server client created on plugin init, disposed on teardown
 - Periodic health check every 30 seconds via `OnFrameworkUpdate`
+
+## 2026-03-28: Phase 5B — Score Screen Auto-Advance, Riichi Diagnostics, UI Status
+
+**What:** Implemented automatic score screen advancement, added riichi diagnostic logging, and added auto-play status display in the main window.
+
+**Score screen auto-advance:**
+- Added `BetweenRounds` phase detection for atk0=29 (stable score screen) and atk0=32 (animation/transition) in `EmjUiReader.InferGamePhase`
+- `AutoPlayManager` schedules a score advance action with 3000ms delay when `BetweenRounds` detected
+- `AddonClickHelper.TryAdvanceScoreScreen()` scans ULD nodes for text buttons, finds "Next"/"OK"/"Continue"
+- `TryClickButton()` dispatches via `addon->ReceiveEvent` with the button's original registered `AtkEventType.ButtonClick` event
+
+**Click approach discovery (extensive exploration):**
+- FireCallback 7/8: No effect at atk0=29
+- TryAcceptCallViaListClick: "Next" button parent has no ListItemClick event
+- Direct `listener->ReceiveEvent`: Crashes the game (unsafe pointer dispatch)
+- PostMessage with coordinates: FFXIV doesn't process WM_LBUTTONDOWN for addon UI
+- SendInput mouse simulation: No state change
+- **Working approach:** `addon->ReceiveEvent(evt->State.EventType, (int)evt->Param, evt, eventData)` with the ORIGINAL registered event structure. Key insight: must preserve the original listener pointer; must use `AtkEventType.ButtonClick` enum name (NOT `(AtkEventType)0x09` which has a different numeric value).
+
+**Riichi diagnostics:**
+- Added `[RIICHI-DIAG]` logging when riichi suggestion detected, `RiichiDecisionPrompt` phase entered/left, and provider decision for riichi moves
+
+**Auto-play UI status:**
+- Added `autoPlayStatusText` field to `MainWindow` displaying ON/OFF state, provider name, current phase, pending action, and paused status
+- Status text generated in `Plugin.HandleMergedStateUpdate`
+
+**ISuggestionProvider interface:**
+- New file `ISuggestionProvider.cs` with interface + `InGameSuggestionProvider` (reads EmjL addon suggestions) and `ServerSuggestionProvider` (calls Mahjong server API)
+- Supports discard suggestions, call evaluations, and riichi decisions from either source
 - Auto-suggest on state change: when hand changes, builds `SuggestMoveRequest` and fires async request
 - Throttled to 1 request/second, skips duplicate hand signatures
 - Server status shown in diagnostics and as a status line in MainWindow

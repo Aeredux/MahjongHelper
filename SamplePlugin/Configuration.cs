@@ -28,8 +28,17 @@ public class Configuration : IPluginConfiguration
     /// <summary>Auto-accept or decline call prompts based on server evaluation.</summary>
     public bool AutoCallEnabled { get; set; } = true;
 
-    /// <summary>Delay in milliseconds before auto-actions execute (to look natural).</summary>
-    public int AutoPlayDelayMs { get; set; } = 1500;
+    /// <summary>Minimum delay in milliseconds before auto-discard executes.</summary>
+    public int AutoDiscardDelayMinMs { get; set; } = 1000;
+
+    /// <summary>Maximum delay in milliseconds before auto-discard executes.</summary>
+    public int AutoDiscardDelayMaxMs { get; set; } = 3000;
+
+    /// <summary>Minimum delay in milliseconds before auto-call decision executes.</summary>
+    public int AutoCallDelayMinMs { get; set; } = 500;
+
+    /// <summary>Maximum delay in milliseconds before auto-call decision executes.</summary>
+    public int AutoCallDelayMaxMs { get; set; } = 2000;
 
     // The below exists just to make saving less cumbersome
     public void Save()
