@@ -983,8 +983,8 @@ public static unsafe class EmjUiReader
         if (atkPhase == 6)
             return GamePhase.CallDecisionPrompt; // rare: AtkValues says call but no buttons found
 
-        if (atkPhase == 30)
-            return GamePhase.WaitingForDiscard;
+        if (atkPhase == 30 || atkPhase == 2)
+            return GamePhase.WaitingForDiscard; // 30=normal draw turn, 2=discard-after-call (chi/pon/kan)
 
         if (atkPhase == 15)
             return GamePhase.OpponentTurn;

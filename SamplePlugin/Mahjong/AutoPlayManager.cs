@@ -84,6 +84,12 @@ public sealed class AutoPlayManager
         _lastHandSlots = handSlots;
         _lastCallButtonNodes = callButtonNodes;
 
+        // Log phase transitions for diagnostics
+        if (gamePhase != prevPhase)
+        {
+            Log($"Phase transition: {prevPhase} -> {gamePhase}");
+        }
+
         // If phase just changed to WaitingForDiscard and we have a pending suggestion, try scheduling
         if (gamePhase == "WaitingForDiscard" && prevPhase != "WaitingForDiscard")
         {
