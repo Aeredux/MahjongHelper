@@ -24,33 +24,17 @@ public static unsafe class AddonClickHelper
     // Callback 8 also works as skip/pass on call prompts
     private const int CallbackIdSkipCall = 8;
 
-    // P/Invoke for SendInput mouse click
-    [DllImport("user32.dll")] private static extern bool SetCursorPos(int X, int Y);
-    [DllImport("user32.dll")] private static extern bool GetCursorPos(out POINT lpPoint);
-    [DllImport("user32.dll")] private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+    // P/Invoke for PostMessage mouse click (works tabbed out, no cursor movement)
+    [DllImport("user32.dll")] private static extern bool PostMessage(nint hWnd, uint Msg, nint wParam, nint lParam);
     [DllImport("user32.dll")] private static extern bool ClientToScreen(nint hWnd, ref POINT lpPoint);
+    [DllImport("user32.dll")] private static extern bool ScreenToClient(nint hWnd, ref POINT lpPoint);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct POINT { public int X, Y; }
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MOUSEINPUT
-    {
-        public int dx, dy;
-        public uint mouseData, dwFlags, time;
-        public nint dwExtraInfo;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct INPUT
-    {
-        public uint type;
-        public MOUSEINPUT mi;
-    }
-
-    private const uint INPUT_MOUSE = 0;
-    private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
-    private const uint MOUSEEVENTF_LEFTUP = 0x0004;
+    private const uint WM_LBUTTONDOWN = 0x0201;
+    private const uint WM_LBUTTONUP = 0x0202;
+    private const nint MK_LBUTTON = 0x0001;
 
     /// <summary>
     /// Discards a tile at the given hand position (0 = leftmost in sorted hand).
@@ -704,7 +688,7 @@ public static unsafe class AddonClickHelper
                     break;
 
                 case 12:
-                    // Real mouse click via SendInput at computed screen position
+                    // PostMessage mouse click at button position (works tabbed out, no cursor movement)
                     {
                         // Walk parent chain to compute game-client position
                         float clientX = node->X;
@@ -726,30 +710,18 @@ public static unsafe class AddonClickHelper
                         Log($"[CALL-CLICK] Method 12: client pos=({clientX},{clientY}) center=({centerX},{centerY}) " +
                             $"addon=({addon->X},{addon->Y}) scale={addon->Scale}");
 
-                        // Convert from game client coordinates to screen coordinates
                         var hwnd = System.Diagnostics.Process.GetCurrentProcess().MainWindowHandle;
-                        var screenPt = new POINT { X = centerX, Y = centerY };
-                        ClientToScreen(hwnd, ref screenPt);
+                        // lParam = MAKELPARAM(x, y) = (y << 16) | (x & 0xFFFF)
+                        nint lParam = (centerY << 16) | (centerX & 0xFFFF);
 
-                        Log($"[CALL-CLICK] Method 12: screen=({screenPt.X},{screenPt.Y}) hwnd={hwnd:X}");
+                        Log($"[CALL-CLICK] Method 12: PostMessage click at client ({centerX},{centerY}) hwnd={hwnd:X}");
 
-                        // Save cursor, move to target, click, restore
-                        GetCursorPos(out var prevPos);
-                        SetCursorPos(screenPt.X, screenPt.Y);
-
-                        var inputs = new INPUT[2];
-                        inputs[0] = new INPUT { type = INPUT_MOUSE, mi = new MOUSEINPUT { dwFlags = MOUSEEVENTF_LEFTDOWN } };
-                        inputs[1] = new INPUT { type = INPUT_MOUSE, mi = new MOUSEINPUT { dwFlags = MOUSEEVENTF_LEFTUP } };
-                        var sent = SendInput(2, inputs, Marshal.SizeOf<INPUT>());
-
-                        Log($"[CALL-CLICK] Method 12: SendInput returned {sent} (expected 2)");
-
-                        // Restore cursor after a brief delay to let the click register
-                        System.Threading.Thread.Sleep(50);
-                        SetCursorPos(prevPos.X, prevPos.Y);
+                        PostMessage(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lParam);
+                        System.Threading.Thread.Sleep(30);
+                        PostMessage(hwnd, WM_LBUTTONUP, 0, lParam);
 
                         LogAtkSnapshot(addon, "post-m12");
-                        Log($"[CALL-CLICK] Method 12: Click sent at screen ({screenPt.X},{screenPt.Y})");
+                        Log($"[CALL-CLICK] Method 12: PostMessage click sent");
                         result = true;
                     }
                     break;
@@ -783,6 +755,50 @@ public static unsafe class AddonClickHelper
                         addon->FireCallback(2, v14, true);
                         LogAtkSnapshot(addon, "post-m14");
                         Log($"[CALL-CLICK] Method 14: FireCallback(2, [9, 0])");
+                        result = true;
+                    }
+                    break;
+
+                case 15:
+                    // FireCallback(2, [8, 1]) — callback 8 was EXCLUDED from sweeps!
+                    // [8, 0] = skip. Maybe [8, 1] = accept first call option?
+                    {
+                        LogAtkSnapshot(addon, "pre-m15");
+                        var v15 = stackalloc AtkValue[2];
+                        v15[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 8 };
+                        v15[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 1 };
+                        addon->FireCallback(2, v15, true);
+                        LogAtkSnapshot(addon, "post-m15");
+                        Log($"[CALL-CLICK] Method 15: FireCallback(2, [8, 1]) — callback 8 value 1");
+                        result = true;
+                    }
+                    break;
+
+                case 16:
+                    // FireCallback(2, [8, 2]) — accept second call option?
+                    {
+                        LogAtkSnapshot(addon, "pre-m16");
+                        var v16 = stackalloc AtkValue[2];
+                        v16[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 8 };
+                        v16[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 2 };
+                        addon->FireCallback(2, v16, true);
+                        LogAtkSnapshot(addon, "post-m16");
+                        Log($"[CALL-CLICK] Method 16: FireCallback(2, [8, 2]) — callback 8 value 2");
+                        result = true;
+                    }
+                    break;
+
+                case 17:
+                    // FireCallback(2, [7, 0]) during call prompt — callback 7 also excluded from sweeps
+                    // [7, N] normally discards, but semantics may differ during call prompt
+                    {
+                        LogAtkSnapshot(addon, "pre-m17");
+                        var v17 = stackalloc AtkValue[2];
+                        v17[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 7 };
+                        v17[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 0 };
+                        addon->FireCallback(2, v17, true);
+                        LogAtkSnapshot(addon, "post-m17");
+                        Log($"[CALL-CLICK] Method 17: FireCallback(2, [7, 0]) — callback 7 during call prompt");
                         result = true;
                     }
                     break;
@@ -904,7 +920,7 @@ public static unsafe class AddonClickHelper
                     }
                     catch (Exception cex) { Log($"[CALL-CLICK]   child dump error: {cex.Message}"); }
 
-                    Log($"[CALL-CLICK]   Use '/mj clickcall {callName} <1-14> run' to test click methods.");
+                    Log($"[CALL-CLICK]   Use '/mj clickcall {callName} <1-17> run' to test click methods.");
                     result = false;
                     break;
             }
