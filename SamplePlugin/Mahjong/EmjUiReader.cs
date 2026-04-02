@@ -37,6 +37,7 @@ public static unsafe class EmjUiReader
         RiichiDecisionPrompt,
         TsumoDecisionPrompt,
         RonDecisionPrompt,
+        CallChoicePrompt,
         BetweenRounds,
         GameOver,
     }
@@ -1361,6 +1362,10 @@ public static unsafe class EmjUiReader
 
         if (atkPhase == 15)
             return GamePhase.OpponentTurn;
+
+        // atk0=25 = chi/pon choice sub-menu (multiple options for the same call)
+        if (atkPhase == 25)
+            return GamePhase.CallChoicePrompt;
 
         // atk0=29 = score screen (stable), atk0=32 = score animation / transition
         if (atkPhase == 29 || atkPhase == 32)

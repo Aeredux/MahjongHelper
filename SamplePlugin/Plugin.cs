@@ -383,7 +383,8 @@ public sealed partial class Plugin : IDalamudPlugin
         // changing while hand/discards remain the same).
         _autoPlayManager.OnGameStateUpdate(merged.GamePhase.Value, _lastUiState?.Slots,
             _lastUiState?.GameInfo?.CallButtonNodes,
-            _lastUiState?.GameInfo?.Suggestion);
+            _lastUiState?.GameInfo?.Suggestion,
+            _iconCapture);
 
         // Always try to request suggestions and call evaluations — phase may
         // have changed even if the normalized signature hasn't.

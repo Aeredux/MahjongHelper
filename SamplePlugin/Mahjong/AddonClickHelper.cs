@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
 using FFXIVClientStructs.FFXIV.Component.GUI;
@@ -278,6 +279,181 @@ public static unsafe class AddonClickHelper
             Log($"ERROR advancing score screen: {ex.Message}");
             return false;
         }
+    }
+
+    /// <summary>
+    /// Handles the chi/pon choice sub-menu (atk0=25) where multiple options exist
+    /// for the same call type. Scans for the choice container (node id=52 type=1053
+    /// or id=53 type=1054), finds visible option nodes (type=1014/1015), reads their
+    /// tile icons, and clicks the best match.
+    /// </summary>
+    /// <param name="addon">The EmjL addon.</param>
+    /// <param name="preferredTiles">
+    /// Tile codes from the pre-chi suggestion to match against (e.g. ["M4","M5","M6"]).
+    /// If null or empty, clicks the first visible option.
+    /// </param>
+    /// <param name="iconMap">Icon map for resolving icon IDs to tile codes.</param>
+    /// <param name="iconCapture">Icon capture for reading dynamic icon IDs.</param>
+    public static bool TrySelectCallChoice(AtkUnitBase* addon,
+        IReadOnlyList<string>? preferredTiles, MahjongIconMap? iconMap, IconIdCapture? iconCapture)
+    {
+        if (addon == null) return false;
+
+        try
+        {
+            int rawAtk0 = -1;
+            try
+            {
+                if (addon->AtkValues != null && addon->AtkValuesCount > 0)
+                    rawAtk0 = addon->AtkValues[0].Int;
+            }
+            catch { }
+
+            Log($"[CHI-CHOICE] Attempting call choice selection (rawAtk0={rawAtk0})");
+            LogAtkSnapshot(addon, "pre-chi-choice");
+
+            // Find the choice container: id=52 (type=1053, chi) or id=53 (type=1054, pon)
+            var uld = addon->UldManager;
+            AtkComponentNode* choiceContainer = null;
+            int choiceNodeIndex = -1;
+
+            for (int i = 0; i < uld.NodeListCount; i++)
+            {
+                var n = uld.NodeList[i];
+                if (n == null) continue;
+                if ((n->NodeId == 52 || n->NodeId == 53) && (int)n->Type >= 1000)
+                {
+                    bool vis = false;
+                    try { vis = n->IsVisible(); } catch { }
+                    if (vis)
+                    {
+                        choiceContainer = (AtkComponentNode*)n;
+                        choiceNodeIndex = i;
+                        Log($"[CHI-CHOICE] Found choice container: nodeId={n->NodeId} type={(int)n->Type} index={i}");
+                        break;
+                    }
+                }
+            }
+
+            if (choiceContainer == null || choiceContainer->Component == null)
+            {
+                Log($"[CHI-CHOICE] No visible choice container found");
+                return false;
+            }
+
+            // Scan child nodes for visible option groups (type=1014 or 1015, with tile children)
+            var comp = choiceContainer->Component;
+            var childUld = comp->UldManager;
+            var options = new System.Collections.Generic.List<(nint node, int childIdx, System.Collections.Generic.List<string> tiles)>();
+
+            for (int j = 0; j < childUld.NodeListCount && j < 32; j++)
+            {
+                var cn = childUld.NodeList[j];
+                if (cn == null || (int)cn->Type < 1000) continue;
+
+                bool vis = false;
+                try { vis = cn->IsVisible(); } catch { }
+                if (!vis) continue;
+
+                var childType = (int)cn->Type;
+                // Option nodes are type 1014 or 1015 (tile groups)
+                if (childType != 1014 && childType != 1015) continue;
+
+                var optionComp = (AtkComponentNode*)cn;
+                if (optionComp->Component == null) continue;
+
+                // Read tile icons from the option's children (type=1009, size 34x45)
+                var tileIcons = new System.Collections.Generic.List<string>();
+                var optChildUld = optionComp->Component->UldManager;
+                for (int k = 0; k < optChildUld.NodeListCount && k < 16; k++)
+                {
+                    var tn = optChildUld.NodeList[k];
+                    if (tn == null || (int)tn->Type < 1000) continue;
+
+                    uint iconId = 0;
+                    if (EmjUiReader.TryFindIconPublic(tn, iconCapture, out iconId) && iconId > 0)
+                    {
+                        var tileName = iconMap?.Resolve(iconId);
+                        if (!string.IsNullOrEmpty(tileName))
+                            tileIcons.Add(tileName);
+                    }
+                }
+
+                if (tileIcons.Count > 0)
+                {
+                    options.Add(((nint)optionComp, j, tileIcons));
+                    Log($"[CHI-CHOICE] Option {options.Count - 1} (childIdx={j} id={cn->NodeId}): [{string.Join(",", tileIcons)}]");
+                }
+            }
+
+            if (options.Count == 0)
+            {
+                Log($"[CHI-CHOICE] No visible options found in container");
+                return false;
+            }
+
+            // Pick the best option: match against preferred tiles if available
+            int bestIdx = 0;
+            if (preferredTiles != null && preferredTiles.Count > 0)
+            {
+                int bestScore = -1;
+                for (int i = 0; i < options.Count; i++)
+                {
+                    var optTiles = options[i].tiles;
+                    int score = 0;
+                    foreach (var pt in preferredTiles)
+                    {
+                        // Normalize red dora for matching: M0↔M5, P0↔P5, S0↔S5
+                        if (optTiles.Any(t => TileMatchesForChi(t, pt)))
+                            score++;
+                    }
+                    if (score > bestScore)
+                    {
+                        bestScore = score;
+                        bestIdx = i;
+                    }
+                }
+                Log($"[CHI-CHOICE] Best match: option {bestIdx} (score={bestScore}) preferred=[{string.Join(",", preferredTiles)}]");
+            }
+            else
+            {
+                Log($"[CHI-CHOICE] No preferred tiles, using first option");
+            }
+
+            // Click the selected option via ButtonClick dispatch
+            var selectedNode = (AtkResNode*)(AtkComponentNode*)options[bestIdx].node;
+            Log($"[CHI-CHOICE] Clicking option {bestIdx} id={selectedNode->NodeId}");
+
+            var result = TryClickButton(addon, (nint)selectedNode, $"chi-option-{bestIdx}");
+            LogAtkSnapshot(addon, "post-chi-choice");
+
+            int postAtk0 = -1;
+            try
+            {
+                if (addon->AtkValues != null && addon->AtkValuesCount > 0)
+                    postAtk0 = addon->AtkValues[0].Int;
+            }
+            catch { }
+
+            Log($"[CHI-CHOICE] Result: atk0 {rawAtk0} -> {postAtk0}");
+            return result;
+        }
+        catch (Exception ex)
+        {
+            Log($"ERROR selecting call choice: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>Matches tile codes for chi option comparison, normalizing red dora.</summary>
+    private static bool TileMatchesForChi(string optionTile, string preferredTile)
+    {
+        if (optionTile.Equals(preferredTile, StringComparison.OrdinalIgnoreCase))
+            return true;
+        // M0↔M5, P0↔P5, S0↔S5
+        var normOpt = optionTile switch { "M0" => "M5", "P0" => "P5", "S0" => "S5", _ => optionTile };
+        var normPref = preferredTile switch { "M0" => "M5", "P0" => "P5", "S0" => "S5", _ => preferredTile };
+        return normOpt.Equals(normPref, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

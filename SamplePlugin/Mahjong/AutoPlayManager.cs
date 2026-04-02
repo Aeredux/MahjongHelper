@@ -34,6 +34,8 @@ public sealed class AutoPlayManager
     private IReadOnlyList<EmjUiReader.UiSlot>? _lastHandSlots;
     private Dictionary<EmjUiReader.CallOptions, nint>? _lastCallButtonNodes;
     private DateTime _callPhaseEnteredUtc; // when we first entered a call/decision phase
+    private List<string>? _preChiSuggestionTiles; // tiles from suggestion before entering chi choice
+    private IconIdCapture? _iconCapture;
 
     private static readonly string LogDir = System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MahjongHelper");
@@ -92,12 +94,14 @@ public sealed class AutoPlayManager
     /// </summary>
     public void OnGameStateUpdate(string? gamePhase, IReadOnlyList<EmjUiReader.UiSlot>? handSlots,
         Dictionary<EmjUiReader.CallOptions, nint>? callButtonNodes = null,
-        EmjUiReader.InGameSuggestion? inGameSuggestion = null)
+        EmjUiReader.InGameSuggestion? inGameSuggestion = null,
+        IconIdCapture? iconCapture = null)
     {
         var prevPhase = _lastGamePhase;
         _lastGamePhase = gamePhase;
         _lastHandSlots = handSlots;
         _lastCallButtonNodes = callButtonNodes;
+        _iconCapture = iconCapture;
 
         // Update the in-game provider with latest suggestion data
         _inGameProvider.Update(inGameSuggestion);
@@ -116,6 +120,7 @@ public sealed class AutoPlayManager
             Log($"Phase transition: {prevPhase} -> {gamePhase}");
             _consecutiveFailedDiscards = 0; // Reset stuck counter on any phase change
             _scoreAdvanceAttempts = 0; // Reset score screen advance attempts
+            _chiChoiceAttempts = 0; // Reset chi choice attempts
 
             // Clear pending actions from the old phase so stale discards/calls
             // don't execute in the wrong phase (e.g. discard firing during riichi prompt).
@@ -142,6 +147,14 @@ public sealed class AutoPlayManager
         if (isCallPhase && !wasCallPhase)
         {
             _callPhaseEnteredUtc = DateTime.UtcNow;
+
+            // Remember chi suggestion tiles for use in the choice sub-menu
+            if (inGameSuggestion?.Type == EmjUiReader.SuggestionType.Chi &&
+                inGameSuggestion.TileName != null)
+            {
+                _preChiSuggestionTiles = new List<string> { inGameSuggestion.TileName };
+                Log($"[CHI-CHOICE] Remembered pre-chi tile: {inGameSuggestion.TileName}");
+            }
         }
         else if (!isCallPhase && wasCallPhase)
         {
@@ -186,6 +199,12 @@ public sealed class AutoPlayManager
         {
             TryScheduleScoreAdvance();
         }
+
+        // Handle chi/pon choice sub-menu (atk0=25).
+        if (gamePhase == "CallChoicePrompt" && _config.AutoPlayEnabled && _config.AutoCallEnabled && !_paused)
+        {
+            TryScheduleCallChoice();
+        }
     }
 
     /// <summary>
@@ -215,6 +234,13 @@ public sealed class AutoPlayManager
             phase != "RiichiDecisionPrompt")
         {
             Log($"Dropping stale call action '{_pendingAction}' — current phase is {phase}");
+            _pendingAction = null;
+            _lastActionSignature = "";
+            return false;
+        }
+        if (_pendingAction == "chi-choice" && phase != "CallChoicePrompt")
+        {
+            Log($"Dropping stale chi-choice action — current phase is {phase}");
             _pendingAction = null;
             _lastActionSignature = "";
             return false;
@@ -279,6 +305,11 @@ public sealed class AutoPlayManager
         {
             _consecutiveFailedDiscards = 0;
             return AddonClickHelper.TryAdvanceScoreScreen(addon);
+        }
+        else if (action == "chi-choice")
+        {
+            _consecutiveFailedDiscards = 0;
+            return AddonClickHelper.TrySelectCallChoice(addon, _preChiSuggestionTiles, _iconMap, _iconCapture);
         }
 
         return false;
@@ -375,6 +406,30 @@ public sealed class AutoPlayManager
         Log($"Scheduled: {sig} attempt={_scoreAdvanceAttempts} (execute at +3000ms)");
     }
 
+    private int _chiChoiceAttempts;
+
+    private void TryScheduleCallChoice()
+    {
+        if (_pendingAction != null)
+            return;
+
+        if (_chiChoiceAttempts >= 3)
+            return;
+
+        var sig = "chi-choice";
+        if (sig == _lastActionSignature)
+            return;
+
+        _lastActionSignature = sig;
+        _pendingAction = sig;
+        _actionScheduledAtUtc = DateTime.UtcNow;
+        var delayMs = _rng.Next(_config.AutoCallDelayMinMs, _config.AutoCallDelayMaxMs + 1);
+        _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(delayMs);
+        _chiChoiceAttempts++;
+
+        Log($"Scheduled: {sig} attempt={_chiChoiceAttempts} preferred=[{string.Join(",", _preChiSuggestionTiles ?? new List<string>())}] (execute at +{delayMs}ms)");
+    }
+
     private unsafe bool ExecuteDiscard(AtkUnitBase* addon, string tileCode)
     {
         if (_lastHandSlots == null || _lastHandSlots.Count == 0)
@@ -442,35 +497,54 @@ public sealed class AutoPlayManager
     {
         if (callIndex == 0)
         {
-            // Accept call — click the best available call button
+            // Accept call — click the button matching the current game phase.
+            // Phase-specific selection prevents stale button nodes from a prior
+            // prompt (e.g. Chi lingering after a pon skip) from being clicked
+            // when we're in a different phase (e.g. RiichiDecisionPrompt).
             if (_lastCallButtonNodes == null || _lastCallButtonNodes.Count == 0)
             {
                 Log($"Cannot accept call: no button nodes captured");
                 return false;
             }
 
-            // Pick the highest-priority call button available
-            // Priority: Ron > Tsumo > Kan > Pon > Chi > Riichi
-            var priority = new[]
+            // Build a phase-specific priority list so we click the correct button.
+            EmjUiReader.CallOptions[] priority;
+            switch (_lastGamePhase)
             {
-                EmjUiReader.CallOptions.Ron,
-                EmjUiReader.CallOptions.Tsumo,
-                EmjUiReader.CallOptions.Kan,
-                EmjUiReader.CallOptions.Pon,
-                EmjUiReader.CallOptions.Chi,
-                EmjUiReader.CallOptions.Riichi,
-            };
+                case "RiichiDecisionPrompt":
+                    priority = new[] { EmjUiReader.CallOptions.Riichi };
+                    break;
+                case "TsumoDecisionPrompt":
+                    priority = new[] { EmjUiReader.CallOptions.Tsumo };
+                    break;
+                case "RonDecisionPrompt":
+                    priority = new[] { EmjUiReader.CallOptions.Ron };
+                    break;
+                case "CallDecisionPrompt":
+                default:
+                    // For generic call prompts, prefer the strongest call available.
+                    priority = new[]
+                    {
+                        EmjUiReader.CallOptions.Ron,
+                        EmjUiReader.CallOptions.Tsumo,
+                        EmjUiReader.CallOptions.Kan,
+                        EmjUiReader.CallOptions.Pon,
+                        EmjUiReader.CallOptions.Chi,
+                        EmjUiReader.CallOptions.Riichi,
+                    };
+                    break;
+            }
 
             foreach (var call in priority)
             {
                 if (_lastCallButtonNodes.TryGetValue(call, out var btnPtr) && btnPtr != 0)
                 {
-                    Log($"Executing call accept: clicking {call} button (ptr={btnPtr:X}) via ListItemClick");
+                    Log($"Executing call accept: clicking {call} button (ptr={btnPtr:X}) phase={_lastGamePhase} via ListItemClick");
                     return AddonClickHelper.TryAcceptCallViaListClick(addon, btnPtr, call.ToString());
                 }
             }
 
-            Log($"Cannot accept call: no matching button node found in captured nodes");
+            Log($"Cannot accept call: no matching button for phase={_lastGamePhase} in captured nodes [{string.Join(",", _lastCallButtonNodes.Keys)}]");
             return false;
         }
         else
