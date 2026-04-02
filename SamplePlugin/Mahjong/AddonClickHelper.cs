@@ -642,47 +642,140 @@ public static unsafe class AddonClickHelper
                     break;
 
                 case 9:
-                    // SelectString-style: FireCallback(1, [0]) — select first list item (index 0)
-                    // This common pattern was NEVER tested in callsweep (sweep started at value 1, not 0)
+                    // KEY INSIGHT: All previous ReceiveEvent calls went through addon->ReceiveEvent().
+                    // But the ListItemClick event's registered LISTENER is a DIFFERENT object than the addon.
+                    // In ATK dispatch, events go to listener->ReceiveEvent(), not addon->ReceiveEvent().
+                    // This method calls the LISTENER's ReceiveEvent directly.
                     {
-                        LogAtkSnapshot(addon, "pre-m9");
-                        var v9 = stackalloc AtkValue[1];
-                        v9[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 0 };
-                        addon->FireCallback(1, v9, true);
-                        LogAtkSnapshot(addon, "post-m9");
-                        Log($"[CALL-CLICK] Method 9: FireCallback(1, [0]) — SelectString pattern index=0");
+                        var resNode9 = (AtkResNode*)compNode;
+                        // Get button's list item index from its registered events
+                        uint buttonParam = 0;
+                        var btnEvt9 = resNode9->AtkEventManager.Event;
+                        if (btnEvt9 != null)
+                            buttonParam = btnEvt9->Param;
+                        Log($"[CALL-CLICK] Method 9: button item param={buttonParam}");
+
+                        var parentNode9 = resNode9->ParentNode;
+                        if (parentNode9 != null)
+                        {
+                            Log($"[CALL-CLICK] Method 9: parent id={parentNode9->NodeId} type={(int)parentNode9->Type}");
+                            // Find ListItemClick event on the parent list node
+                            var listEvt = parentNode9->AtkEventManager.Event;
+                            AtkEvent* listItemClickEvt = null;
+                            int idx9 = 0;
+                            while (listEvt != null && idx9 < 20)
+                            {
+                                Log($"[CALL-CLICK] Method 9: parent event[{idx9}] type={listEvt->State.EventType} " +
+                                    $"param={listEvt->Param} target={(nint)listEvt->Target:X} " +
+                                    $"listener={(nint)listEvt->Listener:X} node={(nint)listEvt->Node:X}");
+                                if (listEvt->State.EventType == AtkEventType.ListItemClick)
+                                {
+                                    listItemClickEvt = listEvt;
+                                    break;
+                                }
+                                listEvt = listEvt->NextEvent;
+                                idx9++;
+                            }
+
+                            if (listItemClickEvt != null && listItemClickEvt->Listener != null)
+                            {
+                                // Construct a safe event copy with valid Node
+                                var safeEvt = stackalloc AtkEvent[1];
+                                *safeEvt = *listItemClickEvt;
+                                safeEvt->Node = resNode9;
+                                safeEvt->Param = buttonParam;
+                                safeEvt->NextEvent = null;
+
+                                var eventData = stackalloc byte[0x28];
+
+                                LogAtkSnapshot(addon, "pre-m9");
+                                Log($"[CALL-CLICK] Method 9: Calling LISTENER->ReceiveEvent(ListItemClick, {buttonParam}) " +
+                                    $"listener={(nint)listItemClickEvt->Listener:X} (NOT addon!)");
+                                listItemClickEvt->Listener->ReceiveEvent(
+                                    AtkEventType.ListItemClick, (int)buttonParam, safeEvt, (AtkEventData*)eventData);
+                                LogAtkSnapshot(addon, "post-m9");
+                                Log($"[CALL-CLICK] Method 9: Done");
+                            }
+                            else
+                            {
+                                Log($"[CALL-CLICK] Method 9: No ListItemClick event or listener is null");
+                            }
+                        }
+                        else
+                        {
+                            Log($"[CALL-CLICK] Method 9: No parent node found");
+                        }
                         result = true;
                     }
                     break;
 
                 case 10:
-                    // SelectString-style: FireCallback(1, [1]) — select second list item (index 1)
+                    // Same as M9 but with param=0 (alternate index)
                     {
-                        LogAtkSnapshot(addon, "pre-m10");
-                        var v10 = stackalloc AtkValue[1];
-                        v10[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 1 };
-                        addon->FireCallback(1, v10, true);
-                        LogAtkSnapshot(addon, "post-m10");
-                        Log($"[CALL-CLICK] Method 10: FireCallback(1, [1]) — SelectString pattern index=1");
+                        var resNode10 = (AtkResNode*)compNode;
+                        var parentNode10 = resNode10->ParentNode;
+                        if (parentNode10 != null)
+                        {
+                            var listEvt10 = parentNode10->AtkEventManager.Event;
+                            AtkEvent* lic10 = null;
+                            while (listEvt10 != null)
+                            {
+                                if (listEvt10->State.EventType == AtkEventType.ListItemClick)
+                                { lic10 = listEvt10; break; }
+                                listEvt10 = listEvt10->NextEvent;
+                            }
+                            if (lic10 != null && lic10->Listener != null)
+                            {
+                                var safeEvt10 = stackalloc AtkEvent[1];
+                                *safeEvt10 = *lic10;
+                                safeEvt10->Node = (AtkResNode*)compNode;
+                                safeEvt10->Param = 0;
+                                safeEvt10->NextEvent = null;
+                                var ed10 = stackalloc byte[0x28];
+
+                                LogAtkSnapshot(addon, "pre-m10");
+                                Log($"[CALL-CLICK] Method 10: LISTENER->ReceiveEvent(ListItemClick, 0)");
+                                lic10->Listener->ReceiveEvent(
+                                    AtkEventType.ListItemClick, 0, safeEvt10, (AtkEventData*)ed10);
+                                LogAtkSnapshot(addon, "post-m10");
+                                Log($"[CALL-CLICK] Method 10: Done");
+                            }
+                            else
+                            {
+                                Log($"[CALL-CLICK] Method 10: No ListItemClick/listener on parent");
+                            }
+                        }
                         result = true;
                     }
                     break;
 
                 case 11:
-                    // SelectString-style with button's event param minus 1 (in case it's 1-indexed)
+                    // Call ButtonClick's own LISTENER->ReceiveEvent (the component handler, not addon)
                     {
                         var resNode11 = (AtkResNode*)compNode;
-                        uint btnParam11 = 0;
-                        var be11 = resNode11->AtkEventManager.Event;
-                        if (be11 != null) btnParam11 = be11->Param;
-                        int idx11 = (int)btnParam11 > 0 ? (int)btnParam11 - 1 : (int)btnParam11;
-
-                        LogAtkSnapshot(addon, "pre-m11");
-                        var v11 = stackalloc AtkValue[1];
-                        v11[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = idx11 };
-                        addon->FireCallback(1, v11, true);
-                        LogAtkSnapshot(addon, "post-m11");
-                        Log($"[CALL-CLICK] Method 11: FireCallback(1, [{idx11}]) — adjusted from button param={btnParam11}");
+                        var evt11 = resNode11->AtkEventManager.Event;
+                        AtkEvent* buttonClickEvt = null;
+                        while (evt11 != null)
+                        {
+                            if (evt11->State.EventType == AtkEventType.ButtonClick)
+                            { buttonClickEvt = evt11; break; }
+                            evt11 = evt11->NextEvent;
+                        }
+                        if (buttonClickEvt != null && buttonClickEvt->Listener != null)
+                        {
+                            var ed11 = stackalloc byte[0x28];
+                            LogAtkSnapshot(addon, "pre-m11");
+                            Log($"[CALL-CLICK] Method 11: LISTENER->ReceiveEvent(ButtonClick, {buttonClickEvt->Param}) " +
+                                $"listener={(nint)buttonClickEvt->Listener:X}");
+                            buttonClickEvt->Listener->ReceiveEvent(
+                                AtkEventType.ButtonClick, (int)buttonClickEvt->Param, buttonClickEvt, (AtkEventData*)ed11);
+                            LogAtkSnapshot(addon, "post-m11");
+                            Log($"[CALL-CLICK] Method 11: Done");
+                        }
+                        else
+                        {
+                            Log($"[CALL-CLICK] Method 11: No ButtonClick/listener on button");
+                        }
                         result = true;
                     }
                     break;
@@ -920,7 +1013,7 @@ public static unsafe class AddonClickHelper
                     }
                     catch (Exception cex) { Log($"[CALL-CLICK]   child dump error: {cex.Message}"); }
 
-                    Log($"[CALL-CLICK]   Use '/mj clickcall {callName} <1-17> run' to test click methods.");
+                    Log($"[CALL-CLICK]   Use '/mj clickcall {callName} <1-17> run' to test. M9/10 = listener->ReceiveEvent (KEY TEST).");
                     result = false;
                     break;
             }
