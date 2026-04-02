@@ -21,6 +21,7 @@ public sealed class AutoPlayManager
     private string? _pendingAction; // "discard:TILE" or "call:accept" or "call:pass"
     private string _lastActionSignature = "";
     private bool _paused;
+    private int _consecutiveFailedDiscards; // discards that fired with no state change
 
     // The suggestion to act on
     private SuggestMoveResponse? _lastSuggestion;
@@ -28,6 +29,7 @@ public sealed class AutoPlayManager
     private string? _lastGamePhase;
     private IReadOnlyList<EmjUiReader.UiSlot>? _lastHandSlots;
     private Dictionary<EmjUiReader.CallOptions, nint>? _lastCallButtonNodes;
+    private DateTime _callPhaseEnteredUtc; // when we first entered a call/decision phase
 
     private static readonly string LogDir = System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MahjongHelper");
@@ -88,12 +90,55 @@ public sealed class AutoPlayManager
         if (gamePhase != prevPhase)
         {
             Log($"Phase transition: {prevPhase} -> {gamePhase}");
+            _consecutiveFailedDiscards = 0; // Reset stuck counter on any phase change
         }
 
-        // If phase just changed to WaitingForDiscard and we have a pending suggestion, try scheduling
-        if (gamePhase == "WaitingForDiscard" && prevPhase != "WaitingForDiscard")
+        // Track when we enter a call/decision phase
+        var isCallPhase = gamePhase == "CallDecisionPrompt" || gamePhase == "RonDecisionPrompt" ||
+                          gamePhase == "TsumoDecisionPrompt" || gamePhase == "RiichiDecisionPrompt";
+        var wasCallPhase = prevPhase == "CallDecisionPrompt" || prevPhase == "RonDecisionPrompt" ||
+                           prevPhase == "TsumoDecisionPrompt" || prevPhase == "RiichiDecisionPrompt";
+
+        if (isCallPhase && !wasCallPhase)
+        {
+            _callPhaseEnteredUtc = DateTime.UtcNow;
+        }
+        else if (!isCallPhase && wasCallPhase)
+        {
+            // Left a call phase — clear stale call eval so future prompts
+            // can trigger the fallback if the server doesn't respond.
+            _lastCallEval = null;
+        }
+
+        // Fallback: if we've been in a call phase for >3 seconds with no pending action
+        // and no call eval received, schedule a pass. This handles cases where the server
+        // didn't respond or the call eval request was deduped.
+        if (isCallPhase && _pendingAction == null && _lastCallEval == null &&
+            _config.AutoPlayEnabled && _config.AutoCallEnabled && !_paused &&
+            DateTime.UtcNow > _callPhaseEnteredUtc.AddSeconds(3))
+        {
+            Log($"Fallback: auto-pass after 3s in {gamePhase} with no call evaluation");
+            _pendingAction = "call:pass";
+            _lastActionSignature = "call:pass";
+            _actionScheduledAtUtc = DateTime.UtcNow;
+            _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(500);
+        }
+
+        // Always try scheduling a discard when in WaitingForDiscard.
+        // TryScheduleDiscard has its own signature dedup so it's safe to call every frame.
+        // This is needed because after Update() clears _lastActionSignature,
+        // we must re-attempt scheduling even if the phase didn't transition.
+        if (gamePhase == "WaitingForDiscard")
         {
             TryScheduleDiscard();
+        }
+
+        // Similarly, always try scheduling a call response when in a call phase.
+        // After a skip executes and clears the signature, we need to re-schedule
+        // if the call prompt persists.
+        if (isCallPhase)
+        {
+            TryScheduleCallResponse();
         }
     }
 
@@ -109,20 +154,59 @@ public sealed class AutoPlayManager
         if (DateTime.UtcNow < _actionExecuteAtUtc)
             return false;
 
+        // If discards keep failing (5+ attempts with no state change), stop retrying.
+        // This prevents infinite loops when some unknown state is blocking callbacks.
+        // IMPORTANT: Do NOT fire callback 8 here — at AtkVal[0]=30, callback 8 means
+        // tsumogiri (discard drawn tile), not skip/pass.
+        if (_consecutiveFailedDiscards >= 5 && _pendingAction != null && _pendingAction.StartsWith("discard:"))
+        {
+            Log($"Stuck-discard detected ({_consecutiveFailedDiscards} fails), pausing auto-discard until next phase change");
+            _pendingAction = null;
+            _lastActionSignature = "";
+            // Don't reset counter — it resets on phase change via ClearPending
+            return false;
+        }
+
         var action = _pendingAction;
+
         _pendingAction = null;
+        // Clear the signature so the same action can be re-scheduled if the
+        // game state hasn't changed (e.g., a skip/pass didn't take effect).
+        _lastActionSignature = "";
 
         if (action.StartsWith("discard:"))
         {
+            // Track whether the discard actually changes the game state
+            var preAtk0 = addon->AtkValues != null && addon->AtkValuesCount > 0
+                ? addon->AtkValues[0].Int : -1;
+
             var tileCode = action.Substring(8);
-            return ExecuteDiscard(addon, tileCode);
+            var result = ExecuteDiscard(addon, tileCode);
+
+            // Check if AtkVal[0] changed (≈ immediate for successful callbacks)
+            var postAtk0 = addon->AtkValues != null && addon->AtkValuesCount > 0
+                ? addon->AtkValues[0].Int : -1;
+
+            if (result && preAtk0 == postAtk0)
+            {
+                _consecutiveFailedDiscards++;
+                Log($"Discard may have failed (AtkVal[0] unchanged at {preAtk0}), consecutive={_consecutiveFailedDiscards}");
+            }
+            else
+            {
+                _consecutiveFailedDiscards = 0;
+            }
+
+            return result;
         }
         else if (action == "call:accept")
         {
+            _consecutiveFailedDiscards = 0;
             return ExecuteCallResponse(addon, 0);
         }
         else if (action == "call:pass")
         {
+            _consecutiveFailedDiscards = 0;
             return ExecuteCallResponse(addon, 1);
         }
 
@@ -134,6 +218,7 @@ public sealed class AutoPlayManager
     {
         _pendingAction = null;
         _lastActionSignature = "";
+        _consecutiveFailedDiscards = 0;
     }
 
     private void TryScheduleDiscard()
@@ -293,8 +378,10 @@ public sealed class AutoPlayManager
         }
         else
         {
-            // Skip/pass
-            Log($"Executing call response: skip/pass");
+            // Skip/pass — use callback 8 which works when AtkVal[0]=6.
+            // The action signature reset in Update() ensures we keep retrying
+            // until we catch the right AtkVal state.
+            Log($"Executing call response: skip/pass via callback 8");
             return AddonClickHelper.TrySkipCall(addon);
         }
     }

@@ -463,11 +463,17 @@ public static unsafe class EmjUiReader
         // Detect call prompts from visible button-like components
         var availableCalls = ReadCallPrompts(addon, out var callButtonNodes);
 
+        // Flush any suggestion "!" nodes collected during the scan
+        FlushSuggestionNodes();
+
         // Log AtkValues changes for call prompt discovery
         LogAtkValuesIfChanged(addon);
 
         // Deep scan: dump ALL text at any depth in visible components (one-time snapshot per change)
         DumpAllComponentTextDeep(addon);
+
+        // Phase A instrumentation: log String8 AtkValues and suggestion nodes
+        LogSuggestionProbe(addon, availableCalls);
 
         // Infer game phase from available signals
         var phase = InferGamePhase(addon, availableCalls, rawAtkInts);
@@ -717,6 +723,8 @@ public static unsafe class EmjUiReader
     /// </summary>
     private static string _lastAtkValuesSignature = "";
     private static string _lastDeepScanSignature = "";
+    private static string _lastSuggestionProbeSignature = "";
+    private static string _lastSuggestionNodesSignature = "";
 
     /// <summary>
     /// Deep-scans all component nodes up to 3 levels deep for ANY text, including
@@ -842,6 +850,122 @@ public static unsafe class EmjUiReader
         catch { }
     }
 
+    /// <summary>
+    /// Phase A instrumentation: reads String8 AtkValues at key indices and logs them
+    /// alongside rawAtk0, available calls, and visible suggestion text nodes.
+    /// Logs only when something changes.
+    /// </summary>
+    private static void LogSuggestionProbe(AtkUnitBase* addon, CallOptions availableCalls)
+    {
+        try
+        {
+            var valCount = (int)addon->AtkValuesCount;
+            int rawAtk0 = valCount > 0 ? addon->AtkValues[0].Int : -1;
+
+            // Read String8 AtkValues at key indices
+            int[] stringIndices = { 1, 6, 22, 23, 24, 45 };
+            var strings = new Dictionary<int, string>();
+            foreach (var idx in stringIndices)
+            {
+                if (idx >= valCount) continue;
+                try
+                {
+                    var val = addon->AtkValues[idx];
+                    if (val.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String ||
+                        val.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String8)
+                    {
+                        strings[idx] = $"{val.String}";
+                    }
+                }
+                catch { }
+            }
+
+            // Also read AtkValues[30-37] to see if they ever change
+            var suggestionLabels = new Dictionary<int, string>();
+            for (int idx = 30; idx <= 37 && idx < valCount; idx++)
+            {
+                try
+                {
+                    var val = addon->AtkValues[idx];
+                    if (val.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String ||
+                        val.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String8)
+                    {
+                        suggestionLabels[idx] = $"{val.String}";
+                    }
+                }
+                catch { }
+            }
+
+            // Build signature for dedup
+            var parts = new List<string>();
+            parts.Add($"atk0={rawAtk0}");
+            foreach (var kv in strings.OrderBy(k => k.Key))
+                parts.Add($"[{kv.Key}]=\"{kv.Value}\"");
+            foreach (var kv in suggestionLabels.OrderBy(k => k.Key))
+                parts.Add($"[{kv.Key}]=\"{kv.Value}\"");
+            parts.Add($"calls={availableCalls}");
+
+            var sig = string.Join(" | ", parts);
+            if (sig == _lastSuggestionProbeSignature) return;
+            _lastSuggestionProbeSignature = sig;
+
+            var logDir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MahjongHelper");
+            System.IO.Directory.CreateDirectory(logDir);
+            var line = $"[{DateTime.UtcNow:O}] {sig}\n";
+            System.IO.File.AppendAllText(System.IO.Path.Combine(logDir, "suggestion_probe.log"), line);
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// Phase A2 instrumentation: logs visible suggestion "!" text nodes whenever the set changes.
+    /// </summary>
+    private static readonly List<string> _pendingSuggestionNodes = new();
+
+    private static void LogSuggestionNode(string text, AtkResNode* cn, AtkComponentNode* ownerNode)
+    {
+        try
+        {
+            bool cnVis = false;
+            try { cnVis = cn->IsVisible(); } catch { }
+            bool ownerVis = false;
+            try { ownerVis = ((AtkResNode*)ownerNode)->IsVisible(); } catch { }
+
+            _pendingSuggestionNodes.Add($"\"{text}\" nodeVis={cnVis} ownerVis={ownerVis} ownerId={((AtkResNode*)ownerNode)->NodeId} ownerType={(int)((AtkResNode*)ownerNode)->Type}");
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// Called after ReadCallPrompts completes to flush any pending suggestion node entries.
+    /// </summary>
+    private static void FlushSuggestionNodes()
+    {
+        try
+        {
+            var sig = _pendingSuggestionNodes.Count > 0
+                ? string.Join(" ; ", _pendingSuggestionNodes)
+                : "(none)";
+
+            if (sig == _lastSuggestionNodesSignature)
+            {
+                _pendingSuggestionNodes.Clear();
+                return;
+            }
+            _lastSuggestionNodesSignature = sig;
+
+            var logDir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MahjongHelper");
+            System.IO.Directory.CreateDirectory(logDir);
+            var line = $"[{DateTime.UtcNow:O}] SuggestionNodes: {sig}\n";
+            System.IO.File.AppendAllText(System.IO.Path.Combine(logDir, "suggestion_probe.log"), line);
+        }
+        catch { }
+        finally
+        {
+            _pendingSuggestionNodes.Clear();
+        }
+    }
+
     private static CallOptions ReadCallPrompts(AtkUnitBase* addon, out Dictionary<CallOptions, nint> buttonNodes)
     {
         var calls = CallOptions.None;
@@ -905,6 +1029,13 @@ public static unsafe class EmjUiReader
                     try { cVis = cn->IsVisible(); } catch { }
                     if (!cVis) continue;
 
+                    // Also verify parent component node is visible to avoid stale call buttons
+                    // after a call prompt has been dismissed (text nodes inside invisible
+                    // containers can still report IsVisible=true on their own flag).
+                    bool ownerVis = false;
+                    try { ownerVis = ((AtkResNode*)ownerNode)->IsVisible(); } catch { }
+                    if (!ownerVis) continue;
+
                     var txt = (AtkTextNode*)cn;
                     string text;
                     try { text = Marshal.PtrToStringUTF8((nint)txt->NodeText.StringPtr.Value) ?? ""; }
@@ -913,10 +1044,13 @@ public static unsafe class EmjUiReader
                     if (string.IsNullOrWhiteSpace(text)) continue;
                     var trimmed = text.Trim();
 
-                    // Skip AI suggestion labels on player panes (e.g., "Pon!", "Tsumo!")
+                    // Log AI suggestion labels on player panes (e.g., "Pon!", "Tsumo!")
                     // Actual call buttons use text without exclamation marks (e.g., "Pon", "Pass")
                     if (trimmed.EndsWith("!"))
+                    {
+                        LogSuggestionNode(trimmed, cn, ownerNode);
                         continue;
+                    }
 
                     var lower = trimmed.ToLowerInvariant();
 
@@ -966,10 +1100,15 @@ public static unsafe class EmjUiReader
     {
         var atkPhase = rawAtkInts.Count > 0 ? rawAtkInts[0] : -1;
 
-        // PRIORITY: If call buttons are visible, we are ALWAYS in a call decision,
-        // regardless of what AtkValues[0] says. AtkValues[0] can be 6, 15, 29, or 30
-        // during active call prompts — it does NOT reliably distinguish call prompts
-        // from other phases.
+        // AtkVal[0]=2 and 30 are definitively the player's discard turn.
+        // Stale call buttons persist in the ATK tree after prompts are dismissed,
+        // so these AtkVal values must be authoritative to avoid false CallDecisionPrompt.
+        // The stuck-discard detector in AutoPlayManager handles the rare edge case
+        // where a real modal prompt blocks callbacks at these AtkVal values.
+        if (atkPhase == 30 || atkPhase == 2)
+            return GamePhase.WaitingForDiscard;
+
+        // For all other AtkVal[0] values, call buttons take priority.
         if (availableCalls.HasFlag(CallOptions.Ron))
             return GamePhase.RonDecisionPrompt;
         if (availableCalls.HasFlag(CallOptions.Tsumo))
@@ -981,10 +1120,7 @@ public static unsafe class EmjUiReader
 
         // No call buttons visible — use AtkValues[0] for phase detection
         if (atkPhase == 6)
-            return GamePhase.CallDecisionPrompt; // rare: AtkValues says call but no buttons found
-
-        if (atkPhase == 30 || atkPhase == 2)
-            return GamePhase.WaitingForDiscard; // 30=normal draw turn, 2=discard-after-call (chi/pon/kan)
+            return GamePhase.CallDecisionPrompt;
 
         if (atkPhase == 15)
             return GamePhase.OpponentTurn;

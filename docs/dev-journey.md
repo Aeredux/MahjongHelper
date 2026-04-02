@@ -680,3 +680,20 @@ addon->ReceiveEvent((AtkEventType)25, 0, evt, eventData);  // fabricated params
   - Method 9: Navigate to parent list node, find its ListItemClick event, fire through addon with button's item param (e.g., 1 for Chi)
   - Method 10: Same as 9 but fires with param=0 (to test if indexing differs)
   - Method 11: Fire ButtonClick (not MouseOver) from button's own events through addon
+
+## 2026-04-02: Phase A — In-Game Suggestion Probe Instrumentation
+
+**What:** Added passive instrumentation to log the game's in-game suggestion system data for reverse-engineering. Created a plan document (`docs/in-game-suggestion-plan.md`) for pivoting auto-play to use in-game suggestions instead of the unreliable AtkVal[0] state machine.
+
+**Why:** The previous AtkVal[0] + stale-button approach for phase detection has fundamental reliability issues:
+- Stale call buttons persist in the ATK tree after prompts are dismissed, causing false CallDecisionPrompt
+- Callback 8 has dual meaning (tsumogiri at AtkVal[0]=30, skip at AtkVal[0]=6)
+- AtkVal[0] values overlap between real call prompts and normal gameplay
+
+The game already has built-in suggestion strings in AtkValues (tile names, action labels like "Discard", call labels like "Pon!"/"Chi!"). Reading these is more reliable than reconstructing state from raw integers.
+
+**Changes:**
+- `EmjUiReader.cs`
+  - Added `LogSuggestionProbe()`: reads String8 AtkValues at indices [1],[6],[22],[23],[24],[45] and [30-37], logs to `suggestion_probe.log` on change
+  - Added `LogSuggestionNode()` + `FlushSuggestionNodes()`: logs visible "!" suggestion text nodes (previously silently skipped) with visibility and owner info
+- `docs/in-game-suggestion-plan.md` — created 4-phase plan (A: instrument, B: state from suggestions, C: act on suggestions, D: hybrid mode)

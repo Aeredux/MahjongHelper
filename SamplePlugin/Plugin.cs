@@ -97,6 +97,7 @@ public sealed partial class Plugin : IDalamudPlugin
     private nint _lastAddonAddress;
     private EmjUiReader.UiState? _lastUiState;
     private string _lastActionProbeSignature = string.Empty;
+    private DateTime _nextAutoplayHeartbeatUtc = DateTime.MinValue;
 
     public Plugin()
     {
@@ -363,10 +364,47 @@ public sealed partial class Plugin : IDalamudPlugin
         MainWindow.normalizedStateText = merged.ToDisplayText();
         _lastSuccessfulMergeUpdateUtc = DateTime.UtcNow;
 
+        // Always forward game state to auto-play manager, even if the normalized
+        // signature hasn't changed. The manager needs continuous updates to detect
+        // phase transitions that the signature dedup may miss (e.g., AtkVal[0]
+        // changing while hand/discards remain the same).
+        _autoPlayManager.OnGameStateUpdate(merged.GamePhase.Value, _lastUiState?.Slots,
+            _lastUiState?.GameInfo?.CallButtonNodes);
+
+        // Always try to request suggestions and call evaluations — phase may
+        // have changed even if the normalized signature hasn't.
+        TryRequestSuggestion(merged);
+        TryRequestCallEvaluation(merged);
+
         var signature = BuildNormalizedStateSignature(merged);
         if (signature == _lastNormalizedStateSignature)
         {
             _activeSourcePath = BuildActiveSourcePath(merged);
+
+            // Periodic heartbeat: log AtkVal[0] and phase every 5s even when deduped,
+            // so we can diagnose stuck-state issues.
+            if (DateTime.UtcNow >= _nextAutoplayHeartbeatUtc)
+            {
+                _nextAutoplayHeartbeatUtc = DateTime.UtcNow.AddSeconds(5);
+                var agentState = merged.AgentState.Value;
+                var phase = merged.GamePhase.Value;
+                var calls = merged.AvailableCalls.Value;
+                var handCount = merged.HandIconIds.Value?.Count ?? 0;
+                // Also log raw AtkVal[0] from the addon for comparison
+                int rawAtk0 = -1;
+                unsafe
+                {
+                    if (_lastAddonAddress != 0)
+                    {
+                        var hbAddon = (FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase*)_lastAddonAddress;
+                        if (hbAddon->AtkValues != null && hbAddon->AtkValuesCount > 0)
+                            rawAtk0 = hbAddon->AtkValues[0].Int;
+                    }
+                }
+                LogToFile("autoplay.log",
+                    $"[Heartbeat] phase={phase} agent={agentState} rawAtk0={rawAtk0} calls={calls} hand={handCount} pending={_autoPlayManager.PendingAction}");
+            }
+
             return;
         }
 
@@ -381,16 +419,6 @@ public sealed partial class Plugin : IDalamudPlugin
 
         // Passive action-probe snapshot for callback discovery
         LogActionProbe(merged, source);
-
-        // Update auto-play manager with latest game state (for scheduling)
-        _autoPlayManager.OnGameStateUpdate(merged.GamePhase.Value, _lastUiState?.Slots,
-            _lastUiState?.GameInfo?.CallButtonNodes);
-
-        // Trigger server suggest-move when state changes
-        TryRequestSuggestion(merged);
-
-        // Trigger call evaluation when call prompts are visible
-        TryRequestCallEvaluation(merged);
 
         try
         {
@@ -472,21 +500,26 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void TryRequestCallEvaluation(MahjongGameState state)
     {
+        // Clear call eval state when NOT in a call/decision phase.
+        // This must be based on game phase, not call buttons, because stale
+        // button nodes persist after prompts are dismissed.
+        var phase = state.GamePhase.Value;
+        if (phase != "CallDecisionPrompt" && phase != "RonDecisionPrompt" &&
+            phase != "TsumoDecisionPrompt" && phase != "RiichiDecisionPrompt")
+        {
+            if (!string.IsNullOrEmpty(OverlayWindow.CallRecommendation))
+                OverlayWindow.CallRecommendation = null;
+            _lastCallEvalSignature = string.Empty;
+            return;
+        }
+
         if (_serverClient.IsHealthy != true || _callEvalInFlight)
             return;
 
-        // Only evaluate when a call prompt is visible
+        // Only evaluate when call buttons are actually detected
         var calls = state.AvailableCalls.Value;
         if (string.IsNullOrEmpty(calls) || calls == "None")
-        {
-            // Clear stale recommendation when no call prompt
-            if (!string.IsNullOrEmpty(OverlayWindow.CallRecommendation))
-            {
-                OverlayWindow.CallRecommendation = null;
-                _lastCallEvalSignature = string.Empty;
-            }
             return;
-        }
 
         // Determine call type (pick the most significant available call)
         string callType;
