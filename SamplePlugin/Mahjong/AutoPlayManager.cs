@@ -116,6 +116,15 @@ public sealed class AutoPlayManager
             Log($"Phase transition: {prevPhase} -> {gamePhase}");
             _consecutiveFailedDiscards = 0; // Reset stuck counter on any phase change
             _scoreAdvanceAttempts = 0; // Reset score screen advance attempts
+
+            // Clear pending actions from the old phase so stale discards/calls
+            // don't execute in the wrong phase (e.g. discard firing during riichi prompt).
+            if (_pendingAction != null)
+            {
+                Log($"Clearing stale pending action '{_pendingAction}' due to phase change");
+                _pendingAction = null;
+                _lastActionSignature = "";
+            }
         }
 
         // Track when we enter a call/decision phase
@@ -190,6 +199,26 @@ public sealed class AutoPlayManager
 
         if (DateTime.UtcNow < _actionExecuteAtUtc)
             return false;
+
+        // Phase safety: verify the pending action matches the current phase.
+        // This prevents a stale discard from firing during a call prompt (or vice versa).
+        var phase = _lastGamePhase ?? "";
+        if (_pendingAction.StartsWith("discard:") && phase != "WaitingForDiscard")
+        {
+            Log($"Dropping stale discard action '{_pendingAction}' — current phase is {phase}");
+            _pendingAction = null;
+            _lastActionSignature = "";
+            return false;
+        }
+        if (_pendingAction.StartsWith("call:") && phase != "CallDecisionPrompt" &&
+            phase != "RonDecisionPrompt" && phase != "TsumoDecisionPrompt" &&
+            phase != "RiichiDecisionPrompt")
+        {
+            Log($"Dropping stale call action '{_pendingAction}' — current phase is {phase}");
+            _pendingAction = null;
+            _lastActionSignature = "";
+            return false;
+        }
 
         // If discards keep failing (5+ attempts with no state change), stop retrying.
         // This prevents infinite loops when some unknown state is blocking callbacks.

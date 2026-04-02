@@ -1170,6 +1170,9 @@ public static unsafe class EmjUiReader
                 return new InGameSuggestion(SuggestionType.Discard, raw, tileName, tileIconId);
             if (lower == "pass")
                 return new InGameSuggestion(SuggestionType.Pass, raw);
+            // "riichi" must be checked BEFORE "chi" — "riichi" contains the substring "chi"
+            if (lower.Contains("riichi") || lower.Contains("reach"))
+                return new InGameSuggestion(SuggestionType.Riichi, raw, tileName, tileIconId);
             if (lower.Contains("chi"))
                 return new InGameSuggestion(SuggestionType.Chi, raw);
             if (lower.Contains("pon"))
@@ -1180,8 +1183,6 @@ public static unsafe class EmjUiReader
                 return new InGameSuggestion(SuggestionType.Ron, raw);
             if (lower.Contains("tsumo"))
                 return new InGameSuggestion(SuggestionType.Tsumo, raw);
-            if (lower.Contains("riichi") || lower.Contains("reach"))
-                return new InGameSuggestion(SuggestionType.Riichi, raw);
             if (lower.Contains("fu") && lower.Contains("han"))
                 return new InGameSuggestion(SuggestionType.Scoring, raw);
 
