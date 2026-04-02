@@ -829,32 +829,83 @@ public sealed partial class Plugin : IDalamudPlugin
                 }
             }
         }
-        else if (lower.StartsWith("acceptcall "))
+        else if (lower == "acceptcall" || lower.StartsWith("acceptcall "))
         {
-            // Usage: /mj acceptcall <callbackId> <secondVal> [run]
-            // Targeted test: fire a specific callback during a call prompt.
+            // Usage: /mj acceptcall [chi|pon|kan|ron|tsumo|riichi]
+            // Accepts the highest-priority (or specified) call using the working ListItemClick method.
             var parts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length >= 3 && int.TryParse(parts[1], out var cbId) && int.TryParse(parts[2], out var cbVal))
+            EmjUiReader.CallOptions? targetCall = null;
+            if (parts.Length >= 2)
             {
-                var execute = parts.Length >= 4 && parts[3].ToLowerInvariant() == "run";
-                unsafe
-                {
-                    var addonPtr = _lastAddonAddress != 0 ? (AtkUnitBase*)_lastAddonAddress : null;
-                    if (addonPtr != null)
-                    {
-                        AddonClickHelper.LogAtkSnapshot(addonPtr, $"acceptcall-pre-{cbId}-{cbVal}");
-                        if (execute)
-                        {
-                            AddonClickHelper.TryFireProbeCallbackEx(addonPtr, 0, new[] { cbId, cbVal }, true);
-                            AddonClickHelper.LogAtkSnapshot(addonPtr, $"acceptcall-post-{cbId}-{cbVal}");
-                        }
-                    }
-                }
-                AppendRecentTransition($"{DateTime.UtcNow:O} acceptcall cb={cbId} val={cbVal} execute={execute}");
+                var p = parts[1].ToLowerInvariant();
+                if (p == "pon") targetCall = EmjUiReader.CallOptions.Pon;
+                else if (p == "chi") targetCall = EmjUiReader.CallOptions.Chi;
+                else if (p == "kan") targetCall = EmjUiReader.CallOptions.Kan;
+                else if (p == "ron") targetCall = EmjUiReader.CallOptions.Ron;
+                else if (p == "tsumo") targetCall = EmjUiReader.CallOptions.Tsumo;
+                else if (p == "riichi") targetCall = EmjUiReader.CallOptions.Riichi;
+            }
+
+            var buttonNodes = _lastUiState?.GameInfo?.CallButtonNodes;
+            if (buttonNodes == null || buttonNodes.Count == 0)
+            {
+                var msg = $"{DateTime.UtcNow:O} acceptcall: no call button nodes captured (is a call prompt visible?)";
+                AppendRecentTransition(msg);
+                LogToFile("autoplay.log", msg);
             }
             else
             {
-                AppendRecentTransition($"{DateTime.UtcNow:O} invalid acceptcall args: '{trimmed}'");
+                unsafe
+                {
+                    var addonPtr = _lastAddonAddress != 0 ? (AtkUnitBase*)_lastAddonAddress : null;
+                    if (addonPtr == null)
+                    {
+                        var msg = $"{DateTime.UtcNow:O} acceptcall: no addon";
+                        AppendRecentTransition(msg);
+                        LogToFile("autoplay.log", msg);
+                    }
+                    else
+                    {
+                        nint btnPtr = 0;
+                        string callName = "?";
+                        if (targetCall.HasValue && buttonNodes.TryGetValue(targetCall.Value, out var specificPtr))
+                        {
+                            btnPtr = specificPtr;
+                            callName = targetCall.Value.ToString();
+                        }
+                        else if (!targetCall.HasValue)
+                        {
+                            var priority = new[] {
+                                EmjUiReader.CallOptions.Ron, EmjUiReader.CallOptions.Tsumo,
+                                EmjUiReader.CallOptions.Kan, EmjUiReader.CallOptions.Pon,
+                                EmjUiReader.CallOptions.Chi, EmjUiReader.CallOptions.Riichi,
+                            };
+                            foreach (var c in priority)
+                            {
+                                if (buttonNodes.TryGetValue(c, out var p) && p != 0)
+                                {
+                                    btnPtr = p;
+                                    callName = c.ToString();
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (btnPtr != 0)
+                        {
+                            var result = AddonClickHelper.TryAcceptCallViaListClick(addonPtr, btnPtr, callName);
+                            var msg = $"{DateTime.UtcNow:O} acceptcall {callName} ptr={btnPtr:X} result={result}";
+                            AppendRecentTransition(msg);
+                            LogToFile("autoplay.log", msg);
+                        }
+                        else
+                        {
+                            var msg = $"{DateTime.UtcNow:O} acceptcall: target call '{targetCall}' not found in captured buttons";
+                            AppendRecentTransition(msg);
+                            LogToFile("autoplay.log", msg);
+                        }
+                    }
+                }
             }
         }
         else if (lower.StartsWith("clickcall"))
@@ -945,8 +996,8 @@ public sealed partial class Plugin : IDalamudPlugin
 
                         if (btnPtr != 0)
                         {
-                            AddonClickHelper.TryClickCallButton(addonPtr, btnPtr, callName, method);
-                            var msg = $"{DateTime.UtcNow:O} clickcall EXECUTE {callName} method={method}";
+                            var result = AddonClickHelper.TryAcceptCallViaListClick(addonPtr, btnPtr, callName);
+                            var msg = $"{DateTime.UtcNow:O} clickcall EXECUTE {callName} via ListItemClick result={result}";
                             AppendRecentTransition(msg);
                             LogToFile("autoplay.log", msg);
                         }
