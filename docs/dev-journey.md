@@ -697,3 +697,51 @@ The game already has built-in suggestion strings in AtkValues (tile names, actio
   - Added `LogSuggestionProbe()`: reads String8 AtkValues at indices [1],[6],[22],[23],[24],[45] and [30-37], logs to `suggestion_probe.log` on change
   - Added `LogSuggestionNode()` + `FlushSuggestionNodes()`: logs visible "!" suggestion text nodes (previously silently skipped) with visibility and owner info
 - `docs/in-game-suggestion-plan.md` — created 4-phase plan (A: instrument, B: state from suggestions, C: act on suggestions, D: hybrid mode)
+
+## 2026-04-02: Phase B — ReadInGameSuggestion + Suggestion-First Phase Detection
+
+**What:** Implemented `ReadInGameSuggestion()` reading AtkValues[6] for the game's action recommendation, and rewrote `InferGamePhase` to use the suggestion as the primary signal instead of the unreliable AtkVal[0] state machine.
+
+**Why:** AtkValues[6] reliably indicates "Discard", "Pass", "Chi!", "Pon!", "Ron!", "Tsumo!", scoring strings, etc. Using this as the primary phase signal eliminates stale-button and AtkVal[0]-overlap issues.
+
+**Changes:**
+- `EmjUiReader.cs`
+  - Added `SuggestionType` enum (None, Discard, Pass, Chi, Pon, Kan, Ron, Tsumo, Riichi, Scoring)
+  - Added `InGameSuggestion` record (Type, RawText, TileName?, TileIconId?)
+  - Implemented `ReadInGameSuggestion()` — parses [6] string to determine suggestion type
+  - Rewrote `InferGamePhase`: suggestion-first logic with AtkVal fallback only when suggestion is None; call-button-based detection commented out
+  - `ReadGameInfo` updated to pass `iconCapture`/`iconMap` through to `ReadInGameSuggestion`
+- `MahjongGameState.cs`
+  - Added `InGameSuggestion` StateField<string> to the record
+  - `ToDisplayText()` shows InGameSuggestion
+  - Merge method formats suggestion as `"{Type}:{RawText} tile={TileName} icon={TileIconId}"`
+- `Plugin.cs`
+  - Heartbeat includes `sug=` field
+
+## 2026-04-02: Bug Fixes — Stale Discard & Callback 8 Safety Guard
+
+**What:** Fixed two bugs caused by stale AtkValues and dual-meaning callbacks.
+
+**Bug 1 — [6]="Discard" stale override:** `[6]="Discard"` persists into AtkVal[0]=6 call prompts, causing the plugin to stay stuck on WaitingForDiscard. Fixed by only trusting "Discard" when AtkVal[0]=30 or 2 (actual draw/after-call turn).
+
+**Bug 2 — Callback 8 tsumogiri at non-6 states:** Stale call buttons at rawAtk0=15 triggered CallDecisionPrompt → call:pass → callback 8. But callback 8 at rawAtk0=15 means "discard drawn tile" (tsumogiri), not "skip call." Fixed by adding a rawAtk0=6 guard in `ExecuteCallResponse` — only fires callback 8 when rawAtk0==6.
+
+**Changes:**
+- `EmjUiReader.cs` — InferGamePhase only maps Discard→WaitingForDiscard when atk0=30/2
+- `AutoPlayManager.cs` — `ExecuteCallResponse` skip/pass path reads rawAtk0 and only fires callback 8 when rawAtk0==6
+
+## 2026-04-02: Suggestion Tile from Node 45 + Dora Indicator Reading
+
+**What:** Fixed the suggested discard tile reading to use the actual visual tile icon from node 45 instead of the stale hover tooltip AtkValues[1]/[2]. Also identified and implemented dora indicator reading from the UI.
+
+**Suggestion tile fix:** AtkValues[1] is a mouse hover tooltip (changes with cursor movement) and AtkValues[2] is a static icon (76070 = West, never changes). The actual suggested discard tile is rendered as a visible component child inside node 45 (the suggestion bar). Specifically: NodeList node with nodeId=45 (type=1027) → compChild id=2 (type=1021, size 34×45) is the visible tile image. Updated `ReadInGameSuggestion` to find this node via ULD NodeList scan and extract its icon using `TryFindIcon`, then resolve via `iconMap.Resolve()`.
+
+**Dora indicator discovery:** Added `LogDoraProbe()` diagnostic that scans all non-discard/hand component nodes for mahjong tile icons. Found dora indicators at nodeIds 28-32, type=1006, size 50×60. Up to 5 slots exist (1 base dora + 4 kan dora); only slots with valid tile icons (76041-76077) are revealed. Node 28 (leftmost) is the initial dora; additional slots become visible after kan declarations.
+
+**Changes:**
+- `EmjUiReader.cs`
+  - `ReadInGameSuggestion()`: signature updated to receive `iconCapture`/`iconMap`; body rewritten to find node 45 in addon's ULD NodeList, locate visible child id=2, extract icon via `TryFindIcon`, resolve tile code via `iconMap.Resolve()`
+  - Added 50×60 type=1006 detection in the main node scan loop → produces `SlotKind.DoraIndicator` slots for nodes with valid tile icons
+  - Re-indexes dora slots by X position (leftmost = index 0)
+  - Added `LogDoraProbe()` diagnostic for instrumentation
+- `MahjongGameState.cs` — `DoraIndicators` field (already existed) now populated from the new dora slots

@@ -378,10 +378,23 @@ public sealed class AutoPlayManager
         }
         else
         {
-            // Skip/pass — use callback 8 which works when AtkVal[0]=6.
-            // The action signature reset in Update() ensures we keep retrying
-            // until we catch the right AtkVal state.
-            Log($"Executing call response: skip/pass via callback 8");
+            // Skip/pass — use callback 8, but ONLY when AtkVal[0]=6 (actual call prompt).
+            // Callback 8 at other AtkVal states (e.g., 15, 30) means tsumogiri (discard drawn tile).
+            int rawAtk0 = -1;
+            try
+            {
+                if (addon->AtkValues != null && addon->AtkValuesCount > 0)
+                    rawAtk0 = addon->AtkValues[0].Int;
+            }
+            catch { }
+
+            if (rawAtk0 != 6)
+            {
+                Log($"Skip/pass deferred: rawAtk0={rawAtk0} (need 6). Will retry next frame.");
+                return false;
+            }
+
+            Log($"Executing call response: skip/pass via callback 8 (rawAtk0={rawAtk0})");
             return AddonClickHelper.TrySkipCall(addon);
         }
     }

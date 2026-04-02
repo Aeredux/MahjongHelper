@@ -225,4 +225,4 @@ enum TileType
 4. **Multiple rounds** — How does the addon transition between rounds? Need to detect round boundaries to reset state.
 5. **Click simulation method** — Need to determine whether Dalamud provides a click/callback API for addon nodes, or if raw input simulation is needed.
 6. **Discard pool layout** — Need to identify which node types/indices hold each player's discard pool, and how to distinguish the 4 player positions (self, shimocha, toimen, kamicha).
-7. **Dora indicators** — Need to find the dead wall / dora indicator tiles in the node tree. These may be a separate set of tile component nodes.
+7. ~~**Dora indicators**~~ — **Resolved.** Dora indicator tiles are nodeIds 28-32, type=1006, size 50×60 in the EmjL ULD NodeList. Up to 5 slots exist (1 base + 4 kan dora). Only slots with valid mahjong tile icons (76041-76077) are revealed. Read during the main node scan and classified as `SlotKind.DoraIndicator`.

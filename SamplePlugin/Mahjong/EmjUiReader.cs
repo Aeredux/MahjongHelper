@@ -68,7 +68,7 @@ public static unsafe class EmjUiReader
         Scoring,
     }
 
-    public sealed record InGameSuggestion(SuggestionType Type, string RawText);
+    public sealed record InGameSuggestion(SuggestionType Type, string RawText, string? TileName = null, int? TileIconId = null);
 
     public sealed record UiGameInfo(
         int? SeatWind,
@@ -295,7 +295,38 @@ public static unsafe class EmjUiReader
                     iconId,
                     iconId > 0 ? iconMap?.Resolve(iconId) : null));
             }
+
+            // 50x60 type=1006 = dora indicator slots (nodeIds 28-32, up to 5 kan dora)
+            // Only nodes with a valid tile icon are revealed dora indicators.
+            if (type == 1006 && node->Width == 50 && node->Height == 60)
+            {
+                uint iconId = 0;
+                TryFindIcon(node, iconCapture, out iconId);
+
+                if (iconId >= 76041 && iconId <= 76077)
+                {
+                    slots.Add(new UiSlot(
+                        SlotKind.DoraIndicator,
+                        0, // slot index assigned below after collecting all
+                        i,
+                        node->NodeId,
+                        (ushort)node->Type,
+                        visible,
+                        node->X,
+                        node->Y,
+                        node->Width,
+                        node->Height,
+                        iconId,
+                        iconMap?.Resolve(iconId)));
+                }
+            }
         }
+
+        // Re-index dora indicator slots by X position (leftmost = index 0)
+        var doraSlots = slots.Where(s => s.Kind == SlotKind.DoraIndicator).OrderBy(s => s.X).ToList();
+        slots.RemoveAll(s => s.Kind == SlotKind.DoraIndicator);
+        for (int di = 0; di < doraSlots.Count; di++)
+            slots.Add(doraSlots[di] with { SlotIndex = di });
 
         // Classify 34x45 tiles into discard pools and dora indicators by spatial position.
         // In the Mahjong UI, tiles are arranged with the local player at the bottom.
@@ -322,7 +353,7 @@ public static unsafe class EmjUiReader
             slots.Add(canonicalDraw with { Kind = SlotKind.CanonicalPlayerDraw, SlotIndex = 0 });
         }
 
-        var gameInfo = ReadGameInfo(addon);
+        var gameInfo = ReadGameInfo(addon, iconCapture, iconMap);
 
         return new UiState(slots, gameInfo, DateTime.UtcNow);
     }
@@ -396,7 +427,7 @@ public static unsafe class EmjUiReader
     ///     Current turn:   pane → 14/15  (has visible children when it's that player's turn)
     ///   Dora (score screen only): root → 46 → 54 → 80 → 83
     /// </summary>
-    private static UiGameInfo ReadGameInfo(AtkUnitBase* addon)
+    private static UiGameInfo ReadGameInfo(AtkUnitBase* addon, IconIdCapture? iconCapture, MahjongIconMap? iconMap)
     {
         int? seatWind = null;
         int? roundWind = null;
@@ -492,8 +523,11 @@ public static unsafe class EmjUiReader
         // Phase A instrumentation: log String8 AtkValues and suggestion nodes
         LogSuggestionProbe(addon, availableCalls);
 
-        // Read the in-game suggestion from AtkValues[6]
-        var suggestion = ReadInGameSuggestion(addon);
+        // Dora indicator probe: scan all component nodes for tile icons
+        LogDoraProbe(addon, iconCapture, iconMap);
+
+        // Read the in-game suggestion from AtkValues[6] + node 45 tile icon
+        var suggestion = ReadInGameSuggestion(addon, iconCapture, iconMap);
 
         // Infer game phase from available signals
         var phase = InferGamePhase(addon, availableCalls, rawAtkInts, suggestion);
@@ -882,6 +916,20 @@ public static unsafe class EmjUiReader
             var valCount = (int)addon->AtkValuesCount;
             int rawAtk0 = valCount > 0 ? addon->AtkValues[0].Int : -1;
 
+            // Read Int AtkValues at key indices (icon IDs)
+            int sugTileIcon = -1;
+            if (valCount > 2)
+            {
+                try
+                {
+                    var v2 = addon->AtkValues[2];
+                    if (v2.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int ||
+                        v2.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.UInt)
+                        sugTileIcon = v2.Int;
+                }
+                catch { }
+            }
+
             // Read String8 AtkValues at key indices
             int[] stringIndices = { 1, 6, 22, 23, 24, 45 };
             var strings = new Dictionary<int, string>();
@@ -919,6 +967,7 @@ public static unsafe class EmjUiReader
             // Build signature for dedup
             var parts = new List<string>();
             parts.Add($"atk0={rawAtk0}");
+            if (sugTileIcon > 0) parts.Add($"[2]icon={sugTileIcon}");
             foreach (var kv in strings.OrderBy(k => k.Key))
                 parts.Add($"[{kv.Key}]=\"{kv.Value}\"");
             foreach (var kv in suggestionLabels.OrderBy(k => k.Key))
@@ -990,7 +1039,79 @@ public static unsafe class EmjUiReader
     /// Reads AtkValues[6] to determine the game's current action recommendation.
     /// This is the most reliable signal for what the game expects the player to do.
     /// </summary>
-    private static InGameSuggestion ReadInGameSuggestion(AtkUnitBase* addon)
+
+    private static string? _lastDoraProbeSignature;
+
+    /// <summary>
+    /// Diagnostic probe: scans ALL component nodes for mahjong tile icon IDs (76041-76077)
+    /// to identify which nodes hold the dora indicator(s) during gameplay.
+    /// Logs to %APPDATA%/MahjongHelper/dora_probe.log on change.
+    /// </summary>
+    private static void LogDoraProbe(AtkUnitBase* addon, IconIdCapture? iconCapture, MahjongIconMap? iconMap)
+    {
+        try
+        {
+            var uld = addon->UldManager;
+            var entries = new List<string>();
+
+            for (int i = 0; i < uld.NodeListCount; i++)
+            {
+                var node = uld.NodeList[i];
+                if (node == null) continue;
+
+                var type = (int)node->Type;
+                if (type < 1000) continue;
+
+                // Skip known discard tile types and hand tile types
+                if (type == 1021 || type == 1022 || type == 1023 || type == 1024 || type == 1055)
+                    continue;
+
+                uint iconId = 0;
+                try { TryFindIcon(node, iconCapture, out iconId); } catch { }
+
+                // Only log nodes with valid mahjong tile icons
+                if (iconId >= 76041 && iconId <= 76077)
+                {
+                    bool vis = false;
+                    try { vis = node->IsVisible(); } catch { }
+                    var tileCode = iconMap?.Resolve(iconId) ?? "?";
+                    entries.Add($"idx={i} id={node->NodeId} type={type} vis={vis} pos=({node->X:F0},{node->Y:F0}) size=({node->Width},{node->Height}) icon={iconId} tile={tileCode}");
+                }
+            }
+
+            // Also check root→46→54→80→83 (score screen dora path) and its siblings
+            try
+            {
+                var root = addon->RootNode;
+                if (root != null)
+                {
+                    var node83 = FindChildById(root, 46, 54, 80, 83);
+                    if (node83 != null)
+                    {
+                        bool vis = false;
+                        try { vis = node83->IsVisible(); } catch { }
+                        uint iconId = 0;
+                        try { TryFindIcon(node83, iconCapture, out iconId); } catch { }
+                        var tileCode = iconId > 0 ? (iconMap?.Resolve(iconId) ?? "?") : "none";
+                        entries.Add($"ROOT_PATH id={node83->NodeId} type={(int)node83->Type} vis={vis} icon={iconId} tile={tileCode}");
+                    }
+                }
+            }
+            catch { }
+
+            var sig = entries.Count > 0 ? string.Join(" | ", entries) : "(none)";
+            if (sig == _lastDoraProbeSignature) return;
+            _lastDoraProbeSignature = sig;
+
+            var logDir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MahjongHelper");
+            System.IO.Directory.CreateDirectory(logDir);
+            var line = $"[{DateTime.UtcNow:O}] DoraNodes: {sig}\n";
+            System.IO.File.AppendAllText(System.IO.Path.Combine(logDir, "dora_probe.log"), line);
+        }
+        catch { }
+    }
+
+    private static InGameSuggestion ReadInGameSuggestion(AtkUnitBase* addon, IconIdCapture? iconCapture, MahjongIconMap? iconMap)
     {
         try
         {
@@ -1006,10 +1127,47 @@ public static unsafe class EmjUiReader
             if (string.IsNullOrEmpty(raw))
                 return new InGameSuggestion(SuggestionType.None, "");
 
+            // Read the suggested discard tile from node 45 (suggestion component).
+            // Its visible child id=2 (type=1021) contains the actual recommended tile icon,
+            // unlike AtkValues[1]/[2] which are just hover tooltips.
+            string? tileName = null;
+            int? tileIconId = null;
+            try
+            {
+                // Find node 45 in the addon's ULD NodeList
+                AtkResNode* sugNode = null;
+                var uld = addon->UldManager;
+                for (int i = 0; i < uld.NodeListCount; i++)
+                {
+                    var n = uld.NodeList[i];
+                    if (n != null && n->NodeId == 45 && (int)n->Type >= 1000)
+                    {
+                        sugNode = n;
+                        break;
+                    }
+                }
+
+                if (sugNode != null)
+                {
+                    // Inside node 45, find the visible tile component (child id=2)
+                    var tileNode = FindDirectChildById(sugNode, 2);
+                    if (tileNode != null && tileNode->IsVisible())
+                    {
+                        uint iconId = 0;
+                        if (TryFindIcon(tileNode, iconCapture, out iconId) && iconId > 0)
+                        {
+                            tileIconId = (int)iconId;
+                            tileName = iconMap?.Resolve(iconId);
+                        }
+                    }
+                }
+            }
+            catch { }
+
             var lower = raw.ToLowerInvariant();
 
             if (lower == "discard")
-                return new InGameSuggestion(SuggestionType.Discard, raw);
+                return new InGameSuggestion(SuggestionType.Discard, raw, tileName, tileIconId);
             if (lower == "pass")
                 return new InGameSuggestion(SuggestionType.Pass, raw);
             if (lower.Contains("chi"))
@@ -1157,46 +1315,26 @@ public static unsafe class EmjUiReader
 
     /// <summary>
     /// Infers the current game phase from available signals:
-    /// - In-game suggestion from AtkValues[6] (most reliable)
-    /// - Call prompts visible = CallDecisionPrompt (or specific call type)
-    /// - AtkVal[0] as fallback
+    /// - In-game suggestion from AtkValues[6] is the single source of truth
+    /// - AtkVal[0] only used as fallback when suggestion is empty/None
     /// </summary>
     private static GamePhase InferGamePhase(AtkUnitBase* addon, CallOptions availableCalls, IReadOnlyList<int> rawAtkInts, InGameSuggestion? suggestion)
     {
         var atkPhase = rawAtkInts.Count > 0 ? rawAtkInts[0] : -1;
         var sugType = suggestion?.Type ?? SuggestionType.None;
 
-        // Scoring / between rounds: [6] contains "Fu" and "Han"
+        // === PRIMARY: In-game suggestion [6] is the source of truth ===
+
         if (sugType == SuggestionType.Scoring)
             return GamePhase.BetweenRounds;
 
-        // AtkVal[0]=2 and 30 are definitively the player's discard turn.
-        // Stale call buttons persist in the ATK tree after prompts are dismissed,
-        // so these AtkVal values must be authoritative to avoid false CallDecisionPrompt.
-        // The stuck-discard detector in AutoPlayManager handles the rare edge case
-        // where a real modal prompt blocks callbacks at these AtkVal values.
-        if (atkPhase == 30 || atkPhase == 2)
+        if (sugType == SuggestionType.Discard && (atkPhase == 30 || atkPhase == 2))
             return GamePhase.WaitingForDiscard;
 
-        // In-game suggestion [6] says Pass or a call type → call/decision prompt
-        // This can detect the prompt BEFORE atk0 transitions to 6.
         if (sugType == SuggestionType.Pass || sugType == SuggestionType.Chi ||
             sugType == SuggestionType.Pon || sugType == SuggestionType.Kan)
-        {
-            // But only if we're not in a clearly non-call AtkVal state
-            if (atkPhase == 6 || atkPhase == 15)
-            {
-                if (availableCalls.HasFlag(CallOptions.Ron))
-                    return GamePhase.RonDecisionPrompt;
-                if (availableCalls.HasFlag(CallOptions.Tsumo))
-                    return GamePhase.TsumoDecisionPrompt;
-                if (availableCalls.HasFlag(CallOptions.Riichi))
-                    return GamePhase.RiichiDecisionPrompt;
-                return GamePhase.CallDecisionPrompt;
-            }
-        }
+            return GamePhase.CallDecisionPrompt;
 
-        // Ron/Tsumo/Riichi suggestions
         if (sugType == SuggestionType.Ron)
             return GamePhase.RonDecisionPrompt;
         if (sugType == SuggestionType.Tsumo)
@@ -1204,24 +1342,31 @@ public static unsafe class EmjUiReader
         if (sugType == SuggestionType.Riichi)
             return GamePhase.RiichiDecisionPrompt;
 
-        // For all other AtkVal[0] values, call buttons take priority.
-        if (availableCalls.HasFlag(CallOptions.Ron))
-            return GamePhase.RonDecisionPrompt;
-        if (availableCalls.HasFlag(CallOptions.Tsumo))
-            return GamePhase.TsumoDecisionPrompt;
-        if (availableCalls.HasFlag(CallOptions.Riichi))
-            return GamePhase.RiichiDecisionPrompt;
-        if (availableCalls != CallOptions.None && availableCalls != CallOptions.Skip)
-            return GamePhase.CallDecisionPrompt;
+        // === FALLBACK: AtkVal[0] when suggestion is None/Discard-stale ===
+        // [6]="Discard" persists stale into non-discard phases, so only trust
+        // it when atk0 confirms (handled above). Otherwise fall through here.
 
-        // No call buttons visible — use AtkValues[0] for phase detection
-        if (atkPhase == 6)
-            return GamePhase.CallDecisionPrompt;
+        if (atkPhase == 30 || atkPhase == 2)
+            return GamePhase.WaitingForDiscard;
 
         if (atkPhase == 15)
             return GamePhase.OpponentTurn;
 
+        // atk0=6 with no clear suggestion — likely a stale state or transition
+        if (atkPhase == 6)
+            return GamePhase.CallDecisionPrompt;
+
         return GamePhase.Unknown;
+
+        // === DISABLED: Old call-button-based detection (stale buttons unreliable) ===
+        // if (availableCalls.HasFlag(CallOptions.Ron))
+        //     return GamePhase.RonDecisionPrompt;
+        // if (availableCalls.HasFlag(CallOptions.Tsumo))
+        //     return GamePhase.TsumoDecisionPrompt;
+        // if (availableCalls.HasFlag(CallOptions.Riichi))
+        //     return GamePhase.RiichiDecisionPrompt;
+        // if (availableCalls != CallOptions.None && availableCalls != CallOptions.Skip)
+        //     return GamePhase.CallDecisionPrompt;
     }
 
     private static List<UiSlot> BuildCanonicalHand(List<UiSlot> rawHand)

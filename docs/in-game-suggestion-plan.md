@@ -55,7 +55,7 @@ The game also displays suggestion bubbles on the player pane (e.g., "Pon!", "Chi
 
 ### Phase B: Game State from Suggestions
 
-- [ ] **B1: Implement `ReadInGameSuggestion()` in EmjUiReader**
+- [x] **B1: Implement `ReadInGameSuggestion()` in EmjUiReader**
   - Read `AtkValues[6]` as the primary signal:
     - `"Discard"` → player's discard turn
     - `"Pass"` → game recommends passing on a call
@@ -64,7 +64,7 @@ The game also displays suggestion bubbles on the player pane (e.g., "Pon!", "Chi
   - Also read SuggestionNodes as secondary signal for call type detection
   - Return a structured `InGameSuggestion` with type enum
 
-- [ ] **B2: Use `[6]` for phase detection (cross-check with AtkVal[0])**
+- [x] **B2: Use `[6]` for phase detection (cross-check with AtkVal[0])**
   - `[6]="Discard"` at atk0=30/2 → WaitingForDiscard (high confidence)
   - `[6]="Pass"` or `[6]="Chi!"` at atk0=15 → call prompt incoming (act immediately or wait for atk0=6)
   - `[6]` contains "Fu" and "Han" → BetweenRounds

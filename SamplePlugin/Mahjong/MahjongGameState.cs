@@ -53,6 +53,7 @@ public sealed record MahjongGameState(
         sb.AppendLine("Normalized Mahjong State");
         sb.AppendLine($"AgentState: {FormatValue(AgentState)}");
         sb.AppendLine($"GamePhase: {FormatValue(GamePhase)}");
+        sb.AppendLine($"InGameSuggestion: {FormatValue(InGameSuggestion)}");
         sb.AppendLine($"SeatWind: {FormatValue(SeatWind)}");
         sb.AppendLine($"RoundWind: {FormatValue(RoundWind)}");
         sb.AppendLine($"RoundNumber: {FormatValue(RoundNumber)}");
@@ -171,9 +172,14 @@ public static class MahjongGameStateBuilder
         var phaseStr = gameInfo.Phase.ToString();
         var mergedPhase = new StateField<string>(phaseStr, MahjongStateSource.Node, IsAuthoritative: true, IsFallback: false);
 
-        var sugStr = gameInfo.Suggestion != null
-            ? $"{gameInfo.Suggestion.Type}:{gameInfo.Suggestion.RawText}"
-            : "None";
+        var sugStr = "None";
+        if (gameInfo.Suggestion != null)
+        {
+            var s = gameInfo.Suggestion;
+            sugStr = $"{s.Type}:{s.RawText}";
+            if (s.TileName != null) sugStr += $" tile={s.TileName}";
+            if (s.TileIconId.HasValue) sugStr += $" icon={s.TileIconId.Value}";
+        }
         var mergedSuggestion = new StateField<string>(sugStr, MahjongStateSource.Node, IsAuthoritative: true, IsFallback: false);
 
         var turnStr = gameInfo.CurrentTurn switch
