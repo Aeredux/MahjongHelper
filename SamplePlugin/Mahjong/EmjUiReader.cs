@@ -1328,8 +1328,17 @@ public static unsafe class EmjUiReader
         if (sugType == SuggestionType.Scoring)
             return GamePhase.BetweenRounds;
 
-        if (sugType == SuggestionType.Discard && (atkPhase == 30 || atkPhase == 2))
-            return GamePhase.WaitingForDiscard;
+        // Discard with a visible suggestion tile = definitely our turn.
+        // Discard WITHOUT a tile icon = stale [6]="Discard" from a previous turn;
+        // only trust it when atk0 also confirms (30 = draw turn, 2 = after-call discard).
+        if (sugType == SuggestionType.Discard)
+        {
+            if (suggestion?.TileIconId != null)
+                return GamePhase.WaitingForDiscard;
+            if (atkPhase == 30 || atkPhase == 2)
+                return GamePhase.WaitingForDiscard;
+            // Stale Discard with no tile — fall through to AtkVal fallback
+        }
 
         if (sugType == SuggestionType.Pass || sugType == SuggestionType.Chi ||
             sugType == SuggestionType.Pon || sugType == SuggestionType.Kan)
@@ -1351,6 +1360,10 @@ public static unsafe class EmjUiReader
 
         if (atkPhase == 15)
             return GamePhase.OpponentTurn;
+
+        // atk0=29 = score screen (stable), atk0=32 = score animation / transition
+        if (atkPhase == 29 || atkPhase == 32)
+            return GamePhase.BetweenRounds;
 
         // atk0=6 with no clear suggestion — likely a stale state or transition
         if (atkPhase == 6)

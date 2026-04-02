@@ -174,6 +174,19 @@ public sealed partial class Plugin : IDalamudPlugin
         MainWindow.recentTransitionsText = BuildRecentTransitionsText();
         MainWindow.serverStatusText = _serverClient.GetStatusText();
 
+        // Auto-play status line
+        {
+            var ap = Configuration.AutoPlayEnabled;
+            var phase = _autoPlayManager.PendingAction != null
+                ? $"pending={_autoPlayManager.PendingAction}"
+                : _lastMergedState?.GamePhase.Value ?? "?";
+            var paused = _autoPlayManager.IsPaused ? " [PAUSED]" : "";
+            var provider = Configuration.AutoPlayEnabled ? _autoPlayManager.ActiveProviderName : "";
+            MainWindow.autoPlayStatusText = ap
+                ? $"ON ({provider}) {phase}{paused}"
+                : "Off";
+        }
+
         // Feed overlay data
         OverlayWindow.IsOpen = Configuration.OverlayVisible && _lastReaderStatus == AddonReaderStatus.NoErrors;
         OverlayWindow.ServerStatus = _serverClient.GetStatusText();
@@ -369,7 +382,8 @@ public sealed partial class Plugin : IDalamudPlugin
         // phase transitions that the signature dedup may miss (e.g., AtkVal[0]
         // changing while hand/discards remain the same).
         _autoPlayManager.OnGameStateUpdate(merged.GamePhase.Value, _lastUiState?.Slots,
-            _lastUiState?.GameInfo?.CallButtonNodes);
+            _lastUiState?.GameInfo?.CallButtonNodes,
+            _lastUiState?.GameInfo?.Suggestion);
 
         // Always try to request suggestions and call evaluations — phase may
         // have changed even if the normalized signature hasn't.

@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Runtime.InteropServices;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 
@@ -28,9 +29,33 @@ public static unsafe class AddonClickHelper
     [DllImport("user32.dll")] private static extern bool PostMessage(nint hWnd, uint Msg, nint wParam, nint lParam);
     [DllImport("user32.dll")] private static extern bool ClientToScreen(nint hWnd, ref POINT lpPoint);
     [DllImport("user32.dll")] private static extern bool ScreenToClient(nint hWnd, ref POINT lpPoint);
+    [DllImport("user32.dll")] private static extern bool GetCursorPos(out POINT lpPoint);
+    [DllImport("user32.dll")] private static extern bool SetCursorPos(int X, int Y);
+    [DllImport("user32.dll")] private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct POINT { public int X, Y; }
+
+    // SendInput structures
+    [StructLayout(LayoutKind.Sequential)]
+    private struct INPUT
+    {
+        public uint type; // 0 = mouse
+        public MOUSEINPUT mi;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MOUSEINPUT
+    {
+        public int dx, dy;
+        public uint mouseData, dwFlags, time;
+        public nint dwExtraInfo;
+    }
+
+    private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+    private const uint MOUSEEVENTF_LEFTUP = 0x0004;
+    private const uint MOUSEEVENTF_ABSOLUTE = 0x8000;
+    private const uint MOUSEEVENTF_MOVE = 0x0001;
 
     private const uint WM_LBUTTONDOWN = 0x0201;
     private const uint WM_LBUTTONUP = 0x0202;
@@ -116,6 +141,240 @@ public static unsafe class AddonClickHelper
         catch (Exception ex)
         {
             Log($"ERROR skipping call: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Advances past the score screen (atk0=29/32).
+    /// Strategy: Scan for visible text button nodes containing "OK"/"Next"/"Continue",
+    /// and click via ListItemClick. Falls back to trying various callbacks.
+    /// Logs all attempts for diagnostics.
+    /// </summary>
+    public static bool TryAdvanceScoreScreen(AtkUnitBase* addon)
+    {
+        if (addon == null) return false;
+
+        try
+        {
+            int rawAtk0 = -1;
+            try
+            {
+                if (addon->AtkValues != null && addon->AtkValuesCount > 0)
+                    rawAtk0 = addon->AtkValues[0].Int;
+            }
+            catch { }
+
+            Log($"[ADVANCE] Attempting score screen advance (rawAtk0={rawAtk0})");
+            LogAtkSnapshot(addon, "pre-advance");
+
+            // Strategy 1: Scan all visible component nodes for clickable text buttons
+            var uld = addon->UldManager;
+            var foundButtons = new System.Collections.Generic.List<(string text, nint node, nint parent)>();
+
+            for (int i = 0; i < uld.NodeListCount; i++)
+            {
+                try
+                {
+                    var n = uld.NodeList[i];
+                    if (n == null || (int)n->Type < 1000) continue;
+                    bool vis = false;
+                    try { vis = n->IsVisible(); } catch { }
+                    // Scan both visible and type=1032 (container) nodes
+                    if (!vis && (int)n->Type != 1032) continue;
+
+                    var comp = (AtkComponentNode*)n;
+                    if (comp->Component == null) continue;
+
+                    // Scan child nodes for text
+                    var childUld = comp->Component->UldManager;
+                    for (int j = 0; j < childUld.NodeListCount && j < 64; j++)
+                    {
+                        try
+                        {
+                            var cn = childUld.NodeList[j];
+                            if (cn == null || cn->Type != NodeType.Text) continue;
+                            bool cVis = false;
+                            try { cVis = cn->IsVisible(); } catch { }
+                            if (!cVis) continue;
+
+                            var txt = (AtkTextNode*)cn;
+                            string text;
+                            try { text = Marshal.PtrToStringUTF8((nint)txt->NodeText.StringPtr.Value) ?? ""; }
+                            catch { continue; }
+
+                            if (string.IsNullOrWhiteSpace(text)) continue;
+                            var trimmed = text.Trim();
+
+                            // Skip known call button text and suggestion labels
+                            if (trimmed.EndsWith("!")) continue;
+                            var lower = trimmed.ToLowerInvariant();
+                            if (lower == "chi" || lower == "pon" || lower == "kan" ||
+                                lower == "ron" || lower == "tsumo" || lower == "riichi" ||
+                                lower == "skip" || lower == "pass" || lower == "cancel") continue;
+
+                            // Log all text nodes found on the score screen for diagnostics
+                            foundButtons.Add((trimmed, (nint)comp, (nint)n));
+                        }
+                        catch { }
+                    }
+                }
+                catch { }
+            }
+
+            // Log just the recognized buttons
+            if (foundButtons.Count > 0)
+            {
+                var btnNames = string.Join(", ", foundButtons.Select(b => $"\"{b.text}\""));
+                Log($"[ADVANCE] Found {foundButtons.Count} text nodes: {btnNames}");
+            }
+
+            // Look for "OK", "Next", "Continue" or similar advance buttons
+            foreach (var (text, node, parent) in foundButtons)
+            {
+                var lower = text.ToLowerInvariant();
+                if (lower == "ok" || lower == "next" || lower.Contains("continue") ||
+                    lower.Contains("proceed") || lower.Contains("confirm"))
+                {
+                    Log($"[ADVANCE] Clicking advance button: \"{text}\" node={node:X}");
+                    var result = TryClickButton(addon, node, text);
+                    LogAtkSnapshot(addon, "post-advance-button");
+
+                    // Check if it worked
+                    int postAtk0btn = -1;
+                    try
+                    {
+                        if (addon->AtkValues != null && addon->AtkValuesCount > 0)
+                            postAtk0btn = addon->AtkValues[0].Int;
+                    }
+                    catch { }
+
+                    if (postAtk0btn != rawAtk0)
+                    {
+                        Log($"[ADVANCE] Button click worked: atk0 {rawAtk0} -> {postAtk0btn}");
+                        return true;
+                    }
+                    Log($"[ADVANCE] Button click didn't change state (may need frame delay)");
+                    break; // PostMessage is async, state change may come next frame
+                }
+            }
+
+            // No recognized button found
+            Log($"[ADVANCE] No advance button found on score screen");
+
+            int postAtk0 = -1;
+            try
+            {
+                if (addon->AtkValues != null && addon->AtkValuesCount > 0)
+                    postAtk0 = addon->AtkValues[0].Int;
+            }
+            catch { }
+
+            Log($"[ADVANCE] Result: atk0 {rawAtk0} -> {postAtk0}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log($"ERROR advancing score screen: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Attempts to click a standalone button node (type >= 1000) using PostMessage
+    /// to simulate a mouse click at the button's screen position.
+    /// This is the most reliable approach for UI elements that don't respond to internal events.
+    /// </summary>
+    private static bool TryClickButton(AtkUnitBase* addon, nint buttonPtr, string label)
+    {
+        if (addon == null || buttonPtr == 0) return false;
+
+        try
+        {
+            var compNode = (AtkComponentNode*)buttonPtr;
+            var node = (AtkResNode*)compNode;
+
+            Log($"[CLICK-BTN] {label}: nodeId={node->NodeId} type={(int)node->Type} visible={node->IsVisible()}");
+
+            // Walk parent chain to compute game-client position
+            float clientX = node->X;
+            float clientY = node->Y;
+            var parent = node->ParentNode;
+            int depth = 0;
+            while (parent != null && depth < 20)
+            {
+                clientX += parent->X;
+                clientY += parent->Y;
+                parent = parent->ParentNode;
+                depth++;
+            }
+
+            // Parent walk gives client-area coordinates; no addon offset needed
+            int centerX = (int)(clientX + node->Width / 2.0f);
+            int centerY = (int)(clientY + node->Height / 2.0f);
+
+            Log($"[CLICK-BTN] {label}: computed center=({centerX},{centerY}) addon=({addon->X},{addon->Y}) rawPos=({clientX},{clientY})");
+
+            // Approach 1: Find the registered ButtonClick event on the node and dispatch
+            // through the addon with the ORIGINAL event structure (preserving listener pointer)
+            try
+            {
+                var evt = node->AtkEventManager.Event;
+                int evtIdx = 0;
+                while (evt != null && evtIdx < 32)
+                {
+                    evtIdx++;
+                    if (evt->State.EventType == AtkEventType.ButtonClick && evt->Listener != null)
+                    {
+                        Log($"[CLICK-BTN] {label}: dispatching ButtonClick param={evt->Param} via addon using original event");
+                        var eventData = stackalloc byte[0x28];
+                        addon->ReceiveEvent(evt->State.EventType, (int)evt->Param, evt, (AtkEventData*)eventData);
+                        Log($"[CLICK-BTN] {label}: addon ReceiveEvent done");
+                        return true;
+                    }
+                    evt = evt->NextEvent;
+                }
+                Log($"[CLICK-BTN] {label}: no ButtonClick found in {evtIdx} events");
+            }
+            catch (Exception ex)
+            {
+                Log($"[CLICK-BTN] {label}: Approach 1 failed: {ex.Message}");
+            }
+
+            // Approach 2: SendInput simulation
+            var hwnd = System.Diagnostics.Process.GetCurrentProcess().MainWindowHandle;
+            if (hwnd == 0)
+            {
+                Log($"[CLICK-BTN] {label}: no HWND found");
+                return false;
+            }
+
+            var screenPt = new POINT { X = centerX, Y = centerY };
+            ClientToScreen(hwnd, ref screenPt);
+            Log($"[CLICK-BTN] {label}: screen coords=({screenPt.X},{screenPt.Y})");
+
+            GetCursorPos(out var savedPos);
+            SetCursorPos(screenPt.X, screenPt.Y);
+            System.Threading.Thread.Sleep(30);
+
+            var inputs = new INPUT[2];
+            inputs[0].type = 0;
+            inputs[0].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+            inputs[1].type = 0;
+            inputs[1].mi.dwFlags = MOUSEEVENTF_LEFTUP;
+
+            var sent = SendInput(2, inputs, Marshal.SizeOf<INPUT>());
+            Log($"[CLICK-BTN] {label}: SendInput sent={sent}");
+
+            System.Threading.Thread.Sleep(50);
+            SetCursorPos(savedPos.X, savedPos.Y);
+
+            Log($"[CLICK-BTN] {label}: cursor restored");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log($"[CLICK-BTN] ERROR clicking {label}: {ex.Message}");
             return false;
         }
     }

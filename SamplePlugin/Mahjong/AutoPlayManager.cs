@@ -15,6 +15,11 @@ public sealed class AutoPlayManager
     private readonly Configuration _config;
     private readonly MahjongIconMap _iconMap;
 
+    // Suggestion providers
+    private readonly InGameSuggestionProvider _inGameProvider = new();
+    private readonly ServerSuggestionProvider _serverProvider = new();
+    private ISuggestionProvider _activeProvider;
+
     // State tracking
     private DateTime _actionScheduledAtUtc;
     private DateTime _actionExecuteAtUtc;
@@ -23,9 +28,7 @@ public sealed class AutoPlayManager
     private bool _paused;
     private int _consecutiveFailedDiscards; // discards that fired with no state change
 
-    // The suggestion to act on
-    private SuggestMoveResponse? _lastSuggestion;
-    private EvaluateCallResponse? _lastCallEval;
+    // Game state
     private string? _lastGamePhase;
     private IReadOnlyList<EmjUiReader.UiSlot>? _lastHandSlots;
     private Dictionary<EmjUiReader.CallOptions, nint>? _lastCallButtonNodes;
@@ -37,11 +40,13 @@ public sealed class AutoPlayManager
     public bool IsPaused => _paused;
     public string? PendingAction => _pendingAction;
     public DateTime ActionExecuteAtUtc => _actionExecuteAtUtc;
+    public string ActiveProviderName => _activeProvider.GetType().Name.Replace("SuggestionProvider", "");
 
     public AutoPlayManager(Configuration config, MahjongIconMap iconMap)
     {
         _config = config;
         _iconMap = iconMap;
+        _activeProvider = _inGameProvider; // default to in-game suggestions
     }
 
     /// <summary>Toggle pause state for the current turn.</summary>
@@ -50,14 +55,20 @@ public sealed class AutoPlayManager
     /// <summary>Resume auto-play.</summary>
     public void Resume() => _paused = false;
 
+    /// <summary>Switch to in-game suggestion provider.</summary>
+    public void UseInGameProvider() { _activeProvider = _inGameProvider; Log("Switched to InGame suggestion provider"); }
+
+    /// <summary>Switch to server suggestion provider.</summary>
+    public void UseServerProvider() { _activeProvider = _serverProvider; Log("Switched to Server suggestion provider"); }
+
     /// <summary>
     /// Called when a new suggestion is received from the server.
-    /// Schedules an auto-discard if conditions are met.
+    /// Updates the server provider and re-checks scheduling.
     /// </summary>
     public void OnSuggestionReceived(SuggestMoveResponse? suggestion, string? gamePhase,
         IReadOnlyList<EmjUiReader.UiSlot>? handSlots)
     {
-        _lastSuggestion = suggestion;
+        _serverProvider.UpdateSuggestion(suggestion);
         _lastGamePhase = gamePhase;
         _lastHandSlots = handSlots;
         TryScheduleDiscard();
@@ -65,11 +76,11 @@ public sealed class AutoPlayManager
 
     /// <summary>
     /// Called when a call evaluation is received from the server.
-    /// Schedules an auto-call response if conditions are met.
+    /// Updates the server provider and re-checks scheduling.
     /// </summary>
     public void OnCallEvalReceived(EvaluateCallResponse? callEval, string? gamePhase)
     {
-        _lastCallEval = callEval;
+        _serverProvider.UpdateCallEval(callEval);
         _lastGamePhase = gamePhase;
         TryScheduleCallResponse();
     }
@@ -79,18 +90,31 @@ public sealed class AutoPlayManager
     /// Re-checks scheduling in case the phase changed after a suggestion was already cached.
     /// </summary>
     public void OnGameStateUpdate(string? gamePhase, IReadOnlyList<EmjUiReader.UiSlot>? handSlots,
-        Dictionary<EmjUiReader.CallOptions, nint>? callButtonNodes = null)
+        Dictionary<EmjUiReader.CallOptions, nint>? callButtonNodes = null,
+        EmjUiReader.InGameSuggestion? inGameSuggestion = null)
     {
         var prevPhase = _lastGamePhase;
         _lastGamePhase = gamePhase;
         _lastHandSlots = handSlots;
         _lastCallButtonNodes = callButtonNodes;
 
+        // Update the in-game provider with latest suggestion data
+        _inGameProvider.Update(inGameSuggestion);
+
+        // Log riichi suggestion events for diagnostics
+        if (inGameSuggestion?.Type == EmjUiReader.SuggestionType.Riichi)
+        {
+            var riichiTile = inGameSuggestion.TileName ?? "(none)";
+            var riichiIcon = inGameSuggestion.TileIconId?.ToString() ?? "(none)";
+            Log($"[RIICHI-DIAG] Riichi suggestion detected: tile={riichiTile} icon={riichiIcon} phase={gamePhase} prev={prevPhase}");
+        }
+
         // Log phase transitions for diagnostics
         if (gamePhase != prevPhase)
         {
             Log($"Phase transition: {prevPhase} -> {gamePhase}");
             _consecutiveFailedDiscards = 0; // Reset stuck counter on any phase change
+            _scoreAdvanceAttempts = 0; // Reset score screen advance attempts
         }
 
         // Track when we enter a call/decision phase
@@ -98,6 +122,12 @@ public sealed class AutoPlayManager
                           gamePhase == "TsumoDecisionPrompt" || gamePhase == "RiichiDecisionPrompt";
         var wasCallPhase = prevPhase == "CallDecisionPrompt" || prevPhase == "RonDecisionPrompt" ||
                            prevPhase == "TsumoDecisionPrompt" || prevPhase == "RiichiDecisionPrompt";
+
+        // Log riichi phase transitions specifically
+        if (gamePhase == "RiichiDecisionPrompt" && prevPhase != "RiichiDecisionPrompt")
+            Log($"[RIICHI-DIAG] Entered RiichiDecisionPrompt from {prevPhase}");
+        if (prevPhase == "RiichiDecisionPrompt" && gamePhase != "RiichiDecisionPrompt")
+            Log($"[RIICHI-DIAG] Left RiichiDecisionPrompt to {gamePhase}");
 
         if (isCallPhase && !wasCallPhase)
         {
@@ -107,17 +137,17 @@ public sealed class AutoPlayManager
         {
             // Left a call phase — clear stale call eval so future prompts
             // can trigger the fallback if the server doesn't respond.
-            _lastCallEval = null;
+            _serverProvider.ClearCallEval();
         }
 
         // Fallback: if we've been in a call phase for >3 seconds with no pending action
-        // and no call eval received, schedule a pass. This handles cases where the server
-        // didn't respond or the call eval request was deduped.
-        if (isCallPhase && _pendingAction == null && _lastCallEval == null &&
+        // and the active provider still can't decide, schedule a pass.
+        if (isCallPhase && _pendingAction == null &&
+            _activeProvider.GetCallAction() == null &&
             _config.AutoPlayEnabled && _config.AutoCallEnabled && !_paused &&
             DateTime.UtcNow > _callPhaseEnteredUtc.AddSeconds(3))
         {
-            Log($"Fallback: auto-pass after 3s in {gamePhase} with no call evaluation");
+            Log($"Fallback: auto-pass after 3s in {gamePhase} with no provider decision");
             _pendingAction = "call:pass";
             _lastActionSignature = "call:pass";
             _actionScheduledAtUtc = DateTime.UtcNow;
@@ -139,6 +169,12 @@ public sealed class AutoPlayManager
         if (isCallPhase)
         {
             TryScheduleCallResponse();
+        }
+
+        // Auto-advance score screen when between rounds.
+        if (gamePhase == "BetweenRounds" && _config.AutoPlayEnabled && !_paused)
+        {
+            TryScheduleScoreAdvance();
         }
     }
 
@@ -209,6 +245,11 @@ public sealed class AutoPlayManager
             _consecutiveFailedDiscards = 0;
             return ExecuteCallResponse(addon, 1);
         }
+        else if (action == "advance")
+        {
+            _consecutiveFailedDiscards = 0;
+            return AddonClickHelper.TryAdvanceScoreScreen(addon);
+        }
 
         return false;
     }
@@ -229,13 +270,7 @@ public sealed class AutoPlayManager
         if (_lastGamePhase != "WaitingForDiscard")
             return;
 
-        if (_lastSuggestion?.Suggestions == null || _lastSuggestion.Suggestions.Count == 0)
-            return;
-
-        if (!string.IsNullOrEmpty(_lastSuggestion.Error))
-            return;
-
-        var bestTile = _lastSuggestion.Suggestions[0].Tile;
+        var bestTile = _activeProvider.GetDiscardTile();
         if (string.IsNullOrEmpty(bestTile))
             return;
 
@@ -248,7 +283,7 @@ public sealed class AutoPlayManager
         _actionScheduledAtUtc = DateTime.UtcNow;
         _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(_config.AutoPlayDelayMs);
 
-        Log($"Scheduled: {sig} (execute at +{_config.AutoPlayDelayMs}ms)");
+        Log($"Scheduled: {sig} provider={_activeProvider.GetType().Name} (execute at +{_config.AutoPlayDelayMs}ms)");
     }
 
     private void TryScheduleCallResponse()
@@ -262,10 +297,15 @@ public sealed class AutoPlayManager
             _lastGamePhase != "RiichiDecisionPrompt")
             return;
 
-        if (_lastCallEval == null)
+        var decision = _activeProvider.GetCallAction();
+        if (decision == null)
             return;
 
-        var action = _lastCallEval.ShouldCall ? "call:accept" : "call:pass";
+        // Log riichi accept/pass decisions
+        if (_lastGamePhase == "RiichiDecisionPrompt")
+            Log($"[RIICHI-DIAG] Provider decision for Riichi: {decision} provider={_activeProvider.GetType().Name}");
+
+        var action = $"call:{decision}";
 
         if (action == _lastActionSignature)
             return;
@@ -275,7 +315,32 @@ public sealed class AutoPlayManager
         _actionScheduledAtUtc = DateTime.UtcNow;
         _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(_config.AutoPlayDelayMs);
 
-        Log($"Scheduled: {action} shouldCall={_lastCallEval.ShouldCall} conf={_lastCallEval.Confidence} (execute at +{_config.AutoPlayDelayMs}ms)");
+        Log($"Scheduled: {action} provider={_activeProvider.GetType().Name} (execute at +{_config.AutoPlayDelayMs}ms)");
+    }
+
+    private int _scoreAdvanceAttempts; // track retry count for score screen
+
+    private void TryScheduleScoreAdvance()
+    {
+        if (_pendingAction != null)
+            return;
+
+        // Stop after 5 attempts — may not work for this screen
+        if (_scoreAdvanceAttempts >= 5)
+            return;
+
+        var sig = "advance";
+        if (sig == _lastActionSignature)
+            return;
+
+        _lastActionSignature = sig;
+        _pendingAction = sig;
+        _actionScheduledAtUtc = DateTime.UtcNow;
+        // Use a longer delay for score screen to let animations finish
+        _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(3000);
+        _scoreAdvanceAttempts++;
+
+        Log($"Scheduled: {sig} attempt={_scoreAdvanceAttempts} (execute at +3000ms)");
     }
 
     private unsafe bool ExecuteDiscard(AtkUnitBase* addon, string tileCode)
@@ -378,8 +443,11 @@ public sealed class AutoPlayManager
         }
         else
         {
-            // Skip/pass — use callback 8, but ONLY when AtkVal[0]=6 (actual call prompt).
-            // Callback 8 at other AtkVal states (e.g., 15, 30) means tsumogiri (discard drawn tile).
+            // Skip/pass — use callback 8.
+            // Old guard required rawAtk0=6, but with suggestion-first phase detection
+            // the game phase is derived from the in-game suggestion (Pass/Chi/Pon/etc.),
+            // and rawAtk0 can legitimately be 30 during a real call prompt.
+            // The phase check in TryScheduleCallResponse already ensures we're in a call phase.
             int rawAtk0 = -1;
             try
             {
@@ -387,12 +455,6 @@ public sealed class AutoPlayManager
                     rawAtk0 = addon->AtkValues[0].Int;
             }
             catch { }
-
-            if (rawAtk0 != 6)
-            {
-                Log($"Skip/pass deferred: rawAtk0={rawAtk0} (need 6). Will retry next frame.");
-                return false;
-            }
 
             Log($"Executing call response: skip/pass via callback 8 (rawAtk0={rawAtk0})");
             return AddonClickHelper.TrySkipCall(addon);

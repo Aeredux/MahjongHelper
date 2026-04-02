@@ -21,6 +21,7 @@ public class MainWindow : Window, IDisposable
     public static String recentTransitionsText = "(no normalized transitions yet)";
     public static String serverSuggestionText = "(no suggestion yet)";
     public static String serverStatusText = "Not checked";
+    public static String autoPlayStatusText = "Off";
     private string resetIconIdInput = "";
     public bool RequestTileDump;
 
@@ -151,6 +152,7 @@ public class MainWindow : Window, IDisposable
         ImGui.Separator();
         ImGui.Text($"Reader Status: {readerStatus}");
         ImGui.Text($"Server: {serverStatusText}");
+        ImGui.Text($"Auto-Play: {autoPlayStatusText}");
 
         // Tab bar for organizing content
         if (ImGui.BeginTabBar("DebugTabs", ImGuiTabBarFlags.None))
