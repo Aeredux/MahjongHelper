@@ -394,7 +394,128 @@ public static unsafe class AddonClickHelper
         catch { }
     }
 
-    // --- Call-accept via button node click ---
+    // --- Call-accept via list item click (WORKING APPROACH) ---
+
+    /// <summary>
+    /// Accepts a call by firing ListItemClick on the parent list's registered listener.
+    /// This is the confirmed working approach: navigates from the button node to its
+    /// parent list component, finds the ListItemClick event's registered listener,
+    /// determines the button's index among visible siblings, and calls
+    /// listener->ReceiveEvent(ListItemClick, index).
+    ///
+    /// buttonComponentPtr: the AtkComponentNode* of the call button (from ScanComponentForCalls)
+    /// Returns true if the event was dispatched successfully.
+    /// </summary>
+    public static bool TryAcceptCallViaListClick(AtkUnitBase* addon, nint buttonComponentPtr, string callName)
+    {
+        if (addon == null || buttonComponentPtr == 0)
+        {
+            Log($"[CALL-ACCEPT] Cannot accept {callName}: addon={addon != null} ptr={buttonComponentPtr:X}");
+            return false;
+        }
+
+        var compNode = (AtkComponentNode*)buttonComponentPtr;
+        var node = (AtkResNode*)compNode;
+
+        Log($"[CALL-ACCEPT] {callName}: ptr={buttonComponentPtr:X} nodeId={node->NodeId} " +
+            $"type={(int)node->Type} visible={node->IsVisible()}");
+
+        // Navigate to parent list node
+        var parentNode = node->ParentNode;
+        if (parentNode == null)
+        {
+            Log($"[CALL-ACCEPT] {callName}: no parent node");
+            return false;
+        }
+
+        Log($"[CALL-ACCEPT] {callName}: parent id={parentNode->NodeId} type={(int)parentNode->Type}");
+
+        // Find ListItemClick event on parent list
+        var listEvt = parentNode->AtkEventManager.Event;
+        AtkEvent* listItemClickEvt = null;
+        while (listEvt != null)
+        {
+            if (listEvt->State.EventType == AtkEventType.ListItemClick)
+            {
+                listItemClickEvt = listEvt;
+                break;
+            }
+            listEvt = listEvt->NextEvent;
+        }
+
+        if (listItemClickEvt == null || listItemClickEvt->Listener == null)
+        {
+            Log($"[CALL-ACCEPT] {callName}: no ListItemClick event or listener on parent");
+            return false;
+        }
+
+        // Determine button's index among visible siblings in the list
+        int buttonIndex = FindButtonIndexInList(parentNode, compNode);
+        Log($"[CALL-ACCEPT] {callName}: buttonIndex={buttonIndex} listener={(nint)listItemClickEvt->Listener:X}");
+
+        // Construct safe event with valid Node field
+        var safeEvt = stackalloc AtkEvent[1];
+        *safeEvt = *listItemClickEvt;
+        safeEvt->Node = node;
+        safeEvt->Param = (uint)buttonIndex;
+        safeEvt->NextEvent = null;
+        var eventData = stackalloc byte[0x28];
+
+        LogAtkSnapshot(addon, $"pre-accept-{callName}");
+        listItemClickEvt->Listener->ReceiveEvent(
+            AtkEventType.ListItemClick, buttonIndex, safeEvt, (AtkEventData*)eventData);
+        LogAtkSnapshot(addon, $"post-accept-{callName}");
+        Log($"[CALL-ACCEPT] {callName}: dispatched ListItemClick index={buttonIndex}");
+        return true;
+    }
+
+    /// <summary>
+    /// Finds the button's index among visible component siblings in the parent list.
+    /// Iterates the parent's child nodes (via UldManager if component, or ChildNode chain)
+    /// and counts visible component nodes to determine position.
+    /// </summary>
+    private static int FindButtonIndexInList(AtkResNode* parentNode, AtkComponentNode* targetButton)
+    {
+        // If parent is a component (type >= 1000), iterate its UldManager children
+        if ((int)parentNode->Type >= 1000)
+        {
+            var parentCompNode = (AtkComponentNode*)parentNode;
+            var parentComp = parentCompNode->Component;
+            if (parentComp != null)
+            {
+                var uld = parentComp->UldManager;
+                // Collect visible component children (the list items)
+                var visibleItems = new System.Collections.Generic.List<nint>();
+                for (int i = 0; i < uld.NodeListCount && i < 64; i++)
+                {
+                    var cn = uld.NodeList[i];
+                    if (cn == null) continue;
+                    if ((int)cn->Type < 1000) continue; // only components
+                    bool vis = false;
+                    try { vis = cn->IsVisible(); } catch { }
+                    if (!vis) continue;
+                    visibleItems.Add((nint)cn);
+                }
+
+                // Find target in the visible items list
+                for (int i = 0; i < visibleItems.Count; i++)
+                {
+                    if (visibleItems[i] == (nint)targetButton)
+                    {
+                        Log($"[CALL-ACCEPT] Found button at list index {i} of {visibleItems.Count} visible items");
+                        return i;
+                    }
+                }
+
+                Log($"[CALL-ACCEPT] Button not found in {visibleItems.Count} visible items, defaulting to 0");
+            }
+        }
+
+        // Fallback: use 0
+        return 0;
+    }
+
+    // --- Call-accept via button node click (experimental methods) ---
 
     /// <summary>
     /// Attempts to accept a call by clicking its button component node.
