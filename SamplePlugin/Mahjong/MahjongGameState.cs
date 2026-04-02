@@ -43,7 +43,8 @@ public sealed record MahjongGameState(
     StateField<int> LeftScore,
     StateField<string> AvailableCalls,
     StateField<string> GamePhase,
-    StateField<string> CurrentTurn)
+    StateField<string> CurrentTurn,
+    StateField<string> InGameSuggestion)
 {
     public string ToDisplayText()
     {
@@ -170,6 +171,11 @@ public static class MahjongGameStateBuilder
         var phaseStr = gameInfo.Phase.ToString();
         var mergedPhase = new StateField<string>(phaseStr, MahjongStateSource.Node, IsAuthoritative: true, IsFallback: false);
 
+        var sugStr = gameInfo.Suggestion != null
+            ? $"{gameInfo.Suggestion.Type}:{gameInfo.Suggestion.RawText}"
+            : "None";
+        var mergedSuggestion = new StateField<string>(sugStr, MahjongStateSource.Node, IsAuthoritative: true, IsFallback: false);
+
         var turnStr = gameInfo.CurrentTurn switch
         {
             0 => "Player",
@@ -203,7 +209,8 @@ public static class MahjongGameStateBuilder
             mergedLeftScore,
             mergedCalls,
             mergedPhase,
-            mergedCurrentTurn);
+            mergedCurrentTurn,
+            mergedSuggestion);
     }
 
     private static StateField<int> MergeNullableInt(int? current, StateField<int>? previous)

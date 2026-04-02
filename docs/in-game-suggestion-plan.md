@@ -18,9 +18,9 @@ From `tile_dump_latest.txt` (50 AtkValues on EmjL addon):
 | Index | Type | Example Value | Meaning |
 |-------|------|---------------|---------|
 | `[0]` | Int | `30` | Raw game phase (unreliable for our purposes) |
-| `[1]` | String8 | `"Bamboo (9)"` | **Tile name (likely the recommended discard tile or hovered tile)** |
-| `[6]` | String8 | `"Discard"` | **Current action label / game prompt** |
-| `[22]` | String8 | `""` | Unknown (empty in dump, may change) |
+| `[1]` | String8 | `"Bamboo (9)"` | **Hover tooltip** — shows tile name under mouse cursor. Only populated at atk0=30 (draw turn). Changes rapidly with mouse movement. NOT a recommendation. |
+| `[6]` | String8 | `"Discard"` | **Game action recommendation** — "Discard" during draw turn, "Pass" when game recommends passing a call, "Chi!" when game recommends accepting chi, "30 Fu N Han" at scoring |
+| `[22]` | String8 | `""` | Always empty in all observed states |
 | `[23]` | String8 | `"Calls Off"` | Call enable/disable label |
 | `[24]` | String8 | `"Calls On"` | Call enable/disable label |
 | `[30]` | String8 | `"Pon!"` | Static suggestion label for Pon prompt |
@@ -39,36 +39,36 @@ The game also displays suggestion bubbles on the player pane (e.g., "Pon!", "Chi
 
 ## Implementation Plan
 
-### Phase A: Investigation / Instrumentation (no gameplay changes)
+### Phase A: Investigation / Instrumentation (no gameplay changes) ✅ COMPLETE
 
-- [ ] **A1: Log AtkValues string fields every state update**
-  - Read AtkValues indices `[1]`, `[6]`, `[22]`, `[45]` as String8
-  - Log them alongside rawAtk0, agent state, and current phase to a new `suggestion_probe.log`
-  - Capture values during: normal draw turn, after-call discard, chi/pon/kan prompt, skip/pass, opponent turns, between rounds
+- [x] **A1: Log AtkValues string fields every state update**
+  - `LogSuggestionProbe()` reads String8 AtkValues at [1],[6],[22],[23],[24],[45],[30-37]
+  - Logs to `suggestion_probe.log` with dedup by signature
   
-- [ ] **A2: Log visible suggestion text nodes (the "!" labels)**
-  - In `ScanComponentForCalls`, instead of skipping `EndsWith("!")` nodes, log them with their parent component visibility, position, and alpha
-  - This tells us which suggestion labels are visible at any moment
+- [x] **A2: Log visible suggestion text nodes (the "!" labels)**
+  - `LogSuggestionNode()` + `FlushSuggestionNodes()` captures "!" text nodes with visibility/owner info
+  - Logged alongside probe data in `suggestion_probe.log`
   
-- [ ] **A3: Collect data during a full game**
-  - Play a game with instrumentation active
-  - Compile a mapping of AtkValues string values → actual game state
+- [x] **A3: Collect data during a full game**
+  - 109 log entries captured across a full game
+  - See findings below
 
 ### Phase B: Game State from Suggestions
 
 - [ ] **B1: Implement `ReadInGameSuggestion()` in EmjUiReader**
-  - Read AtkValues string fields to determine:
-    - **Discard turn**: `[6]` = "Discard" and `[1]` = tile name
-    - **Call prompt**: `[6]` = "Chi"/"Pon"/"Kan"/"Ron"/"Tsumo"/"Riichi" (TBD from data)
-    - **Waiting**: `[45]` = non-empty = opponent turn / nothing to do
-    - **No suggestion**: empty strings = no action needed
-  - Return a structured `InGameSuggestion` with type + tile name
+  - Read `AtkValues[6]` as the primary signal:
+    - `"Discard"` → player's discard turn
+    - `"Pass"` → game recommends passing on a call
+    - `"Chi!"` / `"Pon!"` / `"Kan!"` / `"Ron!"` / `"Tsumo!"` → game recommends accepting
+    - `"N Fu N Han"` → scoring/round end
+  - Also read SuggestionNodes as secondary signal for call type detection
+  - Return a structured `InGameSuggestion` with type enum
 
-- [ ] **B2: Use suggestion for phase detection (parallel to AtkVal[0])**
-  - If in-game suggestion says "Discard" → WaitingForDiscard
-  - If in-game suggestion says "Chi"/"Pon" → CallDecisionPrompt
-  - If no suggestion → OpponentTurn or transition
-  - Use this as a **cross-check** alongside AtkVal[0]: only act when both agree, or trust the suggestion when AtkVal[0] is ambiguous
+- [ ] **B2: Use `[6]` for phase detection (cross-check with AtkVal[0])**
+  - `[6]="Discard"` at atk0=30/2 → WaitingForDiscard (high confidence)
+  - `[6]="Pass"` or `[6]="Chi!"` at atk0=15 → call prompt incoming (act immediately or wait for atk0=6)
+  - `[6]` contains "Fu" and "Han" → BetweenRounds
+  - Trust `[6]` over stale call buttons for phase decisions
 
 ### Phase C: Act on In-Game Suggestion
 
@@ -76,10 +76,10 @@ The game also displays suggestion bubbles on the player pane (e.g., "Pon!", "Chi
   - Build a dictionary: `"Bamboo (9)"` → `S9`, `"Dots (3)"` → `P3`, `"Characters (7)"` → `M7`, etc.
   - Handle honor tiles: `"East"` → `EAST`, `"Red Dragon"` → `RED`, etc.
 
-- [ ] **C2: Use in-game suggestion for discard (replaces server suggestion)**
-  - When game says "Discard" + tile name → find that tile in hand → fire callback 7
-  - If tile is the drawn tile → fire callback 8 (tsumogiri)
-  - This completely sidesteps the server suggestion matching bugs
+- [ ] **C2: Use in-game suggestion for discard**
+  - `[1]` is a hover tooltip, NOT a recommendation — cannot use it for tile selection
+  - For now, continue using server suggestion for which tile to discard
+  - Future: investigate if there's a highlighted tile node or other visual indicator
 
 - [ ] **C3: Use in-game suggestion for call decisions**
   - When game suggests "Chi!"/"Pon!" → the game recommends accepting
@@ -97,14 +97,63 @@ The game also displays suggestion bubbles on the player pane (e.g., "Pon!", "Chi
   - Use server suggestion for choosing which tile to discard
   - This combines best of both: reliable phase detection + stronger AI
 
-## Key Questions to Answer in Phase A
+## Phase A Findings
 
-1. What does `AtkValues[6]` show during a chi prompt? A pon prompt? A normal draw?
-2. What does `AtkValues[1]` show — is it always the recommended discard tile, or the last hovered tile?
-3. Are AtkValues[30-37] always the same static strings, or do they change?
-4. Is there an AtkValues index that shows the game's recommended discard tile icon ID?
-5. During a call prompt, which `!`-suffixed text nodes are visible on the player pane?
+### AtkValues[6] — Game Action Recommendation (THE key signal)
+
+| `[6]` value | Meaning | When observed |
+|---|---|---|
+| `"Discard"` | Player's turn — discard a tile | atk0=30 (draw turn), atk0=6 (after draw animation), atk0=2 (after-call discard). Also persists stale into atk0=15/22 transitions. |
+| `"Pass"` | Game recommends **passing** on a call | atk0=15 during a call prompt |
+| `"Chi!"` | Game recommends **accepting chi** | atk0=15 during chi prompt (appeared once at 09:22:28) |
+| `"30 Fu N Han"` | Scoring display (round result) | atk0=29, 32, 43 at round end |
+
+### AtkValues[1] — Hover Tooltip (NOT a recommendation)
+
+- Only populated when atk0=30 (player's draw turn)
+- Changes rapidly with mouse movement: "Bamboo (9)" → "Bamboo (8)" → "Dots (4)" within 1 second
+- Shows tile names: "West Wind", "White Dragon", "South Wind", "Characters (1)", etc.
+- **Cannot be used as the recommended discard tile** — it's just a hover tooltip
+- Open question: how to determine which tile to discard during draw turns
+
+### AtkValues[22], [23], [24], [45] — Unchanged
+
+- `[22]` always empty
+- `[23]` = "Calls Off", `[24]` = "Calls On" — static labels, never changed
+- `[45]` never appeared in the log (always empty or unchanged from initial state)
+
+### AtkValues[30-37] — Static Labels
+
+- Never changed during the entire game — they are fixed UI label strings
+
+### SuggestionNodes — Reliable Call Indicators
+
+| Nodes visible | Meaning | Timing |
+|---|---|---|
+| `"Chi!"` (ownerType=1031) | Chi available | Appears ~1s before atk0=6 call prompt |
+| `"Pon!"` + `"Chi!"` | Both Pon and Chi available | Appeared together |
+| `"Tsumo!"` | Self-draw win available | Appeared once near end of game |
+| `"Ron!"` | Ron win available | Appeared at start of log (round scoring) |
+| `"Chi!"` (ownerType=1027) | Chi on a different component | Appeared once alongside 1031 nodes |
+| `(none)` | No suggestions | Most of the game |
+
+### Key Insight: `[6]` Transition Timeline During a Call Prompt
+
+```
+atk0=22 [6]="Discard"     → draw animation
+atk0=15 [6]="Discard"     → opponent discards (stale [6])
+atk0=15 [6]="Pass"        → game updates [6] to recommend Pass
+atk0=6  [6]="Discard"     → call prompt appears, [6] resets
+```
+
+The `[6]="Pass"` or `[6]="Chi!"` appears at atk0=15 BEFORE the actual call prompt (atk0=6). This means we can detect the game's recommendation before the prompt even shows.
+
+### Remaining Questions
+
+1. **How to find recommended discard tile?** `[1]` is just hover tooltip. Need to find another AtkValue, or use the game's highlighted tile visual, or fall back to server suggestion for tile selection.
+2. **Is `[6]="Chi!"` reliable?** Only observed once. Need more chi prompt data.
+3. **What does `[6]` show during Pon/Kan/Riichi prompts?** Not observed in this game.
 
 ## Priority
 
-Start with **Phase A** (pure instrumentation) so we can collect data during a real game without breaking anything. The current auto-play mechanism continues running while we gather data.
+**Phase B next**: Implement `ReadInGameSuggestion()` using `[6]` for call/pass decisions. For discard tile selection, continue using server suggestion (Phase D hybrid approach) since `[1]` is just a tooltip.

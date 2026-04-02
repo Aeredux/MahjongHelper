@@ -402,7 +402,7 @@ public sealed partial class Plugin : IDalamudPlugin
                     }
                 }
                 LogToFile("autoplay.log",
-                    $"[Heartbeat] phase={phase} agent={agentState} rawAtk0={rawAtk0} calls={calls} hand={handCount} pending={_autoPlayManager.PendingAction}");
+                    $"[Heartbeat] phase={phase} agent={agentState} rawAtk0={rawAtk0} calls={calls} sug={merged.InGameSuggestion.Value ?? "?"} hand={handCount} pending={_autoPlayManager.PendingAction}");
             }
 
             return;

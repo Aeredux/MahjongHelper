@@ -54,6 +54,22 @@ public static unsafe class EmjUiReader
         Skip = 1 << 6,
     }
 
+    public enum SuggestionType
+    {
+        None,
+        Discard,
+        Pass,
+        Chi,
+        Pon,
+        Kan,
+        Ron,
+        Tsumo,
+        Riichi,
+        Scoring,
+    }
+
+    public sealed record InGameSuggestion(SuggestionType Type, string RawText);
+
     public sealed record UiGameInfo(
         int? SeatWind,
         int? RoundWind,
@@ -69,6 +85,7 @@ public static unsafe class EmjUiReader
         GamePhase Phase,
         int? CurrentTurn,
         IReadOnlyList<int> RawAtkInts,
+        InGameSuggestion? Suggestion = null,
         Dictionary<CallOptions, nint>? CallButtonNodes = null)
     {
         public string ToDisplayText()
@@ -475,13 +492,16 @@ public static unsafe class EmjUiReader
         // Phase A instrumentation: log String8 AtkValues and suggestion nodes
         LogSuggestionProbe(addon, availableCalls);
 
+        // Read the in-game suggestion from AtkValues[6]
+        var suggestion = ReadInGameSuggestion(addon);
+
         // Infer game phase from available signals
-        var phase = InferGamePhase(addon, availableCalls, rawAtkInts);
+        var phase = InferGamePhase(addon, availableCalls, rawAtkInts, suggestion);
 
         return new UiGameInfo(
             seatWind, roundWind, roundNumber, honba, riichiSticks,
             playerScore, rightScore, oppositeScore, leftScore,
-            riichiStatus, availableCalls, phase, currentTurn, rawAtkInts, callButtonNodes);
+            riichiStatus, availableCalls, phase, currentTurn, rawAtkInts, suggestion, callButtonNodes);
     }
 
     /// <summary>
@@ -966,6 +986,52 @@ public static unsafe class EmjUiReader
         }
     }
 
+    /// <summary>
+    /// Reads AtkValues[6] to determine the game's current action recommendation.
+    /// This is the most reliable signal for what the game expects the player to do.
+    /// </summary>
+    private static InGameSuggestion ReadInGameSuggestion(AtkUnitBase* addon)
+    {
+        try
+        {
+            var valCount = (int)addon->AtkValuesCount;
+            if (valCount <= 6) return new InGameSuggestion(SuggestionType.None, "");
+
+            var val = addon->AtkValues[6];
+            if (val.Type != FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String &&
+                val.Type != FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String8)
+                return new InGameSuggestion(SuggestionType.None, "");
+
+            var raw = $"{val.String}".Trim();
+            if (string.IsNullOrEmpty(raw))
+                return new InGameSuggestion(SuggestionType.None, "");
+
+            var lower = raw.ToLowerInvariant();
+
+            if (lower == "discard")
+                return new InGameSuggestion(SuggestionType.Discard, raw);
+            if (lower == "pass")
+                return new InGameSuggestion(SuggestionType.Pass, raw);
+            if (lower.Contains("chi"))
+                return new InGameSuggestion(SuggestionType.Chi, raw);
+            if (lower.Contains("pon"))
+                return new InGameSuggestion(SuggestionType.Pon, raw);
+            if (lower.Contains("kan"))
+                return new InGameSuggestion(SuggestionType.Kan, raw);
+            if (lower.Contains("ron"))
+                return new InGameSuggestion(SuggestionType.Ron, raw);
+            if (lower.Contains("tsumo"))
+                return new InGameSuggestion(SuggestionType.Tsumo, raw);
+            if (lower.Contains("riichi") || lower.Contains("reach"))
+                return new InGameSuggestion(SuggestionType.Riichi, raw);
+            if (lower.Contains("fu") && lower.Contains("han"))
+                return new InGameSuggestion(SuggestionType.Scoring, raw);
+
+            return new InGameSuggestion(SuggestionType.None, raw);
+        }
+        catch { return new InGameSuggestion(SuggestionType.None, ""); }
+    }
+
     private static CallOptions ReadCallPrompts(AtkUnitBase* addon, out Dictionary<CallOptions, nint> buttonNodes)
     {
         var calls = CallOptions.None;
@@ -1091,14 +1157,18 @@ public static unsafe class EmjUiReader
 
     /// <summary>
     /// Infers the current game phase from available signals:
+    /// - In-game suggestion from AtkValues[6] (most reliable)
     /// - Call prompts visible = CallDecisionPrompt (or specific call type)
-    /// - Player has 14 tiles (13 hand + 1 draw) = WaitingForDiscard
-    /// - Player has 13 tiles (no draw) = WaitingForDraw
-    /// - AgentState from AtkValues may provide additional signal
+    /// - AtkVal[0] as fallback
     /// </summary>
-    private static GamePhase InferGamePhase(AtkUnitBase* addon, CallOptions availableCalls, IReadOnlyList<int> rawAtkInts)
+    private static GamePhase InferGamePhase(AtkUnitBase* addon, CallOptions availableCalls, IReadOnlyList<int> rawAtkInts, InGameSuggestion? suggestion)
     {
         var atkPhase = rawAtkInts.Count > 0 ? rawAtkInts[0] : -1;
+        var sugType = suggestion?.Type ?? SuggestionType.None;
+
+        // Scoring / between rounds: [6] contains "Fu" and "Han"
+        if (sugType == SuggestionType.Scoring)
+            return GamePhase.BetweenRounds;
 
         // AtkVal[0]=2 and 30 are definitively the player's discard turn.
         // Stale call buttons persist in the ATK tree after prompts are dismissed,
@@ -1107,6 +1177,32 @@ public static unsafe class EmjUiReader
         // where a real modal prompt blocks callbacks at these AtkVal values.
         if (atkPhase == 30 || atkPhase == 2)
             return GamePhase.WaitingForDiscard;
+
+        // In-game suggestion [6] says Pass or a call type → call/decision prompt
+        // This can detect the prompt BEFORE atk0 transitions to 6.
+        if (sugType == SuggestionType.Pass || sugType == SuggestionType.Chi ||
+            sugType == SuggestionType.Pon || sugType == SuggestionType.Kan)
+        {
+            // But only if we're not in a clearly non-call AtkVal state
+            if (atkPhase == 6 || atkPhase == 15)
+            {
+                if (availableCalls.HasFlag(CallOptions.Ron))
+                    return GamePhase.RonDecisionPrompt;
+                if (availableCalls.HasFlag(CallOptions.Tsumo))
+                    return GamePhase.TsumoDecisionPrompt;
+                if (availableCalls.HasFlag(CallOptions.Riichi))
+                    return GamePhase.RiichiDecisionPrompt;
+                return GamePhase.CallDecisionPrompt;
+            }
+        }
+
+        // Ron/Tsumo/Riichi suggestions
+        if (sugType == SuggestionType.Ron)
+            return GamePhase.RonDecisionPrompt;
+        if (sugType == SuggestionType.Tsumo)
+            return GamePhase.TsumoDecisionPrompt;
+        if (sugType == SuggestionType.Riichi)
+            return GamePhase.RiichiDecisionPrompt;
 
         // For all other AtkVal[0] values, call buttons take priority.
         if (availableCalls.HasFlag(CallOptions.Ron))
