@@ -1281,7 +1281,10 @@ public static unsafe class EmjUiReader
                     var lower = trimmed.ToLowerInvariant();
 
                     CallOptions? matched = null;
-                    if (lower.Contains("chi") || lower.Contains("チー"))
+                    // IMPORTANT: Check riichi BEFORE chi — "riichi" contains "chi" as a substring.
+                    if (lower.Contains("riichi") || lower.Contains("リーチ") || lower.Contains("reach"))
+                        matched = CallOptions.Riichi;
+                    else if (lower.Contains("chi") || lower.Contains("チー"))
                         matched = CallOptions.Chi;
                     else if (lower.Contains("pon") || lower.Contains("ポン"))
                         matched = CallOptions.Pon;
@@ -1291,8 +1294,6 @@ public static unsafe class EmjUiReader
                         matched = CallOptions.Ron;
                     else if (lower.Contains("tsumo") || lower.Contains("ツモ"))
                         matched = CallOptions.Tsumo;
-                    else if (lower.Contains("riichi") || lower.Contains("リーチ") || lower.Contains("reach"))
-                        matched = CallOptions.Riichi;
                     else if (lower.Contains("skip") || lower.Contains("pass") || lower.Contains("cancel")
                              || lower.Contains("スキップ") || lower.Contains("キャンセル"))
                         matched = CallOptions.Skip;
