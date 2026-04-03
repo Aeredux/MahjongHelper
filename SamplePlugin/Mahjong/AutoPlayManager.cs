@@ -549,11 +549,10 @@ public sealed class AutoPlayManager
         }
         else
         {
-            // Skip/pass — use callback 8.
-            // Old guard required rawAtk0=6, but with suggestion-first phase detection
-            // the game phase is derived from the in-game suggestion (Pass/Chi/Pon/etc.),
-            // and rawAtk0 can legitimately be 30 during a real call prompt.
-            // The phase check in TryScheduleCallResponse already ensures we're in a call phase.
+            // Skip/pass — click the Skip button node via ListItemClick first.
+            // Callback 8 only works when rawAtk0=6, but the call prompt can appear
+            // while rawAtk0 is still 15 (opponent turn) or 9 (transition).
+            // Clicking the actual Skip button dismisses the UI immediately.
             int rawAtk0 = -1;
             try
             {
@@ -562,7 +561,16 @@ public sealed class AutoPlayManager
             }
             catch { }
 
-            Log($"Executing call response: skip/pass via callback 8 (rawAtk0={rawAtk0})");
+            // Try clicking the Skip button node if we have it
+            if (_lastCallButtonNodes != null &&
+                _lastCallButtonNodes.TryGetValue(EmjUiReader.CallOptions.Skip, out var skipPtr) && skipPtr != 0)
+            {
+                Log($"Executing call skip: clicking Skip button (ptr={skipPtr:X} rawAtk0={rawAtk0}) via ListItemClick");
+                return AddonClickHelper.TryAcceptCallViaListClick(addon, skipPtr, "Skip");
+            }
+
+            // Fallback to callback 8
+            Log($"Executing call response: skip/pass via callback 8 (rawAtk0={rawAtk0}) — no Skip button node");
             return AddonClickHelper.TrySkipCall(addon);
         }
     }
