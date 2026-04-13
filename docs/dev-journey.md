@@ -779,9 +779,22 @@ The game already has built-in suggestion strings in AtkValues (tile names, actio
 
 **What:** Fixed a bug where autoplay would suggest "pass" on a call prompt but then take the chi anyway.
 
-**Root cause:** `TryScheduleCallResponse()` is called every frame while in a call phase. The in-game suggestion text (`AtkValues[6]`) can change between frames — e.g., first frame reads "Pass", subsequent frame reads "Chi!". Because the method used a signature-based dedup (`_lastActionSignature`), a changed suggestion would pass the dedup check and **overwrite** the already-scheduled `call:pass` with `call:accept`. When the delay expired, the accept action would execute instead of the originally intended pass.
+**Root cause (corrected after log analysis):** The in-game suggestion text did NOT flip — it consistently said "Pass" throughout. The actual sequence was:
+1. AutoPlay correctly scheduled `call:pass` and dispatched a Skip button ListItemClick
+2. The Skip click had **zero effect** (pre/post AtkSnapshots identical) — likely a timing race with the game's internal event processing
+3. The game's own call timer expired and auto-accepted Chi (the first available call)
+4. Game entered `CallChoicePrompt` (atk0=25, chi sub-menu)
+5. `TryScheduleCallChoice()` blindly auto-selected a chi combination, completing the unwanted call
 
-**Fix:** Added an early return in `TryScheduleCallResponse()` that checks if `_pendingAction` already starts with `"call:"`. Once a call action is scheduled for the current call phase, it cannot be overwritten by a different decision. The first decision from the provider is honored. Added `[CALL-GUARD]` diagnostic logging when an overwrite attempt is blocked.
+The real bug was #5: `TryScheduleCallChoice()` ran on any `CallChoicePrompt` entry, even when the autoplay had intended to pass. It had no way to distinguish "we deliberately accepted this call" from "the game timer auto-accepted against our intent."
+
+Initial misdiagnosis (suggestion text flipping between frames) was reverted.
+
+**Fix:** Added `_lastCallIntentWasAccept` flag. Set to `true` only when `call:accept` executes. `TryScheduleCallChoice()` now only auto-selects a chi option if this flag is true. When the game timer auto-accepts a call we didn't want, the flag stays `false` and the chi choice sub-menu is left alone (user/game can handle it).
 
 **Changes:**
-- `AutoPlayManager.cs` — `TryScheduleCallResponse()`: added guard to prevent overwriting an already-pending call action
+- `AutoPlayManager.cs`
+  - Added `_lastCallIntentWasAccept` field, reset on entering new call phase
+  - Set to `true` in `Update()` when executing `call:accept`
+  - `TryScheduleCallChoice()` gated on `_lastCallIntentWasAccept`
+  - Reverted the incorrect `_pendingAction.StartsWith("call:")` overwrite guard from the earlier misdiagnosis

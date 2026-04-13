@@ -36,6 +36,7 @@ public sealed class AutoPlayManager
     private DateTime _callPhaseEnteredUtc; // when we first entered a call/decision phase
     private List<string>? _preChiSuggestionTiles; // tiles from suggestion before entering chi choice
     private IconIdCapture? _iconCapture;
+    private bool _lastCallIntentWasAccept; // true if we deliberately accepted a call (vs game timer auto-accepting)
 
     private static readonly string LogDir = System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MahjongHelper");
@@ -147,6 +148,7 @@ public sealed class AutoPlayManager
         if (isCallPhase && !wasCallPhase)
         {
             _callPhaseEnteredUtc = DateTime.UtcNow;
+            _lastCallIntentWasAccept = false; // reset on entering a new call phase
 
             // Remember chi suggestion tiles for use in the choice sub-menu
             if (inGameSuggestion?.Type == EmjUiReader.SuggestionType.Chi &&
@@ -201,9 +203,19 @@ public sealed class AutoPlayManager
         }
 
         // Handle chi/pon choice sub-menu (atk0=25).
+        // Only auto-select if we deliberately accepted the call. If the game's
+        // timer auto-accepted (e.g., we tried to skip but the click was ineffective),
+        // don't blindly pick a chi combination.
         if (gamePhase == "CallChoicePrompt" && _config.AutoPlayEnabled && _config.AutoCallEnabled && !_paused)
         {
-            TryScheduleCallChoice();
+            if (_lastCallIntentWasAccept)
+            {
+                TryScheduleCallChoice();
+            }
+            else if (prevPhase != "CallChoicePrompt")
+            {
+                Log($"[CHI-CHOICE] Suppressed auto chi-choice: our intent was not accept (game timer may have auto-accepted)");
+            }
         }
     }
 
@@ -294,6 +306,7 @@ public sealed class AutoPlayManager
         else if (action == "call:accept")
         {
             _consecutiveFailedDiscards = 0;
+            _lastCallIntentWasAccept = true;
             return ExecuteCallResponse(addon, 0);
         }
         else if (action == "call:pass")
@@ -358,18 +371,6 @@ public sealed class AutoPlayManager
             _lastGamePhase != "TsumoDecisionPrompt" &&
             _lastGamePhase != "RiichiDecisionPrompt")
             return;
-
-        // Don't overwrite an already-scheduled call action — honor the first
-        // decision the provider gave us for this call phase. The in-game suggestion
-        // text can flip between frames (e.g. Pass → Chi), which would silently
-        // replace a scheduled pass with an accept.
-        if (_pendingAction != null && _pendingAction.StartsWith("call:"))
-        {
-            var wouldBe = _activeProvider.GetCallAction();
-            if (wouldBe != null && $"call:{wouldBe}" != _pendingAction)
-                Log($"[CALL-GUARD] Blocked overwrite: keeping '{_pendingAction}', provider now says '{wouldBe}'");
-            return;
-        }
 
         var decision = _activeProvider.GetCallAction();
         if (decision == null)
