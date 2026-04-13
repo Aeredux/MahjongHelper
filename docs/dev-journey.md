@@ -798,3 +798,24 @@ Initial misdiagnosis (suggestion text flipping between frames) was reverted.
   - Set to `true` in `Update()` when executing `call:accept`
   - `TryScheduleCallChoice()` gated on `_lastCallIntentWasAccept`
   - Reverted the incorrect `_pendingAction.StartsWith("call:")` overwrite guard from the earlier misdiagnosis
+
+## 2026-04-13: Bug Fix — ListItemClick Index Wrong for Skip (Root Cause)
+
+**What:** Discovered the deeper root cause: `TryAcceptCallViaListClick` was sending the wrong ListItemClick param for the Skip button, causing it to accept calls instead of skipping.
+
+**Root cause:** `FindButtonIndexInList` computed the button's index by iterating ALL visible component children in the parent list's ULD NodeList. It found Skip at index 1 of 7 visible components. But the game's ListItemClick handler uses its own item numbering — index 1 corresponds to the first call option (Chi/Pon), not Skip.
+
+Evidence from logs:
+- Every "Skip" click caused an immediate phase transition (~70-145ms) to WaitingForDiscard or CallChoicePrompt
+- A true skip would return to OpponentTurn (opponents continue playing)
+- CallDecisionPrompt → WaitingForDiscard after "Skip" on Pon prompts = Pon was accepted (post-pon discard needed)
+- CallDecisionPrompt → CallChoicePrompt after "Skip" on Chi prompts = Chi was accepted (chi sub-menu shown)
+- **Our "Skip" button click has been accepting calls all along** — Pon accepts were invisible because the phase (WaitingForDiscard) looks the same as a skip→draw sequence
+
+**Fix:** Replaced `FindButtonIndexInList` with `ReadButtonEventParam` — reads the button's own registered AtkEvent Param value. FFXIV list item buttons store their true list index as the Param on their events (MouseOver, ButtonClick, etc.). Using the button's own Param ensures the ListItemClick dispatch targets the correct item.
+
+**Changes:**
+- `AddonClickHelper.cs`
+  - Added `ReadButtonEventParam()`: reads button node's AtkEventManager events, prefers ButtonClick Param, logs all events for diagnostics
+  - `TryAcceptCallViaListClick` now uses `ReadButtonEventParam` instead of `FindButtonIndexInList`
+  - `FindButtonIndexInList` kept for reference with a deprecation warning

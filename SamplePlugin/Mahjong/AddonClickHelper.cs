@@ -884,8 +884,12 @@ public static unsafe class AddonClickHelper
             return false;
         }
 
-        // Determine button's index among visible siblings in the list
-        int buttonIndex = FindButtonIndexInList(parentNode, compNode);
+        // Determine button's list item index from its OWN registered events.
+        // FFXIV list item buttons carry their true list index as the Param on their
+        // registered events (MouseOver, ButtonClick, etc.). Using this is correct;
+        // the old approach (counting visible ULD components) was wrong — it returned
+        // index 1 for Skip, which the game interpreted as "accept the call."
+        int buttonIndex = ReadButtonEventParam(node, callName);
         Log($"[CALL-ACCEPT] {callName}: buttonIndex={buttonIndex} listener={(nint)listItemClickEvt->Listener:X}");
 
         // Construct safe event with valid Node field
@@ -905,9 +909,59 @@ public static unsafe class AddonClickHelper
     }
 
     /// <summary>
+    /// Reads the button's true list item index from its registered AtkEvent Param.
+    /// FFXIV list item components store their item index as the Param value on their
+    /// registered events (MouseOver, ButtonClick, etc.). This is the correct value
+    /// to pass as the ListItemClick param when dispatching through the parent list.
+    /// </summary>
+    private static int ReadButtonEventParam(AtkResNode* buttonNode, string callName)
+    {
+        try
+        {
+            var evt = buttonNode->AtkEventManager.Event;
+            // Log all events for diagnostics
+            int eventIdx = 0;
+            int bestParam = -1;
+            while (evt != null && eventIdx < 20)
+            {
+                var evtType = evt->State.EventType;
+                var param = (int)evt->Param;
+                Log($"[CALL-ACCEPT] {callName}: event[{eventIdx}] type={evtType} param={param}");
+
+                // Prefer ButtonClick param, but accept any event's param as fallback
+                if (evtType == AtkEventType.ButtonClick)
+                    bestParam = param;
+                else if (bestParam < 0)
+                    bestParam = param;
+
+                evt = evt->NextEvent;
+                eventIdx++;
+            }
+
+            if (bestParam >= 0)
+            {
+                Log($"[CALL-ACCEPT] {callName}: using event param={bestParam}");
+                return bestParam;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"[CALL-ACCEPT] {callName}: error reading button events: {ex.Message}");
+        }
+
+        // Fallback: if no events found, use 0 (safest default — typically first item)
+        Log($"[CALL-ACCEPT] {callName}: no events found on button, defaulting to param=0");
+        return 0;
+    }
+
+    // FindButtonIndexInList is kept for reference but no longer used for call acceptance.
+    // The correct approach is ReadButtonEventParam which reads the button's own registered
+    // event Param value.
+
+    /// <summary>
     /// Finds the button's index among visible component siblings in the parent list.
-    /// Iterates the parent's child nodes (via UldManager if component, or ChildNode chain)
-    /// and counts visible component nodes to determine position.
+    /// WARNING: This counts ULD NodeList order which does NOT match the game's internal
+    /// list item indices. Use ReadButtonEventParam instead for ListItemClick dispatch.
     /// </summary>
     private static int FindButtonIndexInList(AtkResNode* parentNode, AtkComponentNode* targetButton)
     {
