@@ -359,6 +359,18 @@ public sealed class AutoPlayManager
             _lastGamePhase != "RiichiDecisionPrompt")
             return;
 
+        // Don't overwrite an already-scheduled call action — honor the first
+        // decision the provider gave us for this call phase. The in-game suggestion
+        // text can flip between frames (e.g. Pass → Chi), which would silently
+        // replace a scheduled pass with an accept.
+        if (_pendingAction != null && _pendingAction.StartsWith("call:"))
+        {
+            var wouldBe = _activeProvider.GetCallAction();
+            if (wouldBe != null && $"call:{wouldBe}" != _pendingAction)
+                Log($"[CALL-GUARD] Blocked overwrite: keeping '{_pendingAction}', provider now says '{wouldBe}'");
+            return;
+        }
+
         var decision = _activeProvider.GetCallAction();
         if (decision == null)
             return;
@@ -464,7 +476,11 @@ public sealed class AutoPlayManager
 
         if (matchingSlot == null)
         {
-            Log($"Cannot discard {tileCode}: no matching hand slot found in canonical hand");
+            var handTiles = string.Join(",", handSlots.Select(s => $"{s.TileCode}(icon={s.IconId} idx={s.SlotIndex})"));
+            var drawnTileInfo = drawnSlot != null ? $"{drawnSlot.TileCode}(icon={drawnSlot.IconId})" : "none";
+            var totalSlots = _lastHandSlots.Count;
+            var canonCount = handSlots.Count;
+            Log($"Cannot discard {tileCode}: no matching hand slot found in canonical hand ({canonCount} canonical, {totalSlots} total). hand=[{handTiles}] draw={drawnTileInfo}");
             return false;
         }
 

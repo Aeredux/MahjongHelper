@@ -774,3 +774,14 @@ The game already has built-in suggestion strings in AtkValues (tile names, actio
   - Re-indexes dora slots by X position (leftmost = index 0)
   - Added `LogDoraProbe()` diagnostic for instrumentation
 - `MahjongGameState.cs` — `DoraIndicators` field (already existed) now populated from the new dora slots
+
+## 2026-04-13: Bug Fix — Call Action Overwrite Race Condition
+
+**What:** Fixed a bug where autoplay would suggest "pass" on a call prompt but then take the chi anyway.
+
+**Root cause:** `TryScheduleCallResponse()` is called every frame while in a call phase. The in-game suggestion text (`AtkValues[6]`) can change between frames — e.g., first frame reads "Pass", subsequent frame reads "Chi!". Because the method used a signature-based dedup (`_lastActionSignature`), a changed suggestion would pass the dedup check and **overwrite** the already-scheduled `call:pass` with `call:accept`. When the delay expired, the accept action would execute instead of the originally intended pass.
+
+**Fix:** Added an early return in `TryScheduleCallResponse()` that checks if `_pendingAction` already starts with `"call:"`. Once a call action is scheduled for the current call phase, it cannot be overwritten by a different decision. The first decision from the provider is honored. Added `[CALL-GUARD]` diagnostic logging when an overwrite attempt is blocked.
+
+**Changes:**
+- `AutoPlayManager.cs` — `TryScheduleCallResponse()`: added guard to prevent overwriting an already-pending call action
