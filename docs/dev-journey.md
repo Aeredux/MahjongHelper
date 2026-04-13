@@ -842,3 +842,21 @@ Evidence from logs:
   - `ExecuteCallResponse` skip path uses callback 8 directly (no ListItemClick attempt)
   - Added `_consecutiveCallAttempts` with 5-attempt limit, reset on phase change
   - Both accept and pass paths increment counter and log attempt number
+
+## 2026-04-13: Performance Fix — Stale addon pointer + per-frame string allocations
+
+**What:** Fixed framerate drop that occurred when NOT in the mahjong game.
+
+**Root cause:** Two issues compounding:
+1. `_lastAddonAddress` was set in `OnMahjongDraw` but **never cleared** when the EmjL addon was destroyed. After leaving mahjong, `_autoPlayManager.Update()` continued running every frame with a stale/freed `AtkUnitBase*` pointer — unsafe memory access on garbage data plus wasted CPU.
+2. `BuildDiagnosticsText()` and `BuildRecentTransitionsText()` allocated `StringBuilder` + strings every frame via `OnFrameworkUpdate`, even when the debug MainWindow was closed.
+
+**Fixes:**
+1. Registered `AddonEvent.PreFinalize` listener for EmjL (`OnMahjongFinalize`) — sets `_lastAddonAddress = 0` and calls `_autoPlayManager.ClearPending()` when addon is destroyed.
+2. Wrapped diagnostics/transitions/server-status string builds in `if (MainWindow.IsOpen)` guard.
+
+**Changes:**
+- `Plugin.cs`
+  - Added `OnMahjongFinalize` handler (clears `_lastAddonAddress`, calls `ClearPending`)
+  - Registered PreFinalize listener in constructor, unregistered in Dispose
+  - Diagnostics string builds now gated on `MainWindow.IsOpen`

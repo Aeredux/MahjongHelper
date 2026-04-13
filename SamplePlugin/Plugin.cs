@@ -170,9 +170,12 @@ public sealed partial class Plugin : IDalamudPlugin
             _lastReaderStatus = _emjReader.Status;
         }
 
-        MainWindow.diagnosticsText = BuildDiagnosticsText();
-        MainWindow.recentTransitionsText = BuildRecentTransitionsText();
-        MainWindow.serverStatusText = _serverClient.GetStatusText();
+        if (MainWindow.IsOpen)
+        {
+            MainWindow.diagnosticsText = BuildDiagnosticsText();
+            MainWindow.recentTransitionsText = BuildRecentTransitionsText();
+            MainWindow.serverStatusText = _serverClient.GetStatusText();
+        }
 
         // Auto-play status line
         {
@@ -265,6 +268,13 @@ public sealed partial class Plugin : IDalamudPlugin
             Log.Error($"Startup dump failed: {ex.Message}");
             RecordFailure($"Startup dump failed: {ex.Message}");
         }
+    }
+
+    private void OnMahjongFinalize(AddonEvent type, AddonArgs args)
+    {
+        Log.Information("EmjL addon finalized — clearing stale addon address");
+        _lastAddonAddress = 0;
+        _autoPlayManager.ClearPending();
     }
 
     private unsafe void OnMahjongDraw(AddonEvent type, AddonArgs args)
@@ -731,6 +741,7 @@ public sealed partial class Plugin : IDalamudPlugin
         _iconCapture.Dispose();
         _serverClient.Dispose();
         AddonLifecycle.UnregisterListener(OnMahjongDraw);
+        AddonLifecycle.UnregisterListener(OnMahjongFinalize);
         Framework.Update -= OnFrameworkUpdate;
         // Unregister all actions to not leak anything during disposal of plugin
         PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
