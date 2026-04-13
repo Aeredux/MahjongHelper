@@ -882,3 +882,19 @@ Additionally, `OnFrameworkUpdate` was building status/diagnostics strings every 
 - `Plugin.cs`
   - Added `_iconCapture.FlushIfNeeded()` call in `OnFrameworkUpdate`
   - `readerStatus.ToString()` and auto-play status strings gated on `MainWindow.IsOpen`
+
+## 2026-04-13: Bug Fix — Riichi button not found due to stale button text labels
+
+**What:** Fixed intermittent failure where riichi was not being called even though the suggestion said to accept.
+
+**Root cause:** When a riichi prompt appears, the phase transitions to `RiichiDecisionPrompt` (based on `AtkValues[6]` text) before the button component text nodes update. The button scan (`ScanComponentForCalls`) finds stale text labels from a previous call prompt — e.g. "Chi" and "Skip" from a prior chi prompt — instead of "Riichi". Since `ExecuteCallResponse` requires an exact `CallOptions.Riichi` match in the phase-specific priority list, it fails with `"no matching button for phase=RiichiDecisionPrompt in captured nodes [Chi,Skip]"`.
+
+Confirmed by autoplay logs showing repeated failures: the button scan consistently found `[Chi,Skip]` during `RiichiDecisionPrompt` prompts. The "Riichi" text node existed deeper in the DOM (visible in deep_text_scan.log) but the stale Chi button text at the same tree position was being matched first.
+
+**Fix:** Added a fallback path in `ExecuteCallResponse`: when in `RiichiDecisionPrompt`, `TsumoDecisionPrompt`, or `RonDecisionPrompt` and no phase-matching button label is found, click the first non-Skip button via `ListItemClick(0)`. In these self-action prompts, the first button is always the accept option regardless of stale label text.
+
+**Changes:**
+- `AutoPlayManager.cs`
+  - Added fallback after priority-based button search for Riichi/Tsumo/Ron phases
+  - Fallback clicks the first non-Skip captured button node as a proxy for accept
+  - Logs indicate fallback usage for diagnostics

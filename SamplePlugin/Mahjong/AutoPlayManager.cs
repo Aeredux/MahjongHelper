@@ -576,6 +576,23 @@ public sealed class AutoPlayManager
                 }
             }
 
+            // Fallback: during RiichiDecisionPrompt (and similar self-action prompts),
+            // the button scan may capture stale labels from a prior call prompt
+            // (e.g. "Chi"/"Skip" text hasn't updated to "Riichi" yet).
+            // In these phases, the first non-Skip button is always the accept option,
+            // so click it regardless of label.
+            if (_lastGamePhase is "RiichiDecisionPrompt" or "TsumoDecisionPrompt" or "RonDecisionPrompt")
+            {
+                foreach (var kvp in _lastCallButtonNodes)
+                {
+                    if (kvp.Key != EmjUiReader.CallOptions.Skip && kvp.Value != 0)
+                    {
+                        Log($"Fallback accept: clicking {kvp.Key} button (ptr={kvp.Value:X}) as proxy for {_lastGamePhase} (label may be stale)");
+                        return AddonClickHelper.TryAcceptCallViaListClick(addon, kvp.Value, _lastGamePhase);
+                    }
+                }
+            }
+
             Log($"Cannot accept call: no matching button for phase={_lastGamePhase} in captured nodes [{string.Join(",", _lastCallButtonNodes.Keys)}]");
             return false;
         }
