@@ -884,12 +884,11 @@ public static unsafe class AddonClickHelper
             return false;
         }
 
-        // Determine button's list item index from its OWN registered events.
-        // FFXIV list item buttons carry their true list index as the Param on their
-        // registered events (MouseOver, ButtonClick, etc.). Using this is correct;
-        // the old approach (counting visible ULD components) was wrong — it returned
-        // index 1 for Skip, which the game interpreted as "accept the call."
-        int buttonIndex = ReadButtonEventParam(node, callName);
+        // Use index 0 for accepting calls. All call button events have param=1 (a
+        // constant, NOT a unique item index). ListItemClick(0) selects the first
+        // call option (Chi/Pon/Kan/Ron/Riichi) which is the correct "accept" target.
+        // NOTE: Skip is NOT a list item — skip must use callback 8, not ListItemClick.
+        int buttonIndex = 0;
         Log($"[CALL-ACCEPT] {callName}: buttonIndex={buttonIndex} listener={(nint)listItemClickEvt->Listener:X}");
 
         // Construct safe event with valid Node field

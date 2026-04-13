@@ -819,3 +819,26 @@ Evidence from logs:
   - Added `ReadButtonEventParam()`: reads button node's AtkEventManager events, prefers ButtonClick Param, logs all events for diagnostics
   - `TryAcceptCallViaListClick` now uses `ReadButtonEventParam` instead of `FindButtonIndexInList`
   - `FindButtonIndexInList` kept for reference with a deprecation warning
+
+## 2026-04-13: Bug Fix — Skip Uses Callback 8, Accept Uses Index 0, Retry Limits
+
+**What:** Fixed three compounding bugs: (1) Skip via ListItemClick never worked, (2) accept used wrong index, (3) infinite retry on stuck call prompts.
+
+**Discovery:** After deploying ReadButtonEventParam fix, Riichi prompt caused infinite Skip spam (~2 clicks/second for minutes with no effect). Investigation revealed:
+- ALL call list buttons have `param=1` on their registered events — it's a constant, not a unique item index
+- `ReadButtonEventParam` was therefore as wrong as `FindButtonIndexInList` — both produced the same value
+- ListItemClick doesn't work for Skip AT ALL because Skip is not a list item in the game's UI. Dispatching ListItemClick for "Skip" always executes a call option instead.
+- The correct skip mechanism is `FireCallback [8, 0]` (confirmed in `callbackNotes.txt`)
+- For accepting calls, ListItemClick(0) selects the first call option (Chi/Pon/Kan/Ron/Riichi) — index 0, not the button's event param
+
+**Fixes:**
+1. **Skip/pass**: Removed ListItemClick path entirely for skip. Now always uses `TrySkipCall()` (callback [8, 0])
+2. **Accept**: Hardcoded `buttonIndex = 0` in `TryAcceptCallViaListClick` instead of reading from button events
+3. **Retry limit**: Added `_consecutiveCallAttempts` counter (resets on phase change, caps at 5) — prevents infinite spam when a call click has no effect
+
+**Changes:**
+- `AddonClickHelper.cs` — `TryAcceptCallViaListClick` uses fixed index=0
+- `AutoPlayManager.cs`
+  - `ExecuteCallResponse` skip path uses callback 8 directly (no ListItemClick attempt)
+  - Added `_consecutiveCallAttempts` with 5-attempt limit, reset on phase change
+  - Both accept and pass paths increment counter and log attempt number

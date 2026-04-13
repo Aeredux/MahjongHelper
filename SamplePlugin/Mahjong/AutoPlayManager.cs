@@ -28,6 +28,7 @@ public sealed class AutoPlayManager
     private string _lastActionSignature = "";
     private bool _paused;
     private int _consecutiveFailedDiscards; // discards that fired with no state change
+    private int _consecutiveCallAttempts; // call accept/skip attempts with no phase change
 
     // Game state
     private string? _lastGamePhase;
@@ -120,6 +121,7 @@ public sealed class AutoPlayManager
         {
             Log($"Phase transition: {prevPhase} -> {gamePhase}");
             _consecutiveFailedDiscards = 0; // Reset stuck counter on any phase change
+            _consecutiveCallAttempts = 0; // Reset call attempt counter on phase change
             _scoreAdvanceAttempts = 0; // Reset score screen advance attempts
             _chiChoiceAttempts = 0; // Reset chi choice attempts
 
@@ -271,6 +273,15 @@ public sealed class AutoPlayManager
             return false;
         }
 
+        // If call accept/skip keeps failing (5+ attempts with no phase change), stop.
+        if (_consecutiveCallAttempts >= 5 && _pendingAction != null && _pendingAction.StartsWith("call:"))
+        {
+            Log($"Stuck-call detected ({_consecutiveCallAttempts} attempts for '{_pendingAction}'), pausing until next phase change");
+            _pendingAction = null;
+            _lastActionSignature = "";
+            return false;
+        }
+
         var action = _pendingAction;
 
         _pendingAction = null;
@@ -306,12 +317,16 @@ public sealed class AutoPlayManager
         else if (action == "call:accept")
         {
             _consecutiveFailedDiscards = 0;
+            _consecutiveCallAttempts++;
             _lastCallIntentWasAccept = true;
+            Log($"Executing call:accept (attempt {_consecutiveCallAttempts})");
             return ExecuteCallResponse(addon, 0);
         }
         else if (action == "call:pass")
         {
             _consecutiveFailedDiscards = 0;
+            _consecutiveCallAttempts++;
+            Log($"Executing call:pass (attempt {_consecutiveCallAttempts})");
             return ExecuteCallResponse(addon, 1);
         }
         else if (action == "advance")
@@ -566,10 +581,10 @@ public sealed class AutoPlayManager
         }
         else
         {
-            // Skip/pass — click the Skip button node via ListItemClick first.
-            // Callback 8 only works when rawAtk0=6, but the call prompt can appear
-            // while rawAtk0 is still 15 (opponent turn) or 9 (transition).
-            // Clicking the actual Skip button dismisses the UI immediately.
+            // Skip/pass — use callback 8 (FireCallback [8, 0]).
+            // Per callbackNotes.txt, callback 8 is "discard drawn tile (tsumogiri)
+            // ALSO: skip/pass on call prompts." Skip is NOT a list item in the UI,
+            // so ListItemClick does NOT work for skip (it accepts instead).
             int rawAtk0 = -1;
             try
             {
@@ -578,16 +593,7 @@ public sealed class AutoPlayManager
             }
             catch { }
 
-            // Try clicking the Skip button node if we have it
-            if (_lastCallButtonNodes != null &&
-                _lastCallButtonNodes.TryGetValue(EmjUiReader.CallOptions.Skip, out var skipPtr) && skipPtr != 0)
-            {
-                Log($"Executing call skip: clicking Skip button (ptr={skipPtr:X} rawAtk0={rawAtk0}) via ListItemClick");
-                return AddonClickHelper.TryAcceptCallViaListClick(addon, skipPtr, "Skip");
-            }
-
-            // Fallback to callback 8
-            Log($"Executing call response: skip/pass via callback 8 (rawAtk0={rawAtk0}) — no Skip button node");
+            Log($"Executing call skip via callback 8 (rawAtk0={rawAtk0})");
             return AddonClickHelper.TrySkipCall(addon);
         }
     }
