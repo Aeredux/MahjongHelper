@@ -860,3 +860,25 @@ Evidence from logs:
   - Added `OnMahjongFinalize` handler (clears `_lastAddonAddress`, calls `ClearPending`)
   - Registered PreFinalize listener in constructor, unregistered in Dispose
   - Diagnostics string builds now gated on `MainWindow.IsOpen`
+
+## 2026-04-13: Performance Fix — Throttle IconIdCapture disk writes + reduce per-frame allocations
+
+**What:** Fixed the remaining framerate drop that persisted after the stale-pointer fix.
+
+**Root cause:** `IconIdCapture` hooks `AtkImageNode.LoadIconTexture` which fires for **every** icon load in the entire game (hotbars, inventory, status effects, etc.). Each invocation serialized the full `_iconMap` dictionary (~200KB JSON) to disk via `SaveCache()`. Outside of mahjong, FFXIV loads icons constantly, causing continuous disk I/O + JSON serialization.
+
+Additionally, `OnFrameworkUpdate` was building status/diagnostics strings every frame even when the debug MainWindow was closed — unnecessary GC pressure from `ToString()`, string interpolation, and `StringBuilder` allocations.
+
+**Fixes:**
+1. **IconIdCapture**: Replaced per-invocation `SaveCache()` with a dirty-flag + 5-second throttle. `MarkDirty()` sets a flag on each capture; `FlushIfNeeded()` (called once per frame from `OnFrameworkUpdate`) only writes to disk if dirty AND 5+ seconds since last save.
+2. **OnFrameworkUpdate**: Gated `readerStatus.ToString()`, auto-play status string building, and `_serverClient.GetStatusText()` behind `MainWindow.IsOpen` check.
+
+**Changes:**
+- `IconIdCapture.cs`
+  - Added `_cacheDirty` flag and `_lastSaveUtc` timer
+  - `OnLoadIconTexture` now calls `MarkDirty()` instead of `SaveCache()`
+  - Added `FlushIfNeeded()` public method with 5s throttle
+  - `ResetCapturedIcons` and `Dispose` use `SaveCacheNow()` for immediate write
+- `Plugin.cs`
+  - Added `_iconCapture.FlushIfNeeded()` call in `OnFrameworkUpdate`
+  - `readerStatus.ToString()` and auto-play status strings gated on `MainWindow.IsOpen`

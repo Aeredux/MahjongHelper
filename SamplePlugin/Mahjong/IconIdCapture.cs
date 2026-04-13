@@ -35,6 +35,11 @@ public sealed unsafe class IconIdCapture : IDisposable
     private readonly List<(DateTime time, nint addr, uint iconId)> _recentCaptures = new();
     private readonly object _recentLock = new();
 
+    // Throttle disk writes: only save when dirty AND at least 5s since last save
+    private bool _cacheDirty;
+    private DateTime _lastSaveUtc = DateTime.MinValue;
+    private static readonly TimeSpan SaveInterval = TimeSpan.FromSeconds(5);
+
     public IconIdCapture(IGameInteropProvider gameInterop)
     {
         LoadCache();
@@ -56,7 +61,7 @@ public sealed unsafe class IconIdCapture : IDisposable
                 _recentCaptures.RemoveAt(0);
         }
 
-        SaveCache();
+        MarkDirty();
 
         _hook.Original(thisPtr, iconId, language);
     }
@@ -93,6 +98,28 @@ public sealed unsafe class IconIdCapture : IDisposable
             _recentCaptures.Clear();
         }
 
+        SaveCacheNow();
+    }
+
+    /// <summary>
+    /// Call periodically (e.g. once per frame) to flush dirty cache to disk if enough time has elapsed.
+    /// </summary>
+    public void FlushIfNeeded()
+    {
+        if (!_cacheDirty) return;
+        if (DateTime.UtcNow - _lastSaveUtc < SaveInterval) return;
+        SaveCacheNow();
+    }
+
+    private void MarkDirty()
+    {
+        _cacheDirty = true;
+    }
+
+    private void SaveCacheNow()
+    {
+        _cacheDirty = false;
+        _lastSaveUtc = DateTime.UtcNow;
         SaveCache();
     }
 
@@ -140,7 +167,7 @@ public sealed unsafe class IconIdCapture : IDisposable
 
     public void Dispose()
     {
-        SaveCache();
+        SaveCacheNow();
         _hook.Disable();
         _hook.Dispose();
     }

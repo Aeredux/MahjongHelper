@@ -160,14 +160,18 @@ public sealed partial class Plugin : IDalamudPlugin
         _lastSchedulerTickUtc = now;
 
         _readerScheduler.Update(delta);
-        MainWindow.readerStatus = _emjReader.Status.ToString();
+        _iconCapture.FlushIfNeeded();
 
-        if (_emjReader.Status != _lastReaderStatus)
+        var readerStatus = _emjReader.Status;
+        if (MainWindow.IsOpen)
+            MainWindow.readerStatus = readerStatus.ToString();
+
+        if (readerStatus != _lastReaderStatus)
         {
-            if (_emjReader.Status != AddonReaderStatus.NoErrors)
-                RecordFailure($"Reader status changed to {_emjReader.Status}");
+            if (readerStatus != AddonReaderStatus.NoErrors)
+                RecordFailure($"Reader status changed to {readerStatus}");
 
-            _lastReaderStatus = _emjReader.Status;
+            _lastReaderStatus = readerStatus;
         }
 
         if (MainWindow.IsOpen)
@@ -177,7 +181,8 @@ public sealed partial class Plugin : IDalamudPlugin
             MainWindow.serverStatusText = _serverClient.GetStatusText();
         }
 
-        // Auto-play status line
+        // Auto-play status line (only when debug window visible)
+        if (MainWindow.IsOpen)
         {
             var ap = Configuration.AutoPlayEnabled;
             var phase = _autoPlayManager.PendingAction != null
