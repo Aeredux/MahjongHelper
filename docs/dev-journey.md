@@ -898,3 +898,21 @@ Confirmed by autoplay logs showing repeated failures: the button scan consistent
   - Added fallback after priority-based button search for Riichi/Tsumo/Ron phases
   - Fallback clicks the first non-Skip captured button node as a proxy for accept
   - Logs indicate fallback usage for diagnostics
+
+## 2026-04-13: Bug Fix — Tsumo/Ron not detected because AtkValues[6] empty for win prompts
+
+**What:** Fixed tsumo (and ron) prompts being missed by autoplay even when buttons were visible.
+
+**Root cause:** Two compounding issues:
+1. **Phase detection**: `AtkValues[6]` doesn't populate "Tsumo" or "Ron" text for win prompts — it stays empty/stale. The only signal is `atk0=6` (call prompt) with visible Tsumo/Ron buttons. `InferGamePhase` mapped `atk0=6` generically to `CallDecisionPrompt`, never reaching `TsumoDecisionPrompt` or `RonDecisionPrompt`.
+2. **Provider returns null**: `InGameSuggestionProvider.GetCallAction()` returns `null` when suggestion type is `None`. Even if the phase were correct, `TryScheduleCallResponse` would bail on `decision == null`. After 3 seconds the fallback auto-pass fires, skipping the win.
+
+Confirmed by heartbeat logs: `phase=CallDecisionPrompt calls=Tsumo,Skip sug=None: pending=` — Tsumo button visible, phase misidentified, no action scheduled, eventually auto-passed.
+
+**Fixes:**
+1. **InferGamePhase**: When `atk0=6` and suggestion is None, check `availableCalls` flags: Tsumo → `TsumoDecisionPrompt`, Ron → `RonDecisionPrompt`, Riichi → `RiichiDecisionPrompt`, else `CallDecisionPrompt`.
+2. **TryScheduleCallResponse**: Auto-accept for `TsumoDecisionPrompt` and `RonDecisionPrompt` when provider returns null — you never decline a winning hand.
+
+**Changes:**
+- `EmjUiReader.cs` — `InferGamePhase`: atk0=6 fallback now checks call buttons for Tsumo/Ron/Riichi
+- `AutoPlayManager.cs` — `TryScheduleCallResponse`: force `decision = "accept"` for Tsumo/Ron when provider is null

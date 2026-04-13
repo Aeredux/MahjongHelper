@@ -1372,9 +1372,19 @@ public static unsafe class EmjUiReader
         if (atkPhase == 29 || atkPhase == 32)
             return GamePhase.BetweenRounds;
 
-        // atk0=6 with no clear suggestion — likely a stale state or transition
+        // atk0=6 with no clear suggestion — check call buttons for specific prompts.
+        // AtkValues[6] often doesn't populate for Tsumo/Ron/Riichi — the game shows
+        // buttons but the suggestion text stays empty. Use visible buttons as signal.
         if (atkPhase == 6)
+        {
+            if (availableCalls.HasFlag(CallOptions.Tsumo))
+                return GamePhase.TsumoDecisionPrompt;
+            if (availableCalls.HasFlag(CallOptions.Ron))
+                return GamePhase.RonDecisionPrompt;
+            if (availableCalls.HasFlag(CallOptions.Riichi))
+                return GamePhase.RiichiDecisionPrompt;
             return GamePhase.CallDecisionPrompt;
+        }
 
         return GamePhase.Unknown;
 

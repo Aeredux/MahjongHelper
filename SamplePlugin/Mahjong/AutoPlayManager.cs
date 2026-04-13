@@ -388,6 +388,16 @@ public sealed class AutoPlayManager
             return;
 
         var decision = _activeProvider.GetCallAction();
+
+        // Tsumo and Ron are always winning hands — auto-accept even if the provider
+        // has no opinion (AtkValues[6] often doesn't populate for these prompts,
+        // so InGameSuggestionProvider returns null).
+        if (decision == null && (_lastGamePhase == "TsumoDecisionPrompt" || _lastGamePhase == "RonDecisionPrompt"))
+        {
+            decision = "accept";
+            Log($"Auto-accept for {_lastGamePhase} (provider returned null — never decline a win)");
+        }
+
         if (decision == null)
             return;
 
