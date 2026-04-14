@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
-using SamplePlugin.Mahjong;
+using MahjongHelper.Mahjong;
 
-namespace SamplePlugin.Windows;
+namespace MahjongHelper.Windows;
 
 /// <summary>
 /// Compact in-game overlay showing Mahjong AI suggestions.

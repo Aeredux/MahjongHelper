@@ -1,4 +1,4 @@
-namespace SamplePlugin.Mahjong;
+namespace MahjongHelper.Mahjong;
 
 /// <summary>
 /// Provides tile discard and call decision suggestions for auto-play.

@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 
-namespace SamplePlugin.Mahjong;
+namespace MahjongHelper.Mahjong;
 
 public static unsafe class EmjUiReader
 {

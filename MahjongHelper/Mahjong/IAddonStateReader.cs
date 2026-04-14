@@ -1,6 +1,6 @@
 using System;
 
-namespace SamplePlugin.Mahjong;
+namespace MahjongHelper.Mahjong;
 
 public interface IAddonStateReader
 {

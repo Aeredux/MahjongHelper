@@ -1,0 +1,12 @@
+{
+  "Author": "alvin",
+  "Name": "Mahjong Helper",
+  "Punchline": "AI-assisted Doman Mahjong auto-play and suggestions.",
+  "Description": "Reads the Doman Mahjong (EmjL) addon, provides tile suggestions via in-game AI or a local server, and can auto-play discards and calls. Use /mj to toggle.",
+  "ApplicableVersion": "any",
+  "Tags": [
+    "mahjong",
+    "doman",
+    "autoplay"
+  ]
+}

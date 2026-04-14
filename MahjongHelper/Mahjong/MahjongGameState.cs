@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 
-namespace SamplePlugin.Mahjong;
+namespace MahjongHelper.Mahjong;
 
 public enum MahjongStateSource
 {

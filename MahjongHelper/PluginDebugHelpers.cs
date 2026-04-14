@@ -4,11 +4,11 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using FFXIVClientStructs.FFXIV.Component.GUI;
-using SamplePlugin.Mahjong;
-using SamplePlugin.Mahjong.Debug;
-using SamplePlugin.Windows;
+using MahjongHelper.Mahjong;
+using MahjongHelper.Mahjong.Debug;
+using MahjongHelper.Windows;
 
-namespace SamplePlugin;
+namespace MahjongHelper;
 
 /// <summary>
 /// Debug, diagnostic, and investigation helpers split out from Plugin.cs.

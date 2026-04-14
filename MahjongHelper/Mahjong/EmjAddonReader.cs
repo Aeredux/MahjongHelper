@@ -1,7 +1,7 @@
 using System;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 
-namespace SamplePlugin.Mahjong;
+namespace MahjongHelper.Mahjong;
 
 public sealed unsafe class EmjAddonReader : IAddonStateReader
 {

@@ -4,7 +4,7 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
 
-namespace SamplePlugin.Windows;
+namespace MahjongHelper.Windows;
 
 public class ConfigWindow : Window, IDisposable
 {

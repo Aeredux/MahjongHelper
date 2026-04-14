@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 
-namespace SamplePlugin.Mahjong;
+namespace MahjongHelper.Mahjong;
 
 public class AddonReaderScheduler(IGameGui gameGui)
 {

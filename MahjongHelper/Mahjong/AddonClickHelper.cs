@@ -4,7 +4,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 
-namespace SamplePlugin.Mahjong;
+namespace MahjongHelper.Mahjong;
 
 /// <summary>
 /// Provides methods for simulating user actions on EmjL (Doman Mahjong) addon.

@@ -8,7 +8,7 @@ using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 
-namespace SamplePlugin.Mahjong;
+namespace MahjongHelper.Mahjong;
 
 /// <summary>
 /// Hooks AtkImageNode.LoadIconTexture to capture icon IDs as they're loaded onto image nodes.

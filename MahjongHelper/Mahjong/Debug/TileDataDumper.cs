@@ -8,9 +8,9 @@ using FFXIVClientStructs.FFXIV.Client.Game.UI;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using FFXIVClientStructs.FFXIV.Client.UI.Misc;
 using FFXIVClientStructs.FFXIV.Component.GUI;
-using SamplePlugin.Mahjong;
+using MahjongHelper.Mahjong;
 
-namespace SamplePlugin.Mahjong.Debug;
+namespace MahjongHelper.Mahjong.Debug;
 
 /// <summary>
 /// Writes structured tile data from the EmjL addon to a file for offline analysis.

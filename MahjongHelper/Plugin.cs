@@ -4,20 +4,20 @@ using Dalamud.Plugin;
 using System.IO;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
-using SamplePlugin.Windows;
+using MahjongHelper.Windows;
 using Dalamud.Game.Addon.Lifecycle;
 using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
 using Dalamud.Game.Gui;
 using FFXIVClientStructs.FFXIV.Component.GUI;
-using SamplePlugin.Mahjong;
-using SamplePlugin.Mahjong.Debug;
+using MahjongHelper.Mahjong;
+using MahjongHelper.Mahjong.Debug;
 using System;
 using System.Linq;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace SamplePlugin;
+namespace MahjongHelper;
 
 public sealed partial class Plugin : IDalamudPlugin
 {
@@ -56,7 +56,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
     public Configuration Configuration { get; init; }
 
-    public readonly WindowSystem WindowSystem = new("SamplePlugin");
+    public readonly WindowSystem WindowSystem = new("MahjongHelper");
     private ConfigWindow ConfigWindow { get; init; }
     private MainWindow MainWindow { get; init; }
     private SuggestionOverlayWindow OverlayWindow { get; init; }
@@ -143,7 +143,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
         // Add a simple message to the log with level set to information
         // Use /xllog to open the log window in-game
-        // Example Output: 00:57:54.959 | INF | [SamplePlugin] ===A cool log message from Sample Plugin===
+        // Example Output: 00:57:54.959 | INF | [MahjongHelper] ===A cool log message from Sample Plugin===
         Log.Information($"===A cool log message from {PluginInterface.Manifest.Name}===");
 
         // If EmjL addon is already open (player is in a mahjong game), dump immediately on load

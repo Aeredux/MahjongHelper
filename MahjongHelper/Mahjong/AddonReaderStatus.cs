@@ -1,4 +1,4 @@
-namespace SamplePlugin.Mahjong;
+namespace MahjongHelper.Mahjong;
 
 public enum AddonReaderStatus
 {

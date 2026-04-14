@@ -6,7 +6,7 @@ using System.Text;
 using System.Text.Json;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 
-namespace SamplePlugin.Mahjong;
+namespace MahjongHelper.Mahjong;
 
 public static unsafe class MahjongHandReader
 {

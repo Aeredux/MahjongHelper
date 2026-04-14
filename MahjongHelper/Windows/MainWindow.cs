@@ -3,9 +3,9 @@ using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Windowing;
-using SamplePlugin.Mahjong.Debug;
+using MahjongHelper.Mahjong.Debug;
 
-namespace SamplePlugin.Windows;
+namespace MahjongHelper.Windows;
 
 public class MainWindow : Window, IDisposable
 {

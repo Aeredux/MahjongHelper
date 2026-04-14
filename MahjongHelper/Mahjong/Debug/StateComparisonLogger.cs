@@ -7,9 +7,9 @@ using System.Text;
 using FFXIVClientStructs.FFXIV.Client.Game.UI;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using FFXIVClientStructs.FFXIV.Component.GUI;
-using SamplePlugin.Mahjong;
+using MahjongHelper.Mahjong;
 
-namespace SamplePlugin.Mahjong.Debug;
+namespace MahjongHelper.Mahjong.Debug;
 
 /// <summary>
 /// Logs before/after comparisons of AgentId.Emj state to identify which memory locations
