@@ -181,8 +181,13 @@ public sealed class AutoPlayManager
 
         // Fallback: if we've been in a call phase for >3 seconds with no pending action
         // and the active provider still can't decide, schedule a pass.
+        // IMPORTANT: Do NOT auto-pass if we already executed an accept in this phase.
+        // After clicking accept (e.g. Riichi), AtkValues[6] clears while the phase
+        // lingers — the provider returns null, but the accept was already dispatched.
+        // Auto-passing here would cancel the accepted call.
         if (isCallPhase && _pendingAction == null &&
             _activeProvider.GetCallAction() == null &&
+            !_lastCallIntentWasAccept &&
             _config.AutoPlayEnabled && _config.AutoCallEnabled && !_paused &&
             DateTime.UtcNow > _callPhaseEnteredUtc.AddSeconds(3))
         {
@@ -409,6 +414,13 @@ public sealed class AutoPlayManager
             _lastGamePhase != "RonDecisionPrompt" &&
             _lastGamePhase != "TsumoDecisionPrompt" &&
             _lastGamePhase != "RiichiDecisionPrompt")
+            return;
+
+        // If we already executed an accept in this phase, don't re-schedule.
+        // After clicking (e.g. Riichi), AtkValues[6] may clear while the phase
+        // persists — re-scheduling would either double-click or trigger auto-pass.
+        // Just wait for the phase transition.
+        if (_lastCallIntentWasAccept)
             return;
 
         var decision = _activeProvider.GetCallAction();
