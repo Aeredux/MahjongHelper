@@ -19,6 +19,9 @@ public class Configuration : IPluginConfiguration
 
     // ─── Auto-Play Settings ───
 
+    /// <summary>Which suggestion provider to use: 0 = In-Game, 1 = Server.</summary>
+    public int StrategyProvider { get; set; } = 0;
+
     /// <summary>Master toggle for auto-play (off by default).</summary>
     public bool AutoPlayEnabled { get; set; } = false;
 

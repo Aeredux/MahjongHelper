@@ -116,8 +116,10 @@ public sealed partial class Plugin : IDalamudPlugin
         );
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
         _autoPlayManager = new AutoPlayManager(Configuration, _iconMap);
+        ApplyStrategyProvider(Configuration.StrategyProvider);
 
         ConfigWindow = new ConfigWindow(this);
+        ConfigWindow.OnStrategyProviderChanged = ApplyStrategyProvider;
         MainWindow = new MainWindow(this);
         OverlayWindow = new SuggestionOverlayWindow(Configuration);
 
@@ -760,6 +762,14 @@ public sealed partial class Plugin : IDalamudPlugin
         OverlayWindow.Dispose();
 
         CommandManager.RemoveHandler(CommandName);
+    }
+
+    private void ApplyStrategyProvider(int provider)
+    {
+        if (provider == 1)
+            _autoPlayManager.UseServerProvider();
+        else
+            _autoPlayManager.UseInGameProvider();
     }
 
     private void OnCommand(string command, string args)

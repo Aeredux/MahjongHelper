@@ -9,6 +9,9 @@ namespace MahjongHelper.Windows;
 public class ConfigWindow : Window, IDisposable
 {
     private readonly Configuration configuration;
+    private static readonly string[] ProviderNames = ["In-Game", "Server"];
+
+    public Action<int>? OnStrategyProviderChanged;
 
     public ConfigWindow(Plugin plugin) : base("Mahjong Helper Settings###MahjongHelperConfig")
     {
@@ -31,6 +34,18 @@ public class ConfigWindow : Window, IDisposable
         // ─── Auto-Play ───
         ImGui.TextColored(new Vector4(1, 0.8f, 0.3f, 1), "Auto-Play");
         ImGui.Separator();
+
+        ImGui.Text("Strategy Provider");
+        var provider = configuration.StrategyProvider;
+        ImGui.SetNextItemWidth(160);
+        if (ImGui.Combo("##StrategyProvider", ref provider, ProviderNames, ProviderNames.Length))
+        {
+            configuration.StrategyProvider = provider;
+            configuration.Save();
+            OnStrategyProviderChanged?.Invoke(provider);
+        }
+
+        ImGui.Spacing();
 
         var autoPlay = configuration.AutoPlayEnabled;
         if (ImGui.Checkbox("Enable Auto-Play", ref autoPlay))
