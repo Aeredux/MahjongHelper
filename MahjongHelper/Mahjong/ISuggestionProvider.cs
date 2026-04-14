@@ -35,7 +35,8 @@ public sealed class InGameSuggestionProvider : ISuggestionProvider
 
     public string? GetDiscardTile()
     {
-        if (_suggestion?.Type == EmjUiReader.SuggestionType.Discard &&
+        if ((_suggestion?.Type == EmjUiReader.SuggestionType.Discard ||
+             _suggestion?.Type == EmjUiReader.SuggestionType.Riichi) &&
             !string.IsNullOrEmpty(_suggestion.TileName))
             return _suggestion.TileName;
         return null;

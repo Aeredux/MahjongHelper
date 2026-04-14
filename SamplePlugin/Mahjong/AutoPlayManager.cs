@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 
-namespace MahjongHelper.Mahjong;
+namespace SamplePlugin.Mahjong;
 
 /// <summary>
 /// Manages automatic tile discards and call decisions.
@@ -38,7 +38,6 @@ public sealed class AutoPlayManager
     private List<string>? _preChiSuggestionTiles; // tiles from suggestion before entering chi choice
     private IconIdCapture? _iconCapture;
     private bool _lastCallIntentWasAccept; // true if we deliberately accepted a call (vs game timer auto-accepting)
-    private string? _riichiDiscardTile; // saved from Riichi suggestion for post-Riichi discard
 
     private static readonly string LogDir = System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MahjongHelper");
@@ -109,14 +108,12 @@ public sealed class AutoPlayManager
         // Update the in-game provider with latest suggestion data
         _inGameProvider.Update(inGameSuggestion);
 
-        // Log riichi suggestion events for diagnostics and save the recommended discard tile
+        // Log riichi suggestion events for diagnostics
         if (inGameSuggestion?.Type == EmjUiReader.SuggestionType.Riichi)
         {
             var riichiTile = inGameSuggestion.TileName ?? "(none)";
             var riichiIcon = inGameSuggestion.TileIconId?.ToString() ?? "(none)";
             Log($"[RIICHI-DIAG] Riichi suggestion detected: tile={riichiTile} icon={riichiIcon} phase={gamePhase} prev={prevPhase}");
-            if (inGameSuggestion.TileName != null)
-                _riichiDiscardTile = inGameSuggestion.TileName;
         }
 
         // Log phase transitions for diagnostics
@@ -148,16 +145,7 @@ public sealed class AutoPlayManager
         if (gamePhase == "RiichiDecisionPrompt" && prevPhase != "RiichiDecisionPrompt")
             Log($"[RIICHI-DIAG] Entered RiichiDecisionPrompt from {prevPhase}");
         if (prevPhase == "RiichiDecisionPrompt" && gamePhase != "RiichiDecisionPrompt")
-        {
             Log($"[RIICHI-DIAG] Left RiichiDecisionPrompt to {gamePhase}");
-            // Clear the saved Riichi tile if we didn't transition to discard
-            // (e.g. Riichi was declined / timed out → opponent turn).
-            if (gamePhase != "WaitingForDiscard" && _riichiDiscardTile != null)
-            {
-                Log($"[RIICHI-DIAG] Clearing stale riichi discard tile '{_riichiDiscardTile}' (left Riichi to {gamePhase})");
-                _riichiDiscardTile = null;
-            }
-        }
 
         if (isCallPhase && !wasCallPhase)
         {
@@ -372,18 +360,6 @@ public sealed class AutoPlayManager
             return;
 
         var bestTile = _activeProvider.GetDiscardTile();
-
-        // After accepting Riichi, use the tile from the Riichi suggestion.
-        // The provider may return null or a different tile during the post-Riichi
-        // discard phase because AtkValues[6] updates asynchronously.
-        if (_riichiDiscardTile != null)
-        {
-            if (string.IsNullOrEmpty(bestTile) || bestTile != _riichiDiscardTile)
-                Log($"[RIICHI-DIAG] Overriding discard tile: provider={bestTile ?? "(null)"} -> saved riichi tile={_riichiDiscardTile}");
-            bestTile = _riichiDiscardTile;
-            _riichiDiscardTile = null;
-        }
-
         if (string.IsNullOrEmpty(bestTile))
             return;
 
@@ -420,15 +396,6 @@ public sealed class AutoPlayManager
         {
             decision = "accept";
             Log($"Auto-accept for {_lastGamePhase} (provider returned null — never decline a win)");
-        }
-
-        // Riichi — AtkValues[6] sometimes doesn't populate "Riichi" even when the
-        // Riichi button is visible (atk0=6 fallback detects the phase from buttons).
-        // Auto-accept so we don't fall through to the 3-second auto-pass timeout.
-        if (decision == null && _lastGamePhase == "RiichiDecisionPrompt")
-        {
-            decision = "accept";
-            Log($"Auto-accept for RiichiDecisionPrompt (provider returned null — Riichi button visible but AtkValues[6] didn't populate)");
         }
 
         if (decision == null)
