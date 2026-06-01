@@ -1,5 +1,21 @@
 # Dev Journey
 
+## 2026-06-01: README rewritten to match current plugin behavior
+
+**What:** Replaced the template `README.md` content with project-specific documentation for Mahjong Helper's current feature set.
+
+**Why:** The existing README still described the SamplePlugin template and no longer reflected what this plugin actually does.
+
+**Changes made:**
+- Documented current runtime behavior (EmjL state reading, normalized state merge, overlay output, server integration, auto-play flow).
+- Added user-facing command coverage for `/mj` and primary subcommands.
+- Added current settings and provider model (In-Game vs Server).
+- Corrected build instructions to use `dotnet build MahjongHelper.sln -c Release` and documented the expected x64 release artifact path.
+- Added in-game activation steps for dev plugin loading.
+- Added `%APPDATA%/MahjongHelper` diagnostics/log file overview.
+
+**Result:** Repository docs now describe the actual plugin behavior and operational workflow instead of template placeholders.
+
 ## 2026-03-25: Initial Design Plan
 
 **What:** Created the development plan in `docs/dev-plan.md`.
