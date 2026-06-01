@@ -75,8 +75,8 @@ public static unsafe class AddonClickHelper
             LogAtkSnapshot(addon, $"pre-discard-pos{handPos}");
 
             var values = stackalloc AtkValue[2];
-            values[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = CallbackIdDiscardTile };
-            values[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = handPos };
+            values[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = CallbackIdDiscardTile };
+            values[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = handPos };
             addon->FireCallback(2, values, true);
 
             Log($"[DISCARD] Fired callback 7 with handPos={handPos}");
@@ -103,8 +103,8 @@ public static unsafe class AddonClickHelper
             LogAtkSnapshot(addon, "pre-tsumogiri");
 
             var values = stackalloc AtkValue[2];
-            values[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = CallbackIdDiscardDrawn };
-            values[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 0 };
+            values[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = CallbackIdDiscardDrawn };
+            values[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = 0 };
             addon->FireCallback(2, values, true);
 
             Log($"[DISCARD] Fired callback 8 (tsumogiri)");
@@ -131,8 +131,8 @@ public static unsafe class AddonClickHelper
             LogAtkSnapshot(addon, "pre-skip-call");
 
             var values = stackalloc AtkValue[2];
-            values[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = CallbackIdSkipCall };
-            values[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 0 };
+            values[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = CallbackIdSkipCall };
+            values[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = 0 };
             addon->FireCallback(2, values, true);
 
             Log($"[CALL] Fired callback 8 (skip/pass)");
@@ -658,9 +658,9 @@ public static unsafe class AddonClickHelper
                     // FireCallback with [2, slotIndex, 0]
                     {
                         var values = stackalloc AtkValue[3];
-                        values[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 2 };
-                        values[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = slotIndex };
-                        values[2] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 0 };
+                        values[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = 2 };
+                        values[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = slotIndex };
+                        values[2] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = 0 };
                         addon->FireCallback(3, values, true);
                         Log($"[EXECUTE] Method 4: FireCallback(3, [2, {slotIndex}, 0]) nodeIndex={nodeIndex}");
                         result = true;
@@ -685,7 +685,7 @@ public static unsafe class AddonClickHelper
                     // FireCallback(1, [slotIndex])
                     {
                         var v = stackalloc AtkValue[1];
-                        v[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = slotIndex };
+                        v[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = slotIndex };
                         addon->FireCallback(1, v, true);
                         Log($"[EXECUTE] Method 6: FireCallback(1, [{slotIndex}])");
                         result = true;
@@ -696,8 +696,8 @@ public static unsafe class AddonClickHelper
                     // FireCallback(2, [0, slotIndex])
                     {
                         var v = stackalloc AtkValue[2];
-                        v[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 0 };
-                        v[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = slotIndex };
+                        v[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = 0 };
+                        v[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = slotIndex };
                         addon->FireCallback(2, v, true);
                         Log($"[EXECUTE] Method 7: FireCallback(2, [0, {slotIndex}])");
                         result = true;
@@ -708,8 +708,8 @@ public static unsafe class AddonClickHelper
                     // FireCallback(2, [1, slotIndex])
                     {
                         var v = stackalloc AtkValue[2];
-                        v[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 1 };
-                        v[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = slotIndex };
+                        v[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = 1 };
+                        v[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = slotIndex };
                         addon->FireCallback(2, v, true);
                         Log($"[EXECUTE] Method 8: FireCallback(2, [1, {slotIndex}])");
                         result = true;
@@ -720,8 +720,8 @@ public static unsafe class AddonClickHelper
                     // FireCallback(2, [11, slotIndex]) — Saucy TT pattern
                     {
                         var v = stackalloc AtkValue[2];
-                        v[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 11 };
-                        v[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = slotIndex };
+                        v[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = 11 };
+                        v[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = slotIndex };
                         addon->FireCallback(2, v, true);
                         Log($"[EXECUTE] Method 9: FireCallback(2, [11, {slotIndex}])");
                         result = true;
@@ -732,8 +732,8 @@ public static unsafe class AddonClickHelper
                     // FireCallback(2, [14, slotIndex]) — another TT pattern
                     {
                         var v = stackalloc AtkValue[2];
-                        v[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 14 };
-                        v[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = slotIndex };
+                        v[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = 14 };
+                        v[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = slotIndex };
                         addon->FireCallback(2, v, true);
                         Log($"[EXECUTE] Method 10: FireCallback(2, [14, {slotIndex}])");
                         result = true;
@@ -776,7 +776,7 @@ public static unsafe class AddonClickHelper
 
             var atkVals = stackalloc AtkValue[values.Length];
             for (int i = 0; i < values.Length; i++)
-                atkVals[i] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = values[i] };
+                atkVals[i] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = values[i] };
 
             addon->FireCallback((uint)values.Length, atkVals, true);
 
@@ -1438,8 +1438,8 @@ public static unsafe class AddonClickHelper
 
                         LogAtkSnapshot(addon, "pre-m13");
                         var v13 = stackalloc AtkValue[2];
-                        v13[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 9 };
-                        v13[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = (int)btnParam13 };
+                        v13[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = 9 };
+                        v13[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = (int)btnParam13 };
                         addon->FireCallback(2, v13, true);
                         LogAtkSnapshot(addon, "post-m13");
                         Log($"[CALL-CLICK] Method 13: FireCallback(2, [9, {btnParam13}])");
@@ -1452,8 +1452,8 @@ public static unsafe class AddonClickHelper
                     {
                         LogAtkSnapshot(addon, "pre-m14");
                         var v14 = stackalloc AtkValue[2];
-                        v14[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 9 };
-                        v14[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 0 };
+                        v14[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = 9 };
+                        v14[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = 0 };
                         addon->FireCallback(2, v14, true);
                         LogAtkSnapshot(addon, "post-m14");
                         Log($"[CALL-CLICK] Method 14: FireCallback(2, [9, 0])");
@@ -1467,8 +1467,8 @@ public static unsafe class AddonClickHelper
                     {
                         LogAtkSnapshot(addon, "pre-m15");
                         var v15 = stackalloc AtkValue[2];
-                        v15[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 8 };
-                        v15[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 1 };
+                        v15[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = 8 };
+                        v15[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = 1 };
                         addon->FireCallback(2, v15, true);
                         LogAtkSnapshot(addon, "post-m15");
                         Log($"[CALL-CLICK] Method 15: FireCallback(2, [8, 1]) — callback 8 value 1");
@@ -1481,8 +1481,8 @@ public static unsafe class AddonClickHelper
                     {
                         LogAtkSnapshot(addon, "pre-m16");
                         var v16 = stackalloc AtkValue[2];
-                        v16[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 8 };
-                        v16[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 2 };
+                        v16[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = 8 };
+                        v16[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = 2 };
                         addon->FireCallback(2, v16, true);
                         LogAtkSnapshot(addon, "post-m16");
                         Log($"[CALL-CLICK] Method 16: FireCallback(2, [8, 2]) — callback 8 value 2");
@@ -1496,8 +1496,8 @@ public static unsafe class AddonClickHelper
                     {
                         LogAtkSnapshot(addon, "pre-m17");
                         var v17 = stackalloc AtkValue[2];
-                        v17[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 7 };
-                        v17[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = 0 };
+                        v17[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = 7 };
+                        v17[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = 0 };
                         addon->FireCallback(2, v17, true);
                         LogAtkSnapshot(addon, "post-m17");
                         Log($"[CALL-CLICK] Method 17: FireCallback(2, [7, 0]) — callback 7 during call prompt");
@@ -1567,11 +1567,11 @@ public static unsafe class AddonClickHelper
                             {
                                 var v = addon->AtkValues[i];
                                 var typeStr = v.Type.ToString();
-                                if (v.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int)
+                                if (v.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int)
                                     sb.Append($"[{i}]i={v.Int} ");
-                                else if (v.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.UInt)
+                                else if (v.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.UInt)
                                     sb.Append($"[{i}]u={v.UInt} ");
-                                else if (v.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String)
+                                else if (v.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.String)
                                 {
                                     string s;
                                     try { s = Marshal.PtrToStringUTF8((nint)v.String.Value) ?? "null"; }
@@ -1737,7 +1737,7 @@ public static unsafe class AddonClickHelper
         // Fire the callback
         var atkVals = stackalloc AtkValue[candidate.Length];
         for (int i = 0; i < candidate.Length; i++)
-            atkVals[i] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int, Int = candidate[i] };
+            atkVals[i] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = candidate[i] };
 
         addon->FireCallback((uint)candidate.Length, atkVals, true);
 
@@ -1753,3 +1753,4 @@ public static unsafe class AddonClickHelper
     /// </summary>
     public static void ResetCallSweep() => _sweepIndex = 0;
 }
+

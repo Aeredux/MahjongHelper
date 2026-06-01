@@ -916,3 +916,25 @@ Confirmed by heartbeat logs: `phase=CallDecisionPrompt calls=Tsumo,Skip sug=None
 **Changes:**
 - `EmjUiReader.cs` — `InferGamePhase`: atk0=6 fallback now checks call buttons for Tsumo/Ron/Riichi
 - `AutoPlayManager.cs` — `TryScheduleCallResponse`: force `decision = "accept"` for Tsumo/Ron when provider is null
+
+## 2026-05-30: API 15 migration + compilation recovery + plan reconciliation
+
+**What:** Upgraded the plugin to Dalamud API level 15, fixed compile breakages from FFXIVClientStructs API changes, and reconciled stale checklist state in the development plan.
+
+**Why:** Cleanup work found that the project was still on SDK/API 14 in project metadata and the solution no longer compiled after current dependency changes. The plan file also lagged behind implemented autoplay/rename/config persistence work.
+
+**Changes made:**
+- Upgraded SDK/packager baseline:
+  - `MahjongHelper.csproj`: `Dalamud.NET.Sdk/14.0.2` → `Dalamud.NET.Sdk/15.0.0`
+  - `packages.lock.json`: `DalamudPackager` resolved to `15.0.0`
+- Fixed API rename fallout across codebase:
+  - Replaced `FFXIVClientStructs.FFXIV.Component.GUI.ValueType` with `FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType` in autoplay, reader, dumper, and debug-helper paths.
+- Cleared nullable warning hotspots in UI/autoplay plumbing:
+  - `MainWindow.cs`: adjusted multiline text buffer handling and localized suppression at known ImGui nullable call sites.
+  - `AutoPlayManager.cs`: added explicit null guard for pending action before string operations.
+- Reconciled plan drift in `docs/dev-plan.md`:
+  - Marked complete: **5.1** tile discard automation, **5.2** call decision automation, **6.1** plugin rename, **6.3** config persistence.
+  - Updated deploy artifact path to `MahjongHelper/bin/x64/Release/MahjongHelper.dll`.
+  - Marked open questions resolved for call prompt structure and click simulation method.
+
+**Result:** `dotnet build MahjongHelper.sln -c Release` is now green and warning-free, and plan status better matches implemented behavior.

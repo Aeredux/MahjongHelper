@@ -35,9 +35,11 @@ public sealed class AutoPlayManager
     private IReadOnlyList<EmjUiReader.UiSlot>? _lastHandSlots;
     private Dictionary<EmjUiReader.CallOptions, nint>? _lastCallButtonNodes;
     private DateTime _callPhaseEnteredUtc; // when we first entered a call/decision phase
+    private DateTime _discardPhaseEnteredUtc; // when we first entered WaitingForDiscard
     private List<string>? _preChiSuggestionTiles; // tiles from suggestion before entering chi choice
     private IconIdCapture? _iconCapture;
     private bool _lastCallIntentWasAccept; // true if we deliberately accepted a call (vs game timer auto-accepting)
+    private DateTime _acceptExecutedAtUtc; // when _lastCallIntentWasAccept was set
     private string? _riichiDiscardTile; // saved from Riichi suggestion for post-Riichi discard
 
     private static readonly string LogDir = System.IO.Path.Combine(
@@ -198,6 +200,23 @@ public sealed class AutoPlayManager
             _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(500);
         }
 
+        // After accepting Riichi, the game enters a tile-selection sub-state
+        // (choose which tile to discard for riichi). atk0 stays at 6, so the phase
+        // remains RiichiDecisionPrompt, but the game is waiting for a tile click.
+        // If >5s have elapsed since accept with no phase change, schedule a discard.
+        if (gamePhase == "RiichiDecisionPrompt" && _lastCallIntentWasAccept &&
+            _pendingAction == null && _config.AutoPlayEnabled && !_paused &&
+            DateTime.UtcNow > _acceptExecutedAtUtc.AddSeconds(5))
+        {
+            Log($"[RIICHI-DIAG] Post-riichi-accept stuck for >5s — scheduling discard (tsumogiri fallback)");
+            _lastCallIntentWasAccept = false; // allow re-scheduling
+            TryScheduleRiichiDiscard();
+        }
+
+        // Track when we enter WaitingForDiscard
+        if (gamePhase == "WaitingForDiscard" && prevPhase != "WaitingForDiscard")
+            _discardPhaseEnteredUtc = DateTime.UtcNow;
+
         // Always try scheduling a discard when in WaitingForDiscard.
         // TryScheduleDiscard has its own signature dedup so it's safe to call every frame.
         // This is needed because after Update() clears _lastActionSignature,
@@ -205,6 +224,20 @@ public sealed class AutoPlayManager
         if (gamePhase == "WaitingForDiscard")
         {
             TryScheduleDiscard();
+        }
+
+        // Safety net: if WaitingForDiscard with no pending action for >8 seconds,
+        // the suggestion reader may have failed (e.g. AtkValues[6] repurposed as int
+        // after riichi). Fall back to tsumogiri so the game doesn't hang.
+        if (gamePhase == "WaitingForDiscard" && _pendingAction == null &&
+            _config.AutoPlayEnabled && _config.AutoDiscardEnabled && !_paused &&
+            DateTime.UtcNow > _discardPhaseEnteredUtc.AddSeconds(8))
+        {
+            Log($"Fallback: tsumogiri after 8s in WaitingForDiscard with no provider suggestion");
+            _pendingAction = "riichi-tsumogiri";
+            _lastActionSignature = "";
+            _actionScheduledAtUtc = DateTime.UtcNow;
+            _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(500);
         }
 
         // Similarly, always try scheduling a call response when in a call phase.
@@ -277,17 +310,17 @@ public sealed class AutoPlayManager
             return false;
         }
 
-        // If discards keep failing (5+ attempts with no state change), stop retrying.
-        // This prevents infinite loops when some unknown state is blocking callbacks.
-        // IMPORTANT: Do NOT fire callback 8 here — at AtkVal[0]=30, callback 8 means
-        // tsumogiri (discard drawn tile), not skip/pass.
+        // If discards keep failing (5+ attempts with no state change), fall back
+        // to tsumogiri. This handles cases where the hand reader returns stale icons
+        // and can't find the suggested tile.
         if (_consecutiveFailedDiscards >= 5 && _pendingAction != null && _pendingAction.StartsWith("discard:"))
         {
-            Log($"Stuck-discard detected ({_consecutiveFailedDiscards} fails), pausing auto-discard until next phase change");
+            Log($"Stuck-discard detected ({_consecutiveFailedDiscards} fails for '{_pendingAction}'), falling back to tsumogiri");
             _pendingAction = null;
             _lastActionSignature = "";
-            // Don't reset counter — it resets on phase change via ClearPending
-            return false;
+            _consecutiveFailedDiscards = 0;
+            AddonClickHelper.TryDiscardDrawnTile(addon);
+            return true;
         }
 
         // If call accept/skip keeps failing (5+ attempts with no phase change), stop.
@@ -300,6 +333,8 @@ public sealed class AutoPlayManager
         }
 
         var action = _pendingAction;
+        if (action == null)
+            return false;
 
         _pendingAction = null;
         // Clear the signature so the same action can be re-scheduled if the
@@ -319,7 +354,13 @@ public sealed class AutoPlayManager
             var postAtk0 = addon->AtkValues != null && addon->AtkValuesCount > 0
                 ? addon->AtkValues[0].Int : -1;
 
-            if (result && preAtk0 == postAtk0)
+            if (!result)
+            {
+                // Tile not found in hand (stale icon data / reader mismatch)
+                _consecutiveFailedDiscards++;
+                Log($"Discard tile not found in hand, consecutive={_consecutiveFailedDiscards}");
+            }
+            else if (preAtk0 == postAtk0)
             {
                 _consecutiveFailedDiscards++;
                 Log($"Discard may have failed (AtkVal[0] unchanged at {preAtk0}), consecutive={_consecutiveFailedDiscards}");
@@ -336,6 +377,7 @@ public sealed class AutoPlayManager
             _consecutiveFailedDiscards = 0;
             _consecutiveCallAttempts++;
             _lastCallIntentWasAccept = true;
+            _acceptExecutedAtUtc = DateTime.UtcNow;
             Log($"Executing call:accept (attempt {_consecutiveCallAttempts})");
             return ExecuteCallResponse(addon, 0);
         }
@@ -355,6 +397,12 @@ public sealed class AutoPlayManager
         {
             _consecutiveFailedDiscards = 0;
             return AddonClickHelper.TrySelectCallChoice(addon, _preChiSuggestionTiles, _iconMap, _iconCapture);
+        }
+        else if (action == "riichi-tsumogiri")
+        {
+            _consecutiveFailedDiscards = 0;
+            Log($"Executing riichi-tsumogiri (post-riichi discard fallback)");
+            return AddonClickHelper.TryDiscardDrawnTile(addon);
         }
 
         return false;
@@ -389,6 +437,23 @@ public sealed class AutoPlayManager
             _riichiDiscardTile = null;
         }
 
+        // Post-riichi discard: if no tile is known, fall back to tsumogiri.
+        // After accepting Riichi the in-game suggestion clears, and the riichi
+        // suggestion often doesn't include a specific tile name.
+        if (string.IsNullOrEmpty(bestTile) && _lastCallIntentWasAccept)
+        {
+            Log($"[RIICHI-DIAG] Post-riichi discard with no tile suggestion — scheduling tsumogiri");
+            var tsumSig = "riichi-tsumogiri";
+            if (tsumSig == _lastActionSignature)
+                return;
+            _lastActionSignature = tsumSig;
+            _pendingAction = tsumSig;
+            _actionScheduledAtUtc = DateTime.UtcNow;
+            var tsumDelay = _rng.Next(_config.AutoDiscardDelayMinMs, _config.AutoDiscardDelayMaxMs + 1);
+            _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(tsumDelay);
+            return;
+        }
+
         if (string.IsNullOrEmpty(bestTile))
             return;
 
@@ -403,6 +468,48 @@ public sealed class AutoPlayManager
         _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(delayMs);
 
         Log($"Scheduled: {sig} provider={_activeProvider.GetType().Name} (execute at +{delayMs}ms)");
+    }
+
+    /// <summary>
+    /// Schedules a discard for the post-riichi-accept tile selection sub-state.
+    /// After clicking Riichi, the game stays at atk0=6 but expects a tile click.
+    /// Uses the saved riichi discard tile, provider suggestion, or tsumogiri as fallback.
+    /// </summary>
+    private void TryScheduleRiichiDiscard()
+    {
+        if (_pendingAction != null)
+            return;
+
+        // Try saved riichi discard tile first
+        string? tile = _riichiDiscardTile;
+        if (tile != null)
+        {
+            _riichiDiscardTile = null;
+            Log($"[RIICHI-DIAG] Using saved riichi discard tile: {tile}");
+        }
+
+        // Try provider suggestion
+        if (tile == null)
+            tile = _activeProvider.GetDiscardTile();
+
+        if (!string.IsNullOrEmpty(tile))
+        {
+            var sig = $"discard:{tile}";
+            _lastActionSignature = sig;
+            _pendingAction = sig;
+            _actionScheduledAtUtc = DateTime.UtcNow;
+            var delayMs = _rng.Next(_config.AutoDiscardDelayMinMs, _config.AutoDiscardDelayMaxMs + 1);
+            _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(delayMs);
+            Log($"[RIICHI-DIAG] Scheduled post-riichi discard: {sig} (execute at +{delayMs}ms)");
+            return;
+        }
+
+        // Last resort: tsumogiri (discard the drawn tile)
+        Log($"[RIICHI-DIAG] No specific tile known — scheduling tsumogiri for riichi discard");
+        _lastActionSignature = "riichi-tsumogiri";
+        _pendingAction = "riichi-tsumogiri";
+        _actionScheduledAtUtc = DateTime.UtcNow;
+        _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(500);
     }
 
     private void TryScheduleCallResponse()

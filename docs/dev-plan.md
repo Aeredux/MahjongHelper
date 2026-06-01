@@ -7,7 +7,7 @@ A Dalamud plugin for FFXIV's Doman Mahjong (Gold Saucer) that reads in-game stat
 ## Build / Deploy Note
 
 - For in-game testing and deployment, always update the Release x64 build output.
-- Target artifact: `SamplePlugin/bin/x64/Release/SamplePlugin.dll`
+- Target artifact: `MahjongHelper/bin/x64/Release/MahjongHelper.dll`
 - Do not assume the Debug build output is the correct DLL for user testing.
 
 ## Architecture
@@ -149,8 +149,8 @@ Tile format: uppercase strings — `M1`–`M9`, `P1`–`P9`, `S1`–`S9`, `EAST`
 
 **Goal:** Optionally automate tile discards and call decisions.
 
-- [ ] **5.1** Implement tile click automation — simulate clicking the suggested discard tile node in the EmjL addon.
-- [ ] **5.2** Implement call decision automation — click accept/decline on chi/pon/kan/ron prompts based on server evaluation.
+- [x] **5.1** Implement tile click automation — simulate clicking the suggested discard tile node in the EmjL addon.
+- [x] **5.2** Implement call decision automation — click accept/decline on chi/pon/kan/ron prompts based on server evaluation.
 - [x] **5.3** Add configurable delay before auto-actions (to look natural and allow user override).
 - [x] **5.4** Add a master toggle for auto-play (off by default), separate toggles for auto-discard and auto-call.
 - [x] **5.5** Add a "pause" keybind that temporarily disables auto-play for the current turn.
@@ -159,9 +159,9 @@ Tile format: uppercase strings — `M1`–`M9`, `P1`–`P9`, `S1`–`S9`, `EAST`
 
 **Goal:** Clean up, rename, and make the plugin user-friendly.
 
-- [ ] **6.1** Rename the plugin from "Sample Plugin" to "Mahjong Helper" — update `SamplePlugin.json`, namespaces, project name, and solution file.
+- [x] **6.1** Rename the plugin from "Sample Plugin" to "Mahjong Helper" — update `SamplePlugin.json`, namespaces, project name, and solution file.
 - [ ] **6.2** Configuration window: server URL (default `localhost:8080`), auto-play toggles, overlay position/size, compact mode, delay settings.
-- [ ] **6.3** Persist user settings via `Configuration.cs`.
+- [x] **6.3** Persist user settings via `Configuration.cs`.
 - [ ] **6.4** Clean up unused sample code (goat image, random config bools, sample territory/job display).
 - [ ] **6.5** Add a proper plugin icon and description for the Dalamud plugin list.
 - [ ] **6.6** Separate debug/node-exploration code from functional code — move dump utilities (`TileDataDumper`, `StateComparisonLogger`, raw node scanning), debug UI buttons, and discovery helpers into a `Debug/` subfolder or namespace. Keep `Plugin.cs`, `MainWindow.cs`, and the `Mahjong/` folder focused on production functionality.
@@ -220,9 +220,9 @@ enum TileType
 ## Open Questions
 
 1. ~~**Tile-back detection**~~ — Face-down tiles use different node types/no icon. Player hand nodes 54–71 (type 1055, 42x55) hold the active hand; empty slots have no icon and pos=(0,0).
-2. **Call prompt structure** — What does the EmjL addon look like when prompting for chi/pon/kan? Need to identify the relevant nodes.
+2. ~~**Call prompt structure**~~ — **Resolved.** Call prompt buttons are captured from the component tree and mapped to call actions via `CallButtonNodes` + list click handling.
 3. ~~**Red fives**~~ — **Resolved.** Red fives use icon IDs 76075 (M0), 76076 (P0), 76077 (S0). The server tile format uses `M0`/`P0`/`S0` notation.
 4. **Multiple rounds** — How does the addon transition between rounds? Need to detect round boundaries to reset state.
-5. **Click simulation method** — Need to determine whether Dalamud provides a click/callback API for addon nodes, or if raw input simulation is needed.
+5. ~~**Click simulation method**~~ — **Resolved.** Auto actions use EmjL callbacks (`FireCallback`) and addon event/list-click dispatch paths; raw OS input simulation is not required for core flows.
 6. **Discard pool layout** — Need to identify which node types/indices hold each player's discard pool, and how to distinguish the 4 player positions (self, shimocha, toimen, kamicha).
 7. ~~**Dora indicators**~~ — **Resolved.** Dora indicator tiles are nodeIds 28-32, type=1006, size 50×60 in the EmjL ULD NodeList. Up to 5 slots exist (1 base + 4 kan dora). Only slots with valid mahjong tile icons (76041-76077) are revealed. Read during the main node scan and classified as `SlotKind.DoraIndicator`.

@@ -588,10 +588,10 @@ public sealed partial class Plugin
                 {
                     var v = addon->AtkValues[i];
                     var typeStr = v.Type.ToString();
-                    if (v.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int ||
-                        v.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.UInt)
+                    if (v.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int ||
+                        v.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.UInt)
                         sb.AppendLine($"  [{i}] {typeStr} = {v.Int}");
-                    else if (v.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String)
+                    else if (v.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.String)
                     {
                         var str = v.String.ToString() ?? "(null)";
                         sb.AppendLine($"  [{i}] {typeStr} = \"{str}\"");
@@ -733,3 +733,4 @@ public sealed partial class Plugin
         }
     }
 }
+

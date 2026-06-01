@@ -451,8 +451,8 @@ public static unsafe class EmjUiReader
                 try
                 {
                     var val = addon->AtkValues[i];
-                    if (val.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int ||
-                        val.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.UInt)
+                    if (val.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int ||
+                        val.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.UInt)
                         rawAtkInts.Add(val.Int);
                     else
                         rawAtkInts.Add(0);
@@ -924,8 +924,8 @@ public static unsafe class EmjUiReader
                 try
                 {
                     var v2 = addon->AtkValues[2];
-                    if (v2.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int ||
-                        v2.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.UInt)
+                    if (v2.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int ||
+                        v2.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.UInt)
                         sugTileIcon = v2.Int;
                 }
                 catch { }
@@ -940,8 +940,8 @@ public static unsafe class EmjUiReader
                 try
                 {
                     var val = addon->AtkValues[idx];
-                    if (val.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String ||
-                        val.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String8)
+                    if (val.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.String ||
+                        val.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.String8)
                     {
                         strings[idx] = $"{val.String}";
                     }
@@ -956,8 +956,8 @@ public static unsafe class EmjUiReader
                 try
                 {
                     var val = addon->AtkValues[idx];
-                    if (val.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String ||
-                        val.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String8)
+                    if (val.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.String ||
+                        val.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.String8)
                     {
                         suggestionLabels[idx] = $"{val.String}";
                     }
@@ -1120,8 +1120,8 @@ public static unsafe class EmjUiReader
             if (valCount <= 6) return new InGameSuggestion(SuggestionType.None, "");
 
             var val = addon->AtkValues[6];
-            if (val.Type != FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String &&
-                val.Type != FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String8)
+            if (val.Type != FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.String &&
+                val.Type != FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.String8)
                 return new InGameSuggestion(SuggestionType.None, "");
 
             var raw = $"{val.String}".Trim();
@@ -1627,3 +1627,4 @@ public static unsafe class EmjUiReader
         }
     }
 }
+

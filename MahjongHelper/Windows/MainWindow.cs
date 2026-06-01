@@ -183,26 +183,34 @@ public class MainWindow : Window, IDisposable
                     else
                         resetIconIdInput = "";
                 }
+                #pragma warning disable CS8601
+                string? mappingReportText = mappingReport;
                 ImGui.InputTextMultiline(
                     "##mappingProgress",
-                    ref mappingReport,
+                    ref mappingReportText,
                     200_000,
                     new System.Numerics.Vector2(-1, 400),
                     ImGuiInputTextFlags.ReadOnly
                 );
+                #pragma warning restore CS8601
+                mappingReport = mappingReportText ?? string.Empty;
                 ImGui.EndTabItem();
             }
 
             if (ImGui.BeginTabItem("UI State"))
             {
                 ImGui.Text("Mahjong UI State (slot-based scaffold)");
+                #pragma warning disable CS8601
+                string? uiStateText = text3;
                 ImGui.InputTextMultiline(
                     "##mahjongUiState",
-                    ref text3,
+                    ref uiStateText,
                     400_000,
                     new System.Numerics.Vector2(-1, 400),
                     ImGuiInputTextFlags.ReadOnly
                 );
+                #pragma warning restore CS8601
+                text3 = uiStateText ?? string.Empty;
                 ImGui.EndTabItem();
             }
 
@@ -248,13 +256,17 @@ public class MainWindow : Window, IDisposable
             if (ImGui.BeginTabItem("Raw Dump"))
             {
                 ImGui.Text("Raw Dump");
+                #pragma warning disable CS8601
+                string? dumpText = text;
                 ImGui.InputTextMultiline(
                     "##mahjongDump",
-                    ref text,
+                    ref dumpText,
                     2_000_000,
                     new System.Numerics.Vector2(-1, 400),
                     ImGuiInputTextFlags.ReadOnly
                 );
+                #pragma warning restore CS8601
+                text = dumpText ?? string.Empty;
                 ImGui.EndTabItem();
             }
 

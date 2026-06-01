@@ -634,8 +634,8 @@ public static unsafe class TileDataDumper
                 {
                     var val = addon->AtkValues[i];
                     // Highlight non-zero ints that look like game state (small values = wind/round/phase)
-                    if (val.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int ||
-                        val.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.UInt)
+                    if (val.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int ||
+                        val.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.UInt)
                     {
                         var v = val.Int;
                         // Small ints (0-20) could be wind, round, phase, riichi state
@@ -646,8 +646,8 @@ public static unsafe class TileDataDumper
                             sb.AppendLine($"  [{i,3}] type={val.Type,-14} int={v} <<< SCORE?");
                     }
                     // Highlight non-empty strings (tile names, wind names, status labels)
-                    else if (val.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String ||
-                             val.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String8)
+                    else if (val.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.String ||
+                             val.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.String8)
                     {
                         try
                         {
@@ -657,7 +657,7 @@ public static unsafe class TileDataDumper
                         }
                         catch { }
                     }
-                    else if (val.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Bool)
+                    else if (val.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Bool)
                     {
                         sb.AppendLine($"  [{i,3}] type={val.Type,-14} bool={val.Int != 0} <<< BOOL (toggle?)");
                     }
@@ -1056,17 +1056,17 @@ public static unsafe class TileDataDumper
 
                     switch (vType)
                     {
-                        case FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int:
+                        case FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int:
                             sb.Append($" int={val.Int}");
                             break;
-                        case FFXIVClientStructs.FFXIV.Component.GUI.ValueType.UInt:
+                        case FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.UInt:
                             sb.Append($" uint={val.UInt}");
                             break;
-                        case FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Bool:
+                        case FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Bool:
                             sb.Append($" bool={val.Int != 0}");
                             break;
-                        case FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String:
-                        case FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String8:
+                        case FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.String:
+                        case FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.String8:
                             try
                             {
                                 sb.Append($" str=\"{val.String}\"");
@@ -1076,7 +1076,7 @@ public static unsafe class TileDataDumper
                                 sb.Append($" str=(read failed)");
                             }
                             break;
-                        case FFXIVClientStructs.FFXIV.Component.GUI.ValueType.ManagedString:
+                        case FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.ManagedString:
                             sb.Append($" managed_raw={val.Int}");
                             break;
                         default:
@@ -1252,8 +1252,8 @@ public static unsafe class TileDataDumper
                 try
                 {
                     var v1 = addon->AtkValues[1];
-                    if (v1.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String ||
-                        v1.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String8)
+                    if (v1.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.String ||
+                        v1.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.String8)
                         hoveredName = $"{v1.String}";
                 }
                 catch { }
@@ -1261,8 +1261,8 @@ public static unsafe class TileDataDumper
                 try
                 {
                     var v2 = addon->AtkValues[2];
-                    if (v2.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int ||
-                        v2.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.UInt)
+                    if (v2.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int ||
+                        v2.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.UInt)
                         hoveredIconId = v2.Int;
                 }
                 catch { }
@@ -1296,9 +1296,9 @@ public static unsafe class TileDataDumper
                         if (v.Int >= 76000 && v.Int <= 76200) marker = " <<< ICON RANGE";
                         else if (v.Int >= 1 && v.Int <= 200) marker = " <<< SMALL INT";
                         string strContent = "";
-                        if (v.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String8 ||
-                            v.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String ||
-                            v.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.ManagedString)
+                        if (v.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.String8 ||
+                            v.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.String ||
+                            v.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.ManagedString)
                         {
                             try
                             {
@@ -1873,3 +1873,4 @@ public static unsafe class TileDataDumper
         }
     }
 }
+

@@ -63,10 +63,10 @@ public sealed unsafe class MahjongIconMap
             var nameValue = addon->AtkValues[1];
             var iconValue = addon->AtkValues[2];
 
-            if (nameValue.Type != FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String && nameValue.Type != FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String8)
+            if (nameValue.Type != FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.String && nameValue.Type != FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.String8)
                 return;
 
-            if (iconValue.Type != FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int && iconValue.Type != FFXIVClientStructs.FFXIV.Component.GUI.ValueType.UInt)
+            if (iconValue.Type != FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int && iconValue.Type != FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.UInt)
                 return;
 
             var tileCode = TryParseTileCode($"{nameValue.String}");
@@ -331,3 +331,4 @@ public sealed unsafe class MahjongIconMap
         return null;
     }
 }
+
