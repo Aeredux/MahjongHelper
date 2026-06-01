@@ -3,6 +3,7 @@
 Mahjong Helper is a Dalamud plugin for FFXIV Doman Mahjong (EmjL).
 
 It reads live Mahjong UI state, shows recommendations, can query a local Mahjong solver server, and can optionally execute discard/call actions automatically with configurable delays.
+Can be used with https://github.com/Aeredux/MahjongSolver
 
 ## What It Currently Does
 
