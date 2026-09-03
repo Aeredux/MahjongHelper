@@ -138,6 +138,30 @@ public static unsafe class MahjongHandReader
             : new MahjongHandSnapshot(handTiles, drawnTile);
     }
 
+    /// <summary>
+    /// ULD indices that occupy FireCallback 7 closed-hand slots (0-12).
+    /// Node 54 is a real closed tile — the draw is type 1022, not this slot.
+    /// Nodes 55-58 are stale-icon placeholders and must not consume callback positions.
+    /// Nodes 59-71 are the remaining closed-hand slots.
+    /// </summary>
+    public static bool IsCallback7ClosedHandNode(int nodeIndex)
+        => nodeIndex == 54 || nodeIndex is >= 59 and <= 71;
+
+    /// <summary>
+    /// Closed type-1055 tiles in callback 7 order (left-to-right). Index 0-12 maps
+    /// to FireCallback 7. Does not include the type-1022 draw (that is pos 13).
+    /// Keeps node 54; drops placeholders 55-58 that otherwise push a live tile
+    /// past pos 13 so matching logs the tile and then refuses to click it.
+    /// </summary>
+    public static List<MahjongTileObservation> ClosedTilesForCallback7(MahjongHandSnapshot snapshot)
+    {
+        return snapshot.HandTiles
+            .Where(t => IsCallback7ClosedHandNode(t.NodeIndex))
+            .OrderBy(t => t.X)
+            .ThenBy(t => t.NodeIndex)
+            .ToList();
+    }
+
     public static void ResetCachedSnapshot()
     {
         try

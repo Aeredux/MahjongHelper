@@ -392,11 +392,9 @@ public sealed class AutoPlayManager
                 ? addon->AtkValues[0].Int : -1;
 
             var tileCode = action.Substring(8);
-            int? hintIcon = null;
-            if (_lastSeenDiscardIconId is > 0 &&
-                !string.IsNullOrEmpty(_lastSeenDiscardTile) &&
-                TileCodesMatch(_lastSeenDiscardTile, tileCode))
-                hintIcon = _lastSeenDiscardIconId;
+            // Pass the live hint icon even when the last-seen name string
+            // differs — matching is by icon id and tile code on the closed list.
+            int? hintIcon = _lastSeenDiscardIconId is > 0 ? _lastSeenDiscardIconId : null;
 
             var result = _awaitingRiichiDiscard
                 ? ExecuteDeclaredRiichiDiscard(addon)
@@ -693,10 +691,17 @@ public sealed class AutoPlayManager
 
     private bool TileObservationMatchesDeclared(MahjongHandReader.MahjongTileObservation t)
     {
-        var nameMatch = !string.IsNullOrEmpty(_riichiDiscardTile) && t.TileCode != null &&
-                        TileCodesMatch(t.TileCode, _riichiDiscardTile);
-        var iconMatch = _riichiDiscardIconId is > 0 && t.IconId == (uint)_riichiDiscardIconId.Value;
-        return nameMatch || iconMatch;
+        if (_riichiDiscardIconId is > 0 && t.IconId == (uint)_riichiDiscardIconId.Value)
+            return true;
+        if (!string.IsNullOrEmpty(_riichiDiscardTile))
+        {
+            if (t.TileCode != null && TileCodesMatch(t.TileCode, _riichiDiscardTile))
+                return true;
+            var resolved = _iconMap.Resolve(t.IconId);
+            if (resolved != null && TileCodesMatch(resolved, _riichiDiscardTile))
+                return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -713,7 +718,7 @@ public sealed class AutoPlayManager
         Log($"[RIICHI-DIAG] ExecuteDeclaredRiichiDiscard tile={_riichiDiscardTile ?? "(none)"} icon={_riichiDiscardIconId?.ToString() ?? "(none)"} slot={_riichiDiscardSlot?.ToString() ?? "(none)"} atk=[{string.Join(" ", before.Select((v, i) => $"[{i}]={v}"))}]");
 
         var snapshot = MahjongHandReader.Read(addon, _iconCapture, _iconMap);
-        var closedHand = snapshot.HandTiles.OrderBy(t => t.X).ToList();
+        var closedHand = MahjongHandReader.ClosedTilesForCallback7(snapshot);
         var drawn = snapshot.DrawnTile;
 
         var attempts = new List<(int Pos, int? Node, string Reason)>();
@@ -742,7 +747,7 @@ public sealed class AutoPlayManager
             if (_riichiDiscardSlot == 13 && drawn != null && TileObservationMatchesDeclared(drawn))
                 AddAttempt(13, drawn.NodeIndex, $"suggestion@atk-draw node={drawn.NodeIndex} code={drawn.TileCode}");
 
-            for (var i = 0; i < closedHand.Count; i++)
+            for (var i = 0; i < closedHand.Count && i <= 12; i++)
             {
                 var t = closedHand[i];
                 if (TileObservationMatchesDeclared(t))
@@ -899,29 +904,39 @@ public sealed class AutoPlayManager
 
     /// <summary>
     /// Discard the live hint via FireCallback 7 (same as a working normal turn).
-    /// Matches MahjongHandReader closed-hand type 1055 tiles first, then the true
-    /// drawn type 1022 tile only if it is the hint. Never FireCallback 8.
+    /// Matches icon id and tile code from the same closed-hand list that is logged
+    /// (including node 54). Placeholder nodes 55-58 are not callback-7 slots.
+    /// Drawn type 1022 is pos 13 only if it is the hint. Never FireCallback 8.
     /// Success requires ATK to change.
     /// </summary>
     private unsafe bool ExecuteHintedDiscard(AtkUnitBase* addon, string tileCode, int? hintIconId, bool allowUnhintedDrawn)
     {
         var before = SnapshotAtk(addon);
         var snapshot = MahjongHandReader.Read(addon, _iconCapture, _iconMap);
-        var closedHand = snapshot.HandTiles.OrderBy(t => t.X).ToList();
+        var closedLogged = snapshot.HandTiles.OrderBy(t => t.X).ThenBy(t => t.NodeIndex).ToList();
+        var closedHand = MahjongHandReader.ClosedTilesForCallback7(snapshot);
         var drawn = snapshot.DrawnTile;
 
         bool MatchesHint(MahjongHandReader.MahjongTileObservation t)
         {
-            var nameMatch = !string.IsNullOrEmpty(tileCode) && t.TileCode != null &&
-                            TileCodesMatch(t.TileCode, tileCode);
-            var iconMatch = hintIconId is > 0 && t.IconId == (uint)hintIconId.Value;
-            return nameMatch || iconMatch;
+            if (hintIconId is > 0 && t.IconId == (uint)hintIconId.Value)
+                return true;
+            if (!string.IsNullOrEmpty(tileCode))
+            {
+                if (t.TileCode != null && TileCodesMatch(t.TileCode, tileCode))
+                    return true;
+                var resolved = _iconMap.Resolve(t.IconId);
+                if (resolved != null && TileCodesMatch(resolved, tileCode))
+                    return true;
+            }
+            return false;
         }
 
         var attempts = new List<(int Pos, int Node, string Reason)>();
 
         void AddAttempt(int pos, int node, string reason)
         {
+            // Closed 1055 tiles are callback 7 pos 0-12. Pos 13 is the type-1022 draw.
             if (pos is < 0 or > 13)
                 return;
             if (attempts.Any(a => a.Pos == pos))
@@ -932,11 +947,26 @@ public sealed class AutoPlayManager
         var hasHint = !string.IsNullOrEmpty(tileCode) || hintIconId is > 0;
         if (hasHint)
         {
-            for (var i = 0; i < closedHand.Count; i++)
+            // Match from the same closed=[] dump we log, then map that node onto
+            // callback 7 pos via the filtered 54/59-71 list. Do not skip node 54
+            // (it is a real closed tile; the draw is type 1022). Do not use the
+            // unfiltered X-index — placeholders 55-58 push a live tile past 13
+            // so AddAttempt used to drop GREEN while still logging it.
+            foreach (var t in closedLogged)
             {
-                var t = closedHand[i];
-                if (MatchesHint(t))
-                    AddAttempt(i, t.NodeIndex, $"hint-closed pos={i} node={t.NodeIndex} code={t.TileCode} icon={t.IconId}");
+                if (!MatchesHint(t))
+                    continue;
+                if (!MahjongHandReader.IsCallback7ClosedHandNode(t.NodeIndex))
+                {
+                    Log($"[DISCARD] Hint '{tileCode}' icon={t.IconId} at node={t.NodeIndex} is a placeholder/extra — not a callback 7 slot");
+                    continue;
+                }
+
+                var pos = closedHand.FindIndex(c => c.NodeIndex == t.NodeIndex);
+                if (pos is >= 0 and <= 12)
+                    AddAttempt(pos, t.NodeIndex, $"hint-closed pos={pos} node={t.NodeIndex} code={t.TileCode} icon={t.IconId}");
+                else
+                    Log($"[DISCARD] Hint '{tileCode}' node={t.NodeIndex} icon={t.IconId} is not in callback 7 closed slots 0-12 (eligibleIndex={pos})");
             }
 
             if (drawn != null && MatchesHint(drawn))
@@ -946,13 +976,14 @@ public sealed class AutoPlayManager
         if (attempts.Count == 0 && allowUnhintedDrawn && drawn != null)
             AddAttempt(13, drawn.NodeIndex, $"unhinted-drawn node={drawn.NodeIndex} code={drawn.TileCode} type={drawn.NodeType}");
 
-        var closedDesc = string.Join(",", closedHand.Select(t => $"{t.TileCode ?? "?"}(icon={t.IconId} node={t.NodeIndex})"));
+        var closedDesc = string.Join(",", closedLogged.Select(t => $"{t.TileCode ?? "?"}(icon={t.IconId} node={t.NodeIndex})"));
+        var eligibleDesc = string.Join(",", closedHand.Select((t, i) => $"{i}:{t.TileCode ?? "?"}(icon={t.IconId} node={t.NodeIndex})"));
         var drawnDesc = drawn != null ? $"{drawn.TileCode}(icon={drawn.IconId} node={drawn.NodeIndex} type={drawn.NodeType})" : "none";
-        Log($"[DISCARD] Hint tile={tileCode ?? "(none)"} icon={hintIconId?.ToString() ?? "(none)"} atk0={before.ElementAtOrDefault(0)} closed=[{closedDesc}] draw={drawnDesc} attempts={attempts.Count}");
+        Log($"[DISCARD] Hint tile={tileCode ?? "(none)"} icon={hintIconId?.ToString() ?? "(none)"} atk0={before.ElementAtOrDefault(0)} closed=[{closedDesc}] eligible=[{eligibleDesc}] draw={drawnDesc} attempts={attempts.Count}");
 
         if (attempts.Count == 0)
         {
-            Log($"[DISCARD] No MahjongHandReader match for hint '{tileCode}' — not clicking a latest/drawn tile and not firing callback 8");
+            Log($"[DISCARD] No callback-7 slot for hint '{tileCode}' icon={hintIconId?.ToString() ?? "(none)"} — not clicking a latest/drawn tile and not firing callback 8");
             return false;
         }
 

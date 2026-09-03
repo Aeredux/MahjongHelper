@@ -1,5 +1,15 @@
 # Dev Journey
 
+## 2026-09-03: GREEN at node 54 never reached callback 7
+
+**What:** Live AZPC 03:20 PT / 10:20 UTC, head `8390867`. `WaitingForDiscard` `atk0=30` `sug=Discard tile=GREEN icon=76073`. Overlay dump listed `GREEN(icon=76073 node=54)` in closed hand; draw was M1 node 104 type 1022. Matcher logged `No MahjongHandReader match` / `attempts=0`, rescheduled +1500ms, and stuck-discard never fired callback 7.
+
+**Why:** `MahjongHandReader` collects every visible type-1055 42×55 node, including stale placeholders 55–58. Matching used that unfiltered X-index as FireCallback 7 pos and dropped `pos > 13`, so GREEN at 54 could be logged and still never qualify. Node 54 is a real closed slot (draw is type 1022), not a tsumogiri to skip.
+
+**Fix:** Match icon id and tile code from the same closed=[] list already logged. Map hits onto callback 7 pos 0–12 via nodes 54 + 59–71 only. Keep node 54. Do not ReceiveEvent-click nodes. Do not FireCallback 8. If callback 7 is a no-op, wait and retry callback 7.
+
+**Result:** Needs AZPC reload. Expect `[DISCARD] FireCallback 7` for GREEN with ATK change, not `attempts=0`. `/mj leave` still unsticks.
+
 ## 2026-09-03: Native crash — no ReceiveEvent discard fallback; delay floor 1500ms
 
 **What:** AZPC dump `dalamud_appcrash_20260903_011955_213_26372`: `C0000005` in `Client::UI::AddonEmj.ReceiveEvent`. Managed stack `TryClickTileNode` → `ExecuteHintedDiscard` → `Update` → `OnFrameworkUpdate`. All delays were 500ms. Log: `atk0=15`, FireCallback 7 pos=13 then ReceiveEvent methods 1/2/5 on closed-hand node 59 (WHITE). Game died on method 2.
