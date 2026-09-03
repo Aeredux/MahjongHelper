@@ -1,5 +1,13 @@
 # Dev Journey
 
+## 2026-09-03: Native crash — no ReceiveEvent discard fallback; delay floor 1500ms
+
+**What:** AZPC dump `dalamud_appcrash_20260903_011955_213_26372`: `C0000005` in `Client::UI::AddonEmj.ReceiveEvent`. Managed stack `TryClickTileNode` → `ExecuteHintedDiscard` → `Update` → `OnFrameworkUpdate`. All delays were 500ms. Log: `atk0=15`, FireCallback 7 pos=13 then ReceiveEvent methods 1/2/5 on closed-hand node 59 (WHITE). Game died on method 2.
+
+**Verified:** atk0=15 is opponent/incoming-call, not discard-ready (2/6/30). ReceiveEvent on a 1055 tile in that state native-crashes. Removed autoplay `TryClickTileNode`. One FireCallback 7 per tick; retry later if ATK unchanged. Delay min/max floor 1500ms in config + settings UI.
+
+**Result:** Needs AZPC reload. autoplay.log should not contain CLICK-TEST/ReceiveEvent on hand tiles; atk0=15 should log “Not discard-ready” and wait.
+
 ## 2026-09-03: Play the in-game hint; `/mj snap` (KAN-11)
 
 **What:** Live AZPC `794ab82` still discarded “latest” after 5 failed hint clicks by FireCallback 8 labeled tsumogiri. At atk0=6 that callback is skip, not a discard (ATK unchanged). Hint discards now use MahjongHandReader closed-hand/hint nodes and FireCallback 7 until ATK changes; stuck-discard retries the hint instead of tsumogiri. `/mj snap` (KAN-11) writes overlay/suggestion sidecar JSON under `%APPDATA%/MahjongHelper/captures/`, watches `request_snap`, and `scripts/mj-snap.ps1` POSTs Telesto at `http://localhost:45678/` (Host localhost). Last 10 capture files kept; PNGs are not committed.

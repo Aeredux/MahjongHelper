@@ -55,7 +55,7 @@ The settings window is a native FFXIV addon (plugin installer config button, or 
 - auto-play enable/disable
 - auto-discard toggle
 - auto-call toggle
-- min/max delay controls for discard and call actions
+- min/max delay controls for discard and call actions (floor 1500ms; 500ms is rejected)
 
 ## Prerequisites
 

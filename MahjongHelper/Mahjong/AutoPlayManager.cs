@@ -60,6 +60,7 @@ public sealed class AutoPlayManager
         _config = config;
         _iconMap = iconMap;
         _activeProvider = _inGameProvider; // default to in-game suggestions
+        _config.ClampAutoPlayDelays();
     }
 
     /// <summary>Toggle pause state for the current turn.</summary>
@@ -224,7 +225,7 @@ public sealed class AutoPlayManager
             _pendingAction = "call:pass";
             _lastActionSignature = "call:pass";
             _actionScheduledAtUtc = DateTime.UtcNow;
-            _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(500);
+            _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(_config.NextCallDelayMs(_rng));
         }
 
         // After accepting Riichi, atk0 stays 6 so InferGamePhase never leaves
@@ -263,7 +264,7 @@ public sealed class AutoPlayManager
                 _pendingAction = $"discard:{_lastSeenDiscardTile}";
                 _lastActionSignature = "";
                 _actionScheduledAtUtc = DateTime.UtcNow;
-                _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(500);
+                _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(_config.NextDiscardDelayMs(_rng));
             }
             else if (_lastActionSignature != "no-hint-8s")
             {
@@ -342,6 +343,19 @@ public sealed class AutoPlayManager
             _pendingAction = null;
             _lastActionSignature = "";
             return false;
+        }
+
+        // AZPC crash: FireCallback 7 + ReceiveEvent spray at atk0=15 native-crashed
+        // AddonEmj.ReceiveEvent. Only click when ATK is discard-ready (2/6/30).
+        if (IsDiscardAction(_pendingAction))
+        {
+            var atk0 = ReadAtkInt(addon, 0);
+            if (!EmjUiReader.IsDiscardReadyAtk(atk0))
+            {
+                Log($"[DISCARD] Not discard-ready atk0={atk0} (need 2/6/30) — waiting, not clicking a hand tile");
+                _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(_config.NextDiscardDelayMs(_rng));
+                return false;
+            }
         }
 
         // Live AZPC: 5 failed hint clicks then FireCallback 8 (labeled tsumogiri)
@@ -552,7 +566,7 @@ public sealed class AutoPlayManager
             _lastActionSignature = tsumSig;
             _pendingAction = tsumSig;
             _actionScheduledAtUtc = DateTime.UtcNow;
-            var tsumDelay = _rng.Next(_config.AutoDiscardDelayMinMs, _config.AutoDiscardDelayMaxMs + 1);
+            var tsumDelay = _config.NextDiscardDelayMs(_rng);
             _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(tsumDelay);
             return;
         }
@@ -567,7 +581,7 @@ public sealed class AutoPlayManager
         _lastActionSignature = sig;
         _pendingAction = sig;
         _actionScheduledAtUtc = DateTime.UtcNow;
-        var delayMs = _rng.Next(_config.AutoDiscardDelayMinMs, _config.AutoDiscardDelayMaxMs + 1);
+        var delayMs = _config.NextDiscardDelayMs(_rng);
         _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(delayMs);
 
         Log($"Scheduled: {sig} provider={_activeProvider.GetType().Name} (execute at +{delayMs}ms)");
@@ -587,7 +601,7 @@ public sealed class AutoPlayManager
         _lastActionSignature = "riichi-discard";
         _pendingAction = "riichi-discard";
         _actionScheduledAtUtc = DateTime.UtcNow;
-        _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(200);
+        _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(_config.NextDiscardDelayMs(_rng));
     }
 
     private static bool IsDiscardAction(string? action)
@@ -758,39 +772,17 @@ public sealed class AutoPlayManager
             return false;
         }
 
-        foreach (var attempt in attempts)
+        var attempt = attempts[0];
+        Log($"[RIICHI-DIAG] Discard via callback 7 handPos={attempt.Pos} reason={attempt.Reason} (one attempt this tick, not skip/callback 8, not ReceiveEvent)");
+        AddonClickHelper.TryDiscardTile(addon, attempt.Pos);
+        var after7 = SnapshotAtk(addon);
+        if (AtkChanged(before, after7))
         {
-            Log($"[RIICHI-DIAG] Discard via callback 7 handPos={attempt.Pos} reason={attempt.Reason} (not skip/callback 8)");
-            AddonClickHelper.TryDiscardTile(addon, attempt.Pos);
-            var after7 = SnapshotAtk(addon);
-            if (AtkChanged(before, after7))
-            {
-                Log($"[RIICHI-DIAG] Callback 7 pos={attempt.Pos} changed ATK atk0 {before.ElementAtOrDefault(0)}->{after7.ElementAtOrDefault(0)} slot {before.ElementAtOrDefault(18)}->{after7.ElementAtOrDefault(18)}");
-                return true;
-            }
-
-            Log($"[RIICHI-DIAG] Callback 7 pos={attempt.Pos} did not change ATK");
+            Log($"[RIICHI-DIAG] Callback 7 pos={attempt.Pos} changed ATK atk0 {before.ElementAtOrDefault(0)}->{after7.ElementAtOrDefault(0)} slot {before.ElementAtOrDefault(18)}->{after7.ElementAtOrDefault(18)}");
+            return true;
         }
 
-        // Last resort: click the true drawn tile node (type 1022 / node 101 in the
-        // live dump). Do not ReceiveEvent a closed-hand 1055 node — that was the
-        // node-54 hang (ATK unchanged, phase stuck).
-        if (drawn != null)
-        {
-            Log($"[RIICHI-DIAG] All callback 7 positions failed — clicking DrawnTile node {drawn.NodeIndex} type={drawn.NodeType}");
-            foreach (var method in new[] { 1, 2, 5 })
-            {
-                AddonClickHelper.TryClickTileNode(addon, drawn.NodeIndex, execute: true, method);
-                var afterNode = SnapshotAtk(addon);
-                if (AtkChanged(before, afterNode))
-                {
-                    Log($"[RIICHI-DIAG] DrawnTile node {drawn.NodeIndex} method={method} changed ATK");
-                    return true;
-                }
-            }
-        }
-
-        Log($"[RIICHI-DIAG] Post-riichi discard did not change ATK (still atk0={ReadAtkInt(addon, 0)} atk1={ReadAtkInt(addon, 1)} atk18={ReadAtkInt(addon, 18)})");
+        Log($"[RIICHI-DIAG] Post-riichi callback 7 pos={attempt.Pos} did not change ATK (still atk0={ReadAtkInt(addon, 0)}) — will retry callback 7 later, not ReceiveEvent");
         return false;
     }
 
@@ -850,7 +842,7 @@ public sealed class AutoPlayManager
         _lastActionSignature = action;
         _pendingAction = action;
         _actionScheduledAtUtc = DateTime.UtcNow;
-        var callDelayMs = _rng.Next(_config.AutoCallDelayMinMs, _config.AutoCallDelayMaxMs + 1);
+        var callDelayMs = _config.NextCallDelayMs(_rng);
         _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(callDelayMs);
 
         Log($"Scheduled: {action} provider={_activeProvider.GetType().Name} (execute at +{callDelayMs}ms)");
@@ -898,7 +890,7 @@ public sealed class AutoPlayManager
         _lastActionSignature = sig;
         _pendingAction = sig;
         _actionScheduledAtUtc = DateTime.UtcNow;
-        var delayMs = _rng.Next(_config.AutoCallDelayMinMs, _config.AutoCallDelayMaxMs + 1);
+        var delayMs = _config.NextCallDelayMs(_rng);
         _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(delayMs);
         _chiChoiceAttempts++;
 
@@ -964,31 +956,17 @@ public sealed class AutoPlayManager
             return false;
         }
 
-        foreach (var attempt in attempts)
+        var attempt = attempts[0];
+        Log($"[DISCARD] FireCallback 7 handPos={attempt.Pos} reason={attempt.Reason} (one attempt this tick, not ReceiveEvent)");
+        AddonClickHelper.TryDiscardTile(addon, attempt.Pos);
+        var after7 = SnapshotAtk(addon);
+        if (AtkChanged(before, after7))
         {
-            Log($"[DISCARD] FireCallback 7 handPos={attempt.Pos} reason={attempt.Reason}");
-            AddonClickHelper.TryDiscardTile(addon, attempt.Pos);
-            var after7 = SnapshotAtk(addon);
-            if (AtkChanged(before, after7))
-            {
-                Log($"[DISCARD] Callback 7 pos={attempt.Pos} changed ATK atk0 {before.ElementAtOrDefault(0)}->{after7.ElementAtOrDefault(0)}");
-                return true;
-            }
-
-            Log($"[DISCARD] Callback 7 pos={attempt.Pos} did not change ATK — clicking hint node {attempt.Node}");
-            foreach (var method in new[] { 1, 2, 5 })
-            {
-                AddonClickHelper.TryClickTileNode(addon, attempt.Node, execute: true, method);
-                var afterNode = SnapshotAtk(addon);
-                if (AtkChanged(before, afterNode))
-                {
-                    Log($"[DISCARD] Hint node {attempt.Node} method={method} changed ATK");
-                    return true;
-                }
-            }
+            Log($"[DISCARD] Callback 7 pos={attempt.Pos} changed ATK atk0 {before.ElementAtOrDefault(0)}->{after7.ElementAtOrDefault(0)}");
+            return true;
         }
 
-        Log($"[DISCARD] Hint '{tileCode}' did not change ATK (still atk0={ReadAtkInt(addon, 0)}) — will retry hint, not tsumogiri");
+        Log($"[DISCARD] Hint '{tileCode}' callback 7 pos={attempt.Pos} did not change ATK (still atk0={ReadAtkInt(addon, 0)}) — will retry callback 7 later, not ReceiveEvent");
         return false;
     }
 

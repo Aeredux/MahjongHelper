@@ -121,12 +121,15 @@ public class ConfigWindow : NativeAddon
 
         autoPlayDetails.AddNode(autoDiscardCheckbox);
         autoPlayDetails.AddNode(autoCallCheckbox);
+        configuration.ClampAutoPlayDelays();
+        configuration.Save();
+
         autoPlayDetails.AddNode(new CategoryTextNode { String = "Timing" });
         autoPlayDetails.AddNode(NativeUi.Separator(width));
-        autoPlayDetails.AddNode(SetString(NativeUi.Text(width, 20f), "Discard Delay (ms)"));
+        autoPlayDetails.AddNode(SetString(NativeUi.Text(width, 20f), "Discard Delay (ms, min 1500)"));
         autoPlayDetails.AddNode(BuildDelayRow(
-            configuration.AutoDiscardDelayMinMs,
-            configuration.AutoDiscardDelayMaxMs,
+            Configuration.ClampDelayMs(configuration.AutoDiscardDelayMinMs),
+            Configuration.ClampDelayMs(configuration.AutoDiscardDelayMaxMs),
             out discardMinInput,
             out discardMaxInput,
             (min, max) =>
@@ -135,10 +138,10 @@ public class ConfigWindow : NativeAddon
                 configuration.AutoDiscardDelayMaxMs = max;
                 configuration.Save();
             }));
-        autoPlayDetails.AddNode(SetString(NativeUi.Text(width, 20f), "Call Decision Delay (ms)"));
+        autoPlayDetails.AddNode(SetString(NativeUi.Text(width, 20f), "Call Decision Delay (ms, min 1500)"));
         autoPlayDetails.AddNode(BuildDelayRow(
-            configuration.AutoCallDelayMinMs,
-            configuration.AutoCallDelayMaxMs,
+            Configuration.ClampDelayMs(configuration.AutoCallDelayMinMs),
+            Configuration.ClampDelayMs(configuration.AutoCallDelayMaxMs),
             out callMinInput,
             out callMaxInput,
             (min, max) =>
@@ -258,18 +261,18 @@ public class ConfigWindow : NativeAddon
         var min = new NumericInputNode
         {
             Size = new Vector2(110f, 24f),
-            Min = 200,
-            Max = 10000,
+            Min = Configuration.DelayFloorMs,
+            Max = Configuration.DelayCeilMs,
             Step = 50,
-            Value = minValue,
+            Value = Configuration.ClampDelayMs(minValue),
         };
         var max = new NumericInputNode
         {
             Size = new Vector2(110f, 24f),
-            Min = 200,
-            Max = 10000,
+            Min = Configuration.DelayFloorMs,
+            Max = Configuration.DelayCeilMs,
             Step = 50,
-            Value = maxValue,
+            Value = Configuration.ClampDelayMs(maxValue),
         };
 
         min.OnValueUpdate = value =>
