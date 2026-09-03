@@ -30,6 +30,9 @@ public class ConfigWindow : NativeAddon
     private NumericInputNode? callMaxInput;
 
     public Action<int>? OnStrategyProviderChanged;
+    public Action<bool>? OnAutoPlayChanged;
+
+    private bool applyingConfigToUi;
 
     [SetsRequiredMembers]
     public ConfigWindow(Plugin plugin)
@@ -156,11 +159,25 @@ public class ConfigWindow : NativeAddon
         if (!IsOpen || autoPlayCheckbox is null || autoPlayDetails is null)
             return;
 
+        // Re-read config every tick so /mj auto cannot leave a stale checkbox.
+        // CheckboxNode.IsChecked's setter can fire OnClick; ignore that write-back.
         var enabled = configuration.AutoPlayEnabled;
-        if (autoPlayCheckbox.IsChecked == enabled && autoPlayDetails.IsVisible == enabled)
+        if (autoPlayCheckbox.IsChecked != enabled)
+        {
+            applyingConfigToUi = true;
+            try
+            {
+                autoPlayCheckbox.IsChecked = enabled;
+            }
+            finally
+            {
+                applyingConfigToUi = false;
+            }
+        }
+
+        if (autoPlayDetails.IsVisible == enabled)
             return;
 
-        autoPlayCheckbox.IsChecked = enabled;
         autoPlayDetails.IsVisible = enabled;
         RecalculateWindowSize();
     }
@@ -193,8 +210,12 @@ public class ConfigWindow : NativeAddon
 
     private void OnAutoPlayToggled(bool enabled)
     {
+        if (applyingConfigToUi)
+            return;
+
         configuration.AutoPlayEnabled = enabled;
         configuration.Save();
+        OnAutoPlayChanged?.Invoke(enabled);
         if (autoPlayDetails is not null)
             autoPlayDetails.IsVisible = enabled;
         RecalculateWindowSize();

@@ -20,6 +20,12 @@
 
 **Result:** Build still needs a client for Print Screen and live `/mj overlay` during EmjL.
 
+## 2026-09-03: KAN-12 second review — async dispose, settings auto-off, checkbox write-back
+
+**What:** Second-reviewer follow-up on `cursor/kan-12-native-addon-6e0c`. Plugin is `IAsyncDalamudPlugin`. Unload awaits NativeAddon `DisposeAsync` (so ConfigWindow's close animation can finish) then runs `KamiToolKitLibrary.Dispose` on the framework thread, matching VanillaPlus. Settings auto-play off now `ClearPending()` like `/mj auto`. `OnUpdate` still re-reads `AutoPlayEnabled` and ignores `IsChecked`-triggered `OnClick` so `/mj auto` cannot write a stale checkbox bool back into config.
+
+**Result:** Cloud VM still cannot in-game test unload-with-settings-open, `/mj auto` with settings open, or Print Screen.
+
 ## 2026-06-01: README rewritten to match current plugin behavior
 
 **What:** Replaced the template `README.md` content with project-specific documentation for Mahjong Helper's current feature set.

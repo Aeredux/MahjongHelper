@@ -16,11 +16,12 @@ using System;
 using System.Linq;
 using System.Collections.Generic;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace MahjongHelper;
 
-public sealed partial class Plugin : IDalamudPlugin
+public sealed partial class Plugin : IAsyncDalamudPlugin
 {
     private static readonly string CacheDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MahjongHelper");
     private static readonly string MappingReportPath = Path.Combine(CacheDirectory, "mapping_progress_report.txt");
@@ -55,12 +56,12 @@ public sealed partial class Plugin : IDalamudPlugin
     [PluginService]
     private static IFramework Framework { get; set; } = null!;
 
-    public Configuration Configuration { get; init; }
+    public Configuration Configuration { get; private set; } = null!;
 
     public readonly WindowSystem WindowSystem = new("MahjongHelper");
-    private ConfigWindow ConfigWindow { get; init; }
-    private MainWindow MainWindow { get; init; }
-    private SuggestionOverlayWindow OverlayWindow { get; init; }
+    private ConfigWindow ConfigWindow { get; set; } = null!;
+    private MainWindow MainWindow { get; set; } = null!;
+    private SuggestionOverlayWindow OverlayWindow { get; set; } = null!;
     private DateTime _nextDumpAtUtc = DateTime.MinValue;
     private DateTime _nextUiStateCaptureAtUtc = DateTime.MinValue;
     private bool _startupDumpDone = false;
@@ -100,7 +101,7 @@ public sealed partial class Plugin : IDalamudPlugin
     private string _lastActionProbeSignature = string.Empty;
     private DateTime _nextAutoplayHeartbeatUtc = DateTime.MinValue;
 
-    public Plugin()
+    public Task LoadAsync(CancellationToken cancellationToken)
     {
         _iconCapture = new IconIdCapture(GameInterop);
         _iconMap = new MahjongIconMap();
@@ -123,6 +124,11 @@ public sealed partial class Plugin : IDalamudPlugin
 
         ConfigWindow = new ConfigWindow(this);
         ConfigWindow.OnStrategyProviderChanged = ApplyStrategyProvider;
+        ConfigWindow.OnAutoPlayChanged = enabled =>
+        {
+            if (!enabled)
+                _autoPlayManager.ClearPending();
+        };
         MainWindow = new MainWindow(this);
         OverlayWindow = new SuggestionOverlayWindow(Configuration);
 
@@ -154,6 +160,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
         // Always dump startup diagnostics so pipeline state can be inspected offline
         DumpStartupDiagnostics();
+        return Task.CompletedTask;
     }
 
     private void OnFrameworkUpdate(IFramework framework)
@@ -745,26 +752,42 @@ public sealed partial class Plugin : IDalamudPlugin
         return sources.Count == 0 ? "Unknown" : string.Join("+", sources.OrderBy(s => s.ToString()));
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         _iconCapture.Dispose();
         _serverClient.Dispose();
         AddonLifecycle.UnregisterListener(OnMahjongDraw);
         AddonLifecycle.UnregisterListener(OnMahjongFinalize);
         Framework.Update -= OnFrameworkUpdate;
-        // Unregister all actions to not leak anything during disposal of plugin
         PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
         PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
         PluginInterface.UiBuilder.OpenMainUi -= ToggleMainUi;
-        
-        WindowSystem.RemoveAllWindows();
 
-        ConfigWindow.Dispose();
+        WindowSystem.RemoveAllWindows();
         MainWindow.Dispose();
-        OverlayWindow.Dispose();
-        KamiToolKitLibrary.Dispose();
+
+        // NativeAddon.Dispose() Close()s without waiting; unload with settings open would
+        // free nodes mid-close animation (ConfigWindow has no DisableCloseTransition).
+        // Match VanillaPlus: await DisposeAsync, then KamiToolKitLibrary.Dispose on the
+        // framework thread. CloseAsync must not run on the main thread.
+        if (Framework.IsInFrameworkUpdateThread)
+        {
+            await Task.Run(DisposeNativeAddonsAsync).ConfigureAwait(false);
+        }
+        else
+        {
+            await DisposeNativeAddonsAsync().ConfigureAwait(false);
+        }
+
+        await Framework.Run(KamiToolKitLibrary.Dispose);
 
         CommandManager.RemoveHandler(CommandName);
+    }
+
+    private async Task DisposeNativeAddonsAsync()
+    {
+        await OverlayWindow.DisposeAsync();
+        await ConfigWindow.DisposeAsync();
     }
 
     private void ApplyStrategyProvider(int provider)
