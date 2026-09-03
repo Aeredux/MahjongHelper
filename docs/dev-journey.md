@@ -1,5 +1,15 @@
 # Dev Journey
 
+## 2026-09-03: Callback 7 handPos 13 is the 14th closed tile
+
+**What:** Live AZPC 03:51–03:52 PT on `5aa1659` after rebuild+auto-reload. `WaitingForDiscard` `atk0=6` `sug=Discard tile=RED icon=76074`. Eligible listed RED at **index 13** (`node=54`); draw was M1 node 102 type 1022. Matcher logged `eligibleIndex=13` / `not in callback 7 closed slots 0-12` / `attempts=0` and never fired.
+
+**Why:** `TryDiscardTile` already accepts handPos 0–13 (14 tiles). `5aa1659` still required `pos <= 12` after matching, leftover from treating pos 13 as the type-1022 draw. WEST at node 58 was a 55–58 placeholder; dropping it left 14 eligible tiles, so RED at 13 is the 14th closed slot, not an illegal “latest”.
+
+**Fix:** FireCallback 7 for a live hint at eligibleIndex 0–13. Do not treat slot 13 as type-1022. Do not ReceiveEvent. Do not callback 8 at atk0=6/30. If callback 7 is a no-op, wait and retry.
+
+**Result:** Needs AZPC reload. Jade waits ~10s after rebuild for auto-reload. Expect `[DISCARD] FireCallback 7 handPos=13` for RED with ATK change.
+
 ## 2026-09-03: GREEN at node 54 never reached callback 7
 
 **What:** Live AZPC 03:20 PT / 10:20 UTC, head `8390867`. `WaitingForDiscard` `atk0=30` `sug=Discard tile=GREEN icon=76073`. Overlay dump listed `GREEN(icon=76073 node=54)` in closed hand; draw was M1 node 104 type 1022. Matcher logged `No MahjongHandReader match` / `attempts=0`, rescheduled +1500ms, and stuck-discard never fired callback 7.

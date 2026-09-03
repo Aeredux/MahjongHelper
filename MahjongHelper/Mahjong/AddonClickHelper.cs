@@ -66,7 +66,7 @@ public static unsafe class AddonClickHelper
 
     /// <summary>
     /// Discards a tile at the given hand position (0 = leftmost in sorted hand).
-    /// Uses FireCallback(2, [7, handPos], true).
+    /// A discard turn has 14 tiles, so handPos is 0-13. Uses FireCallback(2, [7, handPos], true).
     /// </summary>
     public static bool TryDiscardTile(AtkUnitBase* addon, int handPos)
     {

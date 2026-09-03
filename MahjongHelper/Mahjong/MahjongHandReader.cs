@@ -139,19 +139,19 @@ public static unsafe class MahjongHandReader
     }
 
     /// <summary>
-    /// ULD indices that occupy FireCallback 7 closed-hand slots (0-12).
-    /// Node 54 is a real closed tile — the draw is type 1022, not this slot.
-    /// Nodes 55-58 are stale-icon placeholders and must not consume callback positions.
+    /// ULD indices that occupy FireCallback 7 closed-hand slots (0-13, 14 tiles).
+    /// Node 54 is a real closed tile — the type-1022 node is the draw visual, not pos 13.
+    /// Nodes 55-58 are stale-icon placeholders and must not consume callback positions
+    /// (live AZPC: WEST at 58 dropped → 14 eligible tiles; RED at 54 is handPos 13).
     /// Nodes 59-71 are the remaining closed-hand slots.
     /// </summary>
     public static bool IsCallback7ClosedHandNode(int nodeIndex)
         => nodeIndex == 54 || nodeIndex is >= 59 and <= 71;
 
     /// <summary>
-    /// Closed type-1055 tiles in callback 7 order (left-to-right). Index 0-12 maps
-    /// to FireCallback 7. Does not include the type-1022 draw (that is pos 13).
-    /// Keeps node 54; drops placeholders 55-58 that otherwise push a live tile
-    /// past pos 13 so matching logs the tile and then refuses to click it.
+    /// Closed type-1055 tiles in callback 7 order (left-to-right). Index 0-13 maps
+    /// to FireCallback 7 on a discard turn (14 tiles). The type-1022 draw node is
+    /// not a callback 7 slot. Keeps node 54; drops placeholders 55-58.
     /// </summary>
     public static List<MahjongTileObservation> ClosedTilesForCallback7(MahjongHandSnapshot snapshot)
     {
