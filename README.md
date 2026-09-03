@@ -40,6 +40,7 @@ Main command: `/mj`
 - `/mj compact` toggles compact/full overlay mode.
 - `/mj auto` toggles auto-play.
 - `/mj pause` pauses/resumes pending auto-play actions.
+- `/mj leave` withdraws and closes a stuck NPC mahjong match (FireCallback 16 then 19). Overlay **Leave** asks for confirmation first.
 - `/mj mark discard` records a manual discard marker in diagnostics.
 - `/mj mark call` records a manual call marker in diagnostics.
 

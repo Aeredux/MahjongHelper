@@ -38,6 +38,12 @@
 
 **Result:** Plugin installer metadata shows aeredux.
 
+## 2026-09-03: Overlay cog, server-status gate, riichi discard, leave match
+
+**What:** In-game follow-up on `cursor/kan-12-native-addon-6e0c`. Overlay gained a settings cog (opens ConfigWindow) and a confirmed Leave control (`/mj leave` fires FireCallback 16 then 19). Server health / Disconnected is shown only when StrategyProvider is Server. After auto-play accepts Riichi, the next click is the saved riichi tile (callback 7 / tile node) while phase is still `RiichiDecisionPrompt`; callback 8 is not used because it skips the call prompt. Chi/pon/skip paths unchanged.
+
+**Result:** Cloud VM cannot in-game test cog, Leave, or post-riichi discard. Author remains aeredux.
+
 ## 2026-06-01: README rewritten to match current plugin behavior
 
 **What:** Replaced the template `README.md` content with project-specific documentation for Mahjong Helper's current feature set.

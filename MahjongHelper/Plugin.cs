@@ -131,12 +131,14 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
         };
         MainWindow = new MainWindow(this);
         OverlayWindow = new SuggestionOverlayWindow(Configuration);
+        OverlayWindow.OnOpenSettings = ToggleConfigUi;
+        OverlayWindow.OnLeaveMatch = LeaveStuckMatch;
 
         WindowSystem.AddWindow(MainWindow);
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "/mj — toggle debug window | /mj overlay | /mj compact | /mj auto | /mj pause | /mj mark discard|call | /mj probecallback <a> <b> [run] | /mj clicktile <nodeIndex> [run]"
+            HelpMessage = "/mj — toggle debug window | /mj overlay | /mj compact | /mj auto | /mj pause | /mj leave | /mj mark discard|call | /mj probecallback <a> <b> [run] | /mj clicktile <nodeIndex> [run]"
         });
 
         // Tell the UI system that we want our windows to be drawn through the window system
@@ -205,7 +207,9 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
                 : "Off";
         }
 
-        OverlayWindow.ServerStatus = _serverClient.GetStatusText();
+        OverlayWindow.ServerStatus = Configuration.StrategyProvider == 1
+            ? _serverClient.GetStatusText()
+            : null;
         if (_lastMergedState != null)
         {
             OverlayWindow.HandDescription = _lastMergedState.HandDescription.Value;
@@ -829,6 +833,10 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
         {
             _autoPlayManager.TogglePause();
         }
+        else if (lower == "leave" || lower == "close")
+        {
+            LeaveStuckMatch();
+        }
         else if (lower == "mark discard")
         {
             AnnotateComparisonEvent("manual_discard", "User manually discarded a tile");
@@ -1151,4 +1159,20 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
 
     public void ToggleConfigUi() => ConfigWindow.Toggle();
     public void ToggleMainUi() => MainWindow.Toggle();
+
+    private void LeaveStuckMatch()
+    {
+        if (_lastAddonAddress == 0)
+        {
+            Log.Information("Leave match: EmjL is not open");
+            return;
+        }
+
+        unsafe
+        {
+            var addon = (AtkUnitBase*)_lastAddonAddress;
+            var ok = AddonClickHelper.TryLeaveMatch(addon);
+            Log.Information($"Leave match: withdraw(16)+close(19) result={ok}");
+        }
+    }
 }

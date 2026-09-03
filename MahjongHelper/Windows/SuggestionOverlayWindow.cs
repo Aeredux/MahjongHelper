@@ -3,6 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using KamiToolKit.BaseTypes;
+using KamiToolKit.Enums;
 using KamiToolKit.Nodes;
 using MahjongHelper.Mahjong;
 
@@ -40,6 +41,12 @@ public class SuggestionOverlayWindow : NativeAddon
     private TextNode? emptyText;
     private TextNode? callText;
     private TextNode? autoPlayText;
+    private HorizontalListNode? toolbarRow;
+    private CircleButtonNode? settingsButton;
+    private TextButtonNode? leaveButton;
+    private HorizontalListNode? leaveConfirmRow;
+    private TextNode? leaveConfirmText;
+    private bool leaveConfirmVisible;
     private bool renderedCompact = true;
     private int lastLayoutSignature = int.MinValue;
 
@@ -52,6 +59,8 @@ public class SuggestionOverlayWindow : NativeAddon
     public bool AutoPlayEnabled { get; set; }
     public bool AutoPlayPaused { get; set; }
     public string? PendingAutoAction { get; set; }
+    public Action? OnOpenSettings { get; set; }
+    public Action? OnLeaveMatch { get; set; }
 
     [SetsRequiredMembers]
     public SuggestionOverlayWindow(Configuration configuration)
@@ -172,6 +181,55 @@ public class SuggestionOverlayWindow : NativeAddon
         callText.TextColor = NativeUi.Gold;
         autoPlayText = NativeUi.Text(width, 22f, 12);
 
+        toolbarRow = new HorizontalListNode
+        {
+            Width = width,
+            Height = 28f,
+            ItemSpacing = 8f,
+            FitHeight = true,
+        };
+        settingsButton = new CircleButtonNode
+        {
+            Size = new Vector2(24f, 24f),
+            Icon = CircleButtonIcon.GearCog,
+            TextTooltip = "Settings",
+            OnClick = () => OnOpenSettings?.Invoke(),
+        };
+        leaveButton = new TextButtonNode
+        {
+            Size = new Vector2(88f, 24f),
+            String = "Leave",
+            OnClick = ShowLeaveConfirm,
+        };
+        toolbarRow.AddNode(settingsButton);
+        toolbarRow.AddNode(leaveButton);
+
+        leaveConfirmRow = new HorizontalListNode
+        {
+            Width = width,
+            Height = 28f,
+            ItemSpacing = 8f,
+            FitHeight = true,
+            IsVisible = false,
+        };
+        leaveConfirmText = NativeUi.Text(160f, 22f, 12);
+        leaveConfirmText.String = "Leave this match?";
+        var leaveYes = new TextButtonNode
+        {
+            Size = new Vector2(56f, 24f),
+            String = "Yes",
+            OnClick = ConfirmLeaveMatch,
+        };
+        var leaveNo = new TextButtonNode
+        {
+            Size = new Vector2(56f, 24f),
+            String = "No",
+            OnClick = CancelLeaveConfirm,
+        };
+        leaveConfirmRow.AddNode(leaveConfirmText);
+        leaveConfirmRow.AddNode(leaveYes);
+        leaveConfirmRow.AddNode(leaveNo);
+
         root.AddNode(compactRow);
         root.AddNode(fullHeaderRow);
         root.AddNode(separator);
@@ -182,6 +240,8 @@ public class SuggestionOverlayWindow : NativeAddon
         root.AddNode(emptyText);
         root.AddNode(callText);
         root.AddNode(autoPlayText);
+        root.AddNode(toolbarRow);
+        root.AddNode(leaveConfirmRow);
         root.AttachNode(this);
 
         renderedCompact = configuration.OverlayCompactMode;
@@ -229,6 +289,11 @@ public class SuggestionOverlayWindow : NativeAddon
         emptyText = null;
         callText = null;
         autoPlayText = null;
+        toolbarRow = null;
+        settingsButton = null;
+        leaveButton = null;
+        leaveConfirmRow = null;
+        leaveConfirmText = null;
         lastLayoutSignature = int.MinValue;
         base.OnFinalize(addon);
     }
@@ -240,6 +305,25 @@ public class SuggestionOverlayWindow : NativeAddon
         RefreshDisplay(forceLayout: true);
     }
 
+    private void ShowLeaveConfirm()
+    {
+        leaveConfirmVisible = true;
+        RefreshDisplay(forceLayout: true);
+    }
+
+    private void CancelLeaveConfirm()
+    {
+        leaveConfirmVisible = false;
+        RefreshDisplay(forceLayout: true);
+    }
+
+    private void ConfirmLeaveMatch()
+    {
+        leaveConfirmVisible = false;
+        RefreshDisplay(forceLayout: true);
+        OnLeaveMatch?.Invoke();
+    }
+
     private void RefreshDisplay(bool forceLayout)
     {
         if (root is null || compactRow is null || fullHeaderRow is null ||
@@ -247,7 +331,8 @@ public class SuggestionOverlayWindow : NativeAddon
             compactUkeire is null || compactStatus is null || shantenLabel is null ||
             shantenValue is null || serverStatusText is null || separator is null ||
             columnHeader is null || suggestionRows is null || moreText is null ||
-            emptyText is null || callText is null || autoPlayText is null)
+            emptyText is null || callText is null || autoPlayText is null ||
+            toolbarRow is null || leaveButton is null || leaveConfirmRow is null)
             return;
 
         if (!forceLayout && !IsOpen)
@@ -352,7 +437,12 @@ public class SuggestionOverlayWindow : NativeAddon
             autoPlayText.IsVisible = false;
         }
 
-        var layoutSignature = HashCode.Combine(compact, visibleRows, moreText.IsVisible, emptyText.IsVisible, callVisible, autoPlayVisible);
+        toolbarRow.IsVisible = !leaveConfirmVisible;
+        leaveButton.IsVisible = !leaveConfirmVisible;
+        leaveConfirmRow.IsVisible = leaveConfirmVisible;
+
+        var showServerStatus = !compact && configuration.StrategyProvider == 1;
+        var layoutSignature = HashCode.Combine(compact, visibleRows, moreText.IsVisible, emptyText.IsVisible, callVisible, autoPlayVisible, leaveConfirmVisible, showServerStatus);
         if (!forceLayout && compact == renderedCompact && layoutSignature == lastLayoutSignature)
             return;
 
@@ -411,9 +501,18 @@ public class SuggestionOverlayWindow : NativeAddon
 
         shantenValue.String = suggestion?.Shanten?.ToString() ?? "?";
         shantenValue.TextColor = suggestion?.Shanten == null ? NativeUi.Gray : NativeUi.ShantenColor(suggestion.Shanten);
-        var status = ServerStatus ?? "?";
-        serverStatusText.String = $"[{status}]";
-        serverStatusText.TextColor = status.StartsWith("Connected", StringComparison.Ordinal) ? NativeUi.Green : NativeUi.Red;
+        if (configuration.StrategyProvider == 1)
+        {
+            var status = ServerStatus ?? "?";
+            serverStatusText.IsVisible = true;
+            serverStatusText.String = $"[{status}]";
+            serverStatusText.TextColor = status.StartsWith("Connected", StringComparison.Ordinal) ? NativeUi.Green : NativeUi.Red;
+        }
+        else
+        {
+            serverStatusText.IsVisible = false;
+            serverStatusText.String = string.Empty;
+        }
     }
 
     private void FitWindowToContent()

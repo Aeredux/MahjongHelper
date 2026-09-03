@@ -25,6 +25,8 @@ public static unsafe class AddonClickHelper
     private const int CallbackIdDiscardDrawn = 8;
     // Callback 8 also works as skip/pass on call prompts
     private const int CallbackIdSkipCall = 8;
+    private const int CallbackIdWithdraw = 16;
+    private const int CallbackIdCloseGame = 19;
 
     // P/Invoke for PostMessage mouse click (works tabbed out, no cursor movement)
     [DllImport("user32.dll")] private static extern bool PostMessage(nint hWnd, uint Msg, nint wParam, nint lParam);
@@ -142,6 +144,51 @@ public static unsafe class AddonClickHelper
         catch (Exception ex)
         {
             Log($"ERROR skipping call: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Withdraw from the current match. FireCallback(2, [16, 0], true).
+    /// </summary>
+    public static bool TryWithdrawFromMatch(AtkUnitBase* addon)
+        => TryFireSimpleCallback(addon, CallbackIdWithdraw, "withdraw-match");
+
+    /// <summary>
+    /// Close the mahjong game window. FireCallback(2, [19, 0], true).
+    /// </summary>
+    public static bool TryCloseMahjongGame(AtkUnitBase* addon)
+        => TryFireSimpleCallback(addon, CallbackIdCloseGame, "close-game");
+
+    /// <summary>
+    /// Unstick an NPC match: withdraw (16) then close (19). Documented IDs only.
+    /// </summary>
+    public static bool TryLeaveMatch(AtkUnitBase* addon)
+    {
+        var withdrawn = TryWithdrawFromMatch(addon);
+        var closed = TryCloseMahjongGame(addon);
+        Log($"[LEAVE] withdraw={withdrawn} close={closed}");
+        return withdrawn || closed;
+    }
+
+    private static bool TryFireSimpleCallback(AtkUnitBase* addon, int callbackId, string label)
+    {
+        if (addon == null) return false;
+
+        try
+        {
+            LogAtkSnapshot(addon, $"pre-{label}");
+            var values = stackalloc AtkValue[2];
+            values[0] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = callbackId };
+            values[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = 0 };
+            addon->FireCallback(2, values, true);
+            Log($"[LEAVE] Fired callback {callbackId} ({label})");
+            LogAtkSnapshot(addon, $"post-{label}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log($"ERROR {label}: {ex.Message}");
             return false;
         }
     }
