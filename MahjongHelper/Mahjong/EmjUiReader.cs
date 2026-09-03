@@ -1150,12 +1150,23 @@ public static unsafe class EmjUiReader
 
                 if (sugNode != null)
                 {
-                    // Inside node 45, find the visible tile component (child id=2)
+                    // Child id=2 is the recommended tile. Read it even if the node
+                    // reports invisible — Riichi prompts often leave tile=(none) otherwise.
                     var tileNode = FindDirectChildById(sugNode, 2);
-                    if (tileNode != null && tileNode->IsVisible())
+                    if (tileNode != null)
                     {
                         uint iconId = 0;
                         if (TryFindIcon(tileNode, iconCapture, out iconId) && iconId > 0)
+                        {
+                            tileIconId = (int)iconId;
+                            tileName = iconMap?.Resolve(iconId);
+                        }
+                    }
+
+                    if (tileIconId is null or 0)
+                    {
+                        uint iconId = 0;
+                        if (TryFindIcon(sugNode, iconCapture, out iconId) && iconId > 0)
                         {
                             tileIconId = (int)iconId;
                             tileName = iconMap?.Resolve(iconId);
