@@ -1203,6 +1203,9 @@ public static unsafe class EmjUiReader
         catch { return new InGameSuggestion(SuggestionType.None, ""); }
     }
 
+    public static CallOptions ScanAvailableCalls(AtkUnitBase* addon, out Dictionary<CallOptions, nint> buttonNodes)
+        => ReadCallPrompts(addon, out buttonNodes);
+
     private static CallOptions ReadCallPrompts(AtkUnitBase* addon, out Dictionary<CallOptions, nint> buttonNodes)
     {
         var calls = CallOptions.None;

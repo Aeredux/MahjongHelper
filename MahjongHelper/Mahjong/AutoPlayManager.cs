@@ -45,7 +45,8 @@ public sealed class AutoPlayManager
     private int? _riichiDiscardSlot; // post-accept ATK [18]/[1] hand position
     private string? _lastSeenDiscardTile;
     private int? _lastSeenDiscardIconId;
-    private bool _awaitingRiichiDiscard; // accepted Riichi; game still at atk0=6 waiting for a tile click
+    private bool _awaitingRiichiDiscard; // declared Riichi stuck; waiting to discard the saved tile
+    private bool _riichiDeclarePending; // Riichi ListItemClick dispatched; waiting to see if it stuck
 
     private static readonly string LogDir = System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MahjongHelper");
@@ -150,17 +151,25 @@ public sealed class AutoPlayManager
         {
             Log($"Phase transition: {prevPhase} -> {gamePhase}");
             _consecutiveFailedDiscards = 0; // Reset stuck counter on any phase change
-            _consecutiveCallAttempts = 0; // Reset call attempt counter on phase change
             _scoreAdvanceAttempts = 0; // Reset score screen advance attempts
             _chiChoiceAttempts = 0; // Reset chi choice attempts
 
-            // Clear pending actions from the old phase so stale discards/calls
-            // don't execute in the wrong phase (e.g. discard firing during riichi prompt).
-            if (_pendingAction != null)
+            // After a Riichi click we must observe the new phase+calls before
+            // dropping pending work. A move to OpponentTurn can be a successful
+            // declare (discard already landed) rather than a stale action.
+            var holdRiichiPending = _riichiDeclarePending && prevPhase == "RiichiDecisionPrompt";
+            if (!holdRiichiPending)
+                _consecutiveCallAttempts = 0;
+
+            if (_pendingAction != null && !holdRiichiPending)
             {
                 Log($"Clearing stale pending action '{_pendingAction}' due to phase change");
                 _pendingAction = null;
                 _lastActionSignature = "";
+            }
+            else if (_pendingAction != null && holdRiichiPending)
+            {
+                Log($"[RIICHI-DIAG] Phase {prevPhase} -> {gamePhase} after Riichi click — not treating pending '{_pendingAction}' as stale yet. callsHaveRiichi={CallsIncludeRiichi()}");
             }
         }
 
@@ -175,17 +184,12 @@ public sealed class AutoPlayManager
             Log($"[RIICHI-DIAG] Entered RiichiDecisionPrompt from {prevPhase}");
         if (prevPhase == "RiichiDecisionPrompt" && gamePhase != "RiichiDecisionPrompt")
         {
-            Log($"[RIICHI-DIAG] Left RiichiDecisionPrompt to {gamePhase} awaitingDiscard={_awaitingRiichiDiscard} savedTile={_riichiDiscardTile ?? "(none)"} slot={_riichiDiscardSlot?.ToString() ?? "(none)"}");
-            _awaitingRiichiDiscard = false;
-            // Clear the saved Riichi tile if we didn't transition to discard
-            // (e.g. Riichi was declined / timed out → opponent turn).
-            if (gamePhase != "WaitingForDiscard")
+            Log($"[RIICHI-DIAG] Left RiichiDecisionPrompt to {gamePhase} declarePending={_riichiDeclarePending} awaitingDiscard={_awaitingRiichiDiscard} callsHaveRiichi={CallsIncludeRiichi()} savedTile={_riichiDiscardTile ?? "(none)"} slot={_riichiDiscardSlot?.ToString() ?? "(none)"}");
+            if (!_riichiDeclarePending && !_awaitingRiichiDiscard && gamePhase != "WaitingForDiscard")
             {
                 if (_riichiDiscardTile != null)
-                    Log($"[RIICHI-DIAG] Clearing stale riichi discard tile '{_riichiDiscardTile}' (left Riichi to {gamePhase})");
-                _riichiDiscardTile = null;
-                _riichiDiscardIconId = null;
-                _riichiDiscardSlot = null;
+                    Log($"[RIICHI-DIAG] Clearing unused riichi discard tile '{_riichiDiscardTile}' (left Riichi to {gamePhase} without a pending declare)");
+                ClearRiichiDeclareState(keepPendingAction: true);
             }
         }
 
@@ -218,6 +222,7 @@ public sealed class AutoPlayManager
         if (isCallPhase && _pendingAction == null &&
             _activeProvider.GetCallAction() == null &&
             !_lastCallIntentWasAccept &&
+            !_riichiDeclarePending &&
             _config.AutoPlayEnabled && _config.AutoCallEnabled && !_paused &&
             DateTime.UtcNow > _callPhaseEnteredUtc.AddSeconds(3))
         {
@@ -228,14 +233,16 @@ public sealed class AutoPlayManager
             _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(_config.NextCallDelayMs(_rng));
         }
 
-        // After accepting Riichi, atk0 stays 6 so InferGamePhase never leaves
-        // RiichiDecisionPrompt. The game is waiting for a tile click, not another
-        // call-button click. Schedule that discard immediately (do not wait 5s,
-        // and do not clear _lastCallIntentWasAccept — that re-schedules call:accept).
-        if (gamePhase == "RiichiDecisionPrompt" && _awaitingRiichiDiscard &&
-            _pendingAction == null && _config.AutoPlayEnabled && !_paused)
+        // After clicking Riichi: do not discard in the prompt. Retry the Riichi
+        // button until the prompt is gone AND calls no longer include Riichi.
+        UpdateRiichiDeclareState(gamePhase);
+
+        // After a stuck declare, discard the saved tile only when the prompt is
+        // gone, calls no longer include Riichi, and it is a discard turn.
+        if (gamePhase == "WaitingForDiscard" && _awaitingRiichiDiscard && !_riichiDeclarePending &&
+            !CallsIncludeRiichi() && _pendingAction == null && _config.AutoPlayEnabled && !_paused)
         {
-            Log($"[RIICHI-DIAG] Post-riichi-accept: scheduling tile click while still RiichiDecisionPrompt savedTile={_riichiDiscardTile ?? "(none)"}");
+            Log($"[RIICHI-DIAG] Declaration stuck — scheduling saved-tile discard tile={_riichiDiscardTile ?? "(none)"} icon={_riichiDiscardIconId?.ToString() ?? "(none)"} slot={_riichiDiscardSlot?.ToString() ?? "(none)"}");
             TryScheduleRiichiDiscard();
         }
 
@@ -247,7 +254,7 @@ public sealed class AutoPlayManager
         // TryScheduleDiscard has its own signature dedup so it's safe to call every frame.
         // This is needed because after Update() clears _lastActionSignature,
         // we must re-attempt scheduling even if the phase didn't transition.
-        if (gamePhase == "WaitingForDiscard")
+        if (gamePhase == "WaitingForDiscard" && !_riichiDeclarePending)
         {
             TryScheduleDiscard();
         }
@@ -255,6 +262,7 @@ public sealed class AutoPlayManager
         // Safety net: if WaitingForDiscard with no pending action for >8 seconds,
         // retry the last live hint. Do not FireCallback 8 (skip while atk0=6).
         if (gamePhase == "WaitingForDiscard" && _pendingAction == null &&
+            !_riichiDeclarePending && !_awaitingRiichiDiscard &&
             _config.AutoPlayEnabled && _config.AutoDiscardEnabled && !_paused &&
             DateTime.UtcNow > _discardPhaseEnteredUtc.AddSeconds(8))
         {
@@ -318,12 +326,12 @@ public sealed class AutoPlayManager
 
         // Phase safety: verify the pending action matches the current phase.
         // This prevents a stale discard from firing during a call prompt (or vice versa).
-        // Exception: after Riichi accept the phase stays RiichiDecisionPrompt (atk0=6)
-        // until the riichi tile is clicked — that discard is intentional.
+        // Exception: never discard while a Riichi click is still settling, and never
+        // while the Riichi button is still up (declaration did not stick).
         var phase = _lastGamePhase ?? "";
         if (IsDiscardAction(_pendingAction) && !IsDiscardAllowedInPhase(phase))
         {
-            Log($"Dropping stale discard action '{_pendingAction}' — current phase is {phase} awaitingRiichi={_awaitingRiichiDiscard}");
+            Log($"Dropping stale discard action '{_pendingAction}' — current phase is {phase} declarePending={_riichiDeclarePending} awaitingRiichi={_awaitingRiichiDiscard} callsHaveRiichi={CallsIncludeRiichi()}");
             _pendingAction = null;
             _lastActionSignature = "";
             return false;
@@ -444,23 +452,16 @@ public sealed class AutoPlayManager
             var accepted = ExecuteCallResponse(addon, 0);
             if (accepted && _lastGamePhase == "RiichiDecisionPrompt")
             {
-                _awaitingRiichiDiscard = true;
+                _riichiDeclarePending = true;
+                _awaitingRiichiDiscard = false;
                 _riichiDiscardSlot = ReadPostRiichiDiscardSlot(addon);
-                Log($"[RIICHI-DIAG] Riichi ListItemClick done — immediately discard declared tile tile={_riichiDiscardTile ?? "(none)"} icon={_riichiDiscardIconId?.ToString() ?? "(none)"} atkSlot={_riichiDiscardSlot?.ToString() ?? "(none)"}");
-                var discarded = ExecuteDeclaredRiichiDiscard(addon);
-                if (discarded)
-                {
-                    _awaitingRiichiDiscard = false;
-                    _riichiDiscardTile = null;
-                    _riichiDiscardIconId = null;
-                    _riichiDiscardSlot = null;
-                    Log("[RIICHI-DIAG] Post-riichi discard ATK changed — leaving RiichiDecisionPrompt expected next tick");
-                }
+                var postCalls = EmjUiReader.ScanAvailableCalls(addon, out _);
+                var callsHaveRiichi = postCalls.HasFlag(EmjUiReader.CallOptions.Riichi);
+                Log($"[RIICHI-DIAG] Riichi ListItemClick done — skipping same-tick FireCallback 7. tile={_riichiDiscardTile ?? "(none)"} icon={_riichiDiscardIconId?.ToString() ?? "(none)"} atkSlot={_riichiDiscardSlot?.ToString() ?? "(none)"} postClickCalls={postCalls} callsHaveRiichi={callsHaveRiichi} atk0={ReadAtkInt(addon, 0)}");
+                if (callsHaveRiichi)
+                    Log("[RIICHI-DIAG] Calls still contain Riichi after click — will retry Riichi button, not discard");
                 else
-                {
-                    Log("[RIICHI-DIAG] Immediate post-riichi discard did not change ATK — will retry, not skip");
-                    TryScheduleRiichiDiscard();
-                }
+                    Log("[RIICHI-DIAG] Calls no longer contain Riichi after click — waiting for prompt to leave before any discard");
             }
             return accepted;
         }
@@ -484,11 +485,19 @@ public sealed class AutoPlayManager
         else if (action == "riichi-discard")
         {
             _consecutiveFailedDiscards = 0;
-            Log($"[RIICHI-DIAG] Retry post-riichi discard tile={_riichiDiscardTile ?? "(none)"} slot={_riichiDiscardSlot?.ToString() ?? "(none)"}");
+            if (_riichiDeclarePending || CallsIncludeRiichi() || _lastGamePhase == "RiichiDecisionPrompt")
+            {
+                Log($"[RIICHI-DIAG] Refusing riichi-discard — declare not stuck yet phase={_lastGamePhase} declarePending={_riichiDeclarePending} callsHaveRiichi={CallsIncludeRiichi()}");
+                _pendingAction = null;
+                _lastActionSignature = "";
+                return false;
+            }
+            Log($"[RIICHI-DIAG] Post-declare discard tile={_riichiDiscardTile ?? "(none)"} icon={_riichiDiscardIconId?.ToString() ?? "(none)"} slot={_riichiDiscardSlot?.ToString() ?? "(none)"}");
             var ok = ExecuteDeclaredRiichiDiscard(addon);
             if (ok)
             {
                 _awaitingRiichiDiscard = false;
+                _riichiDeclarePending = false;
                 _riichiDiscardTile = null;
                 _riichiDiscardIconId = null;
                 _riichiDiscardSlot = null;
@@ -498,7 +507,14 @@ public sealed class AutoPlayManager
         else if (action == "riichi-tsumogiri")
         {
             _consecutiveFailedDiscards = 0;
-            Log($"[RIICHI-DIAG] Executing riichi-tsumogiri fallback awaitingRiichi={_awaitingRiichiDiscard} phase={_lastGamePhase}");
+            Log($"[RIICHI-DIAG] Executing post-declare discard fallback awaitingRiichi={_awaitingRiichiDiscard} declarePending={_riichiDeclarePending} phase={_lastGamePhase} callsHaveRiichi={CallsIncludeRiichi()}");
+            if (_riichiDeclarePending || CallsIncludeRiichi() || _lastGamePhase == "RiichiDecisionPrompt")
+            {
+                Log("[RIICHI-DIAG] Refusing tsumogiri fallback — Riichi prompt/button still up (failed or unsettled declare)");
+                _pendingAction = null;
+                _lastActionSignature = "";
+                return false;
+            }
             if (_awaitingRiichiDiscard)
             {
                 var ok = ExecuteDeclaredRiichiDiscard(addon);
@@ -512,10 +528,8 @@ public sealed class AutoPlayManager
                 return ok;
             }
 
-            // No live hint: discard the drawn tile via its matching closed
-            // callback 7 slot (0-13), never callback 8 (skip while atk0=6).
-            Log("[RIICHI-DIAG] No awaiting-riichi flag — callback 7 on drawn tile's closed slot, not callback 8");
-            return ExecuteHintedDiscard(addon, _lastSeenDiscardTile ?? "", _lastSeenDiscardIconId, allowUnhintedDrawn: true);
+            Log("[RIICHI-DIAG] No awaiting-riichi flag — not assuming we are in riichi, not firing callback 8");
+            return false;
         }
 
         return false;
@@ -528,6 +542,7 @@ public sealed class AutoPlayManager
         _lastActionSignature = "";
         _consecutiveFailedDiscards = 0;
         _awaitingRiichiDiscard = false;
+        _riichiDeclarePending = false;
         _riichiDiscardSlot = null;
     }
 
@@ -536,28 +551,27 @@ public sealed class AutoPlayManager
         if (!_config.AutoPlayEnabled || !_config.AutoDiscardEnabled || _paused)
             return;
 
+        if (_pendingAction != null)
+            return;
+
         if (_lastGamePhase != "WaitingForDiscard")
             return;
 
         var bestTile = _activeProvider.GetDiscardTile();
 
-        // After accepting Riichi, use the tile from the Riichi suggestion.
-        // The provider may return null or a different tile during the post-Riichi
-        // discard phase because AtkValues[6] updates asynchronously.
-        if (_riichiDiscardTile != null)
+        // After a stuck Riichi declare, use the tile captured before the Riichi click.
+        if (_awaitingRiichiDiscard && _riichiDiscardTile != null)
         {
             if (string.IsNullOrEmpty(bestTile) || bestTile != _riichiDiscardTile)
                 Log($"[RIICHI-DIAG] Overriding discard tile: provider={bestTile ?? "(null)"} -> saved riichi tile={_riichiDiscardTile}");
             bestTile = _riichiDiscardTile;
-            // Keep _riichiDiscardTile until the click succeeds so a dropped action can retry.
         }
 
-        // Post-riichi discard: if no tile is known, fall back to tsumogiri.
-        // After accepting Riichi the in-game suggestion clears, and the riichi
-        // suggestion often doesn't include a specific tile name.
-        if (string.IsNullOrEmpty(bestTile) && _lastCallIntentWasAccept)
+        // Post-declare discard: if no tile is known, fall back to the drawn tile via
+        // callback 7 (never callback 8). Only after the Riichi button is gone.
+        if (string.IsNullOrEmpty(bestTile) && _awaitingRiichiDiscard && !CallsIncludeRiichi())
         {
-            Log($"[RIICHI-DIAG] Post-riichi discard with no tile suggestion — scheduling DrawnTile via callback 7 (not callback 8)");
+            Log($"[RIICHI-DIAG] Post-declare discard with no tile suggestion — scheduling saved/drawn via callback 7 (not callback 8)");
             var tsumSig = "riichi-tsumogiri";
             if (tsumSig == _lastActionSignature)
                 return;
@@ -586,9 +600,8 @@ public sealed class AutoPlayManager
     }
 
     /// <summary>
-    /// Schedules a discard for the post-riichi-accept tile selection sub-state.
-    /// After clicking Riichi, the game stays at atk0=6 but expects a tile click.
-    /// Uses the saved riichi discard tile, provider suggestion, or tsumogiri as fallback.
+    /// Schedules a discard after Riichi has actually stuck (prompt gone, no Riichi
+    /// in calls). One FireCallback 7 per tick; never in the same tick as the click.
     /// </summary>
     private void TryScheduleRiichiDiscard()
     {
@@ -606,8 +619,117 @@ public sealed class AutoPlayManager
         => action != null && (action.StartsWith("discard:") || action == "riichi-tsumogiri" || action == "riichi-discard");
 
     private bool IsDiscardAllowedInPhase(string phase)
-        => phase == "WaitingForDiscard" ||
-           (_awaitingRiichiDiscard && phase == "RiichiDecisionPrompt");
+        => phase == "WaitingForDiscard"
+           && !_riichiDeclarePending
+           && !CallsIncludeRiichi();
+
+    private bool CallsIncludeRiichi()
+        => _lastCallButtonNodes != null &&
+           _lastCallButtonNodes.ContainsKey(EmjUiReader.CallOptions.Riichi) &&
+           _lastCallButtonNodes[EmjUiReader.CallOptions.Riichi] != 0;
+
+    private string FormatCallKeys()
+        => _lastCallButtonNodes == null || _lastCallButtonNodes.Count == 0
+            ? "None"
+            : string.Join(",", _lastCallButtonNodes.Keys);
+
+    /// <summary>
+    /// After Riichi ListItemClick: retry the Riichi button until the prompt is gone
+    /// and calls no longer include Riichi. Only then discard the saved tile.
+    /// OpponentTurn with Riichi still in calls is a failed declare — not in riichi.
+    /// OpponentTurn without Riichi in calls is success (ListItemClick already discarded).
+    /// </summary>
+    private void UpdateRiichiDeclareState(string? gamePhase)
+    {
+        if (!_riichiDeclarePending)
+            return;
+
+        var callsHaveRiichi = CallsIncludeRiichi();
+        Log($"[RIICHI-DIAG] Declare pending phase={gamePhase} calls={FormatCallKeys()} callsHaveRiichi={callsHaveRiichi} savedTile={_riichiDiscardTile ?? "(none)"} slot={_riichiDiscardSlot?.ToString() ?? "(none)"} pending={_pendingAction ?? "(none)"}");
+
+        if (callsHaveRiichi || gamePhase == "RiichiDecisionPrompt")
+        {
+            if (gamePhase == "OpponentTurn")
+            {
+                Log("[RIICHI-DIAG] Declaration FAILED — left to OpponentTurn but calls still include Riichi. Not in riichi, not discarding saved tile, not tsumogiri.");
+                FailRiichiDeclare();
+                return;
+            }
+
+            TryScheduleRiichiClickRetry();
+            return;
+        }
+
+        // Prompt gone and Riichi is not in the calls list — declaration stuck.
+        if (gamePhase == "OpponentTurn")
+        {
+            Log("[RIICHI-DIAG] Declaration SUCCESS — prompt gone, calls no longer include Riichi, already OpponentTurn. ListItemClick completed declare+discard; not firing callback 7.");
+            CompleteRiichiDeclareSuccess();
+            return;
+        }
+
+        _riichiDeclarePending = false;
+        _awaitingRiichiDiscard = true;
+        Log($"[RIICHI-DIAG] Declaration stuck — prompt gone, no Riichi in calls, phase={gamePhase}. Will discard saved tile={_riichiDiscardTile ?? "(none)"} slot={_riichiDiscardSlot?.ToString() ?? "(none)"} via callback 7.");
+        if (gamePhase == "WaitingForDiscard" && _pendingAction == null)
+            TryScheduleRiichiDiscard();
+    }
+
+    private void TryScheduleRiichiClickRetry()
+    {
+        if (_pendingAction != null)
+            return;
+        if (!_config.AutoPlayEnabled || !_config.AutoCallEnabled || _paused)
+            return;
+        if (_consecutiveCallAttempts >= 5)
+        {
+            Log($"[RIICHI-DIAG] Stuck retrying Riichi button ({_consecutiveCallAttempts} attempts) — pausing, not discarding");
+            return;
+        }
+
+        _pendingAction = "call:accept";
+        _lastActionSignature = "call:accept-riichi-retry";
+        _actionScheduledAtUtc = DateTime.UtcNow;
+        var delayMs = _config.NextCallDelayMs(_rng);
+        _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(delayMs);
+        Log($"[RIICHI-DIAG] Retrying Riichi button (not discard) execute at +{delayMs}ms attempts={_consecutiveCallAttempts}");
+    }
+
+    private void FailRiichiDeclare()
+    {
+        if (_pendingAction is "riichi-discard" or "riichi-tsumogiri" or "call:accept")
+        {
+            Log($"[RIICHI-DIAG] Clearing pending '{_pendingAction}' after failed declare");
+            _pendingAction = null;
+            _lastActionSignature = "";
+        }
+        ClearRiichiDeclareState(keepPendingAction: true);
+    }
+
+    private void CompleteRiichiDeclareSuccess()
+    {
+        if (_pendingAction is "riichi-discard" or "riichi-tsumogiri" or "call:accept")
+        {
+            Log($"[RIICHI-DIAG] Clearing pending '{_pendingAction}' after successful declare (discard already landed)");
+            _pendingAction = null;
+            _lastActionSignature = "";
+        }
+        ClearRiichiDeclareState(keepPendingAction: true);
+    }
+
+    private void ClearRiichiDeclareState(bool keepPendingAction)
+    {
+        _riichiDeclarePending = false;
+        _awaitingRiichiDiscard = false;
+        _riichiDiscardTile = null;
+        _riichiDiscardIconId = null;
+        _riichiDiscardSlot = null;
+        if (!keepPendingAction)
+        {
+            _pendingAction = null;
+            _lastActionSignature = "";
+        }
+    }
 
     private void CaptureRiichiDeclaredTile(EmjUiReader.InGameSuggestion? suggestion, string? gamePhase, string? prevPhase)
     {
@@ -815,7 +937,7 @@ public sealed class AutoPlayManager
         // After clicking (e.g. Riichi), AtkValues[6] may clear while the phase
         // persists — re-scheduling would either double-click or trigger auto-pass.
         // Just wait for the phase transition.
-        if (_lastCallIntentWasAccept || _awaitingRiichiDiscard)
+        if (_lastCallIntentWasAccept || _awaitingRiichiDiscard || _riichiDeclarePending)
             return;
 
         var decision = _activeProvider.GetCallAction();
@@ -1134,7 +1256,7 @@ public sealed class AutoPlayManager
                     if (kvp.Key != EmjUiReader.CallOptions.Skip && kvp.Value != 0)
                     {
                         Log($"Fallback accept: clicking {kvp.Key} button (ptr={kvp.Value:X}) as proxy for {_lastGamePhase} (label may be stale)");
-                        return AddonClickHelper.TryAcceptCallViaListClick(addon, kvp.Value, _lastGamePhase);
+                        return AddonClickHelper.TryAcceptCallViaListClick(addon, kvp.Value, kvp.Key.ToString());
                     }
                 }
             }

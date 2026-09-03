@@ -1,5 +1,15 @@
 # Dev Journey
 
+## 2026-09-03: Same-tick FireCallback 7 after Riichi ListItemClick passes riichi
+
+**What:** Live AZPC 10:56:08Z. Provider accepted Riichi (savedTile=M7). ListItemClick index=0, then **same tick** FireCallback 7 handPos=8 for M7. ATK unchanged on the discard; 40ms later RiichiDecisionPrompt → OpponentTurn, pending `riichi-discard` cleared as stale. Heartbeat still `calls=Riichi, Skip`. M7 went out as a normal discard; later `discard:WEST` — they were not in riichi. Contrast 11:20:55Z S5: same same-tick callback 7 but it targeted the **wrong** tile (S0 vs S5); ListItemClick itself completed riichi+discard of S5.
+
+**Why:** FireCallback 7 on the declared tile before riichi is armed races the declaration. Hitting the correct tile = pass + normal discard. ListItemClick used hardcoded index=0, not the Riichi label.
+
+**Fix:** After Riichi click, do not FireCallback 7 in the same tick. Retry the Riichi button (resolved by label, never Skip) until the prompt is gone and calls no longer include Riichi. Then discard the saved tile with callback 7 if still needed. OpponentTurn without Riichi in calls is success (discard already landed). OpponentTurn with Riichi still in calls is a failed declare — do not assume riichi, do not tsumogiri. Keep: no ReceiveEvent on tiles, no callback 8 as discard, one callback 7 per tick, atk0 2/6/30, delay floor 1500ms.
+
+**Result:** Needs AZPC reload. Expect `[RIICHI-DIAG] skipping same-tick FireCallback 7` then either SUCCESS (OpponentTurn, no Riichi in calls) or a later callback 7 after the button is gone.
+
 ## 2026-09-03: Callback 7 handPos 13 is the 14th closed tile
 
 **What:** Live AZPC 03:51–03:52 PT on `5aa1659` after rebuild+auto-reload. `WaitingForDiscard` `atk0=6` `sug=Discard tile=RED icon=76074`. Eligible listed RED at **index 13** (`node=54`); draw was M1 node 102 type 1022. Matcher logged `eligibleIndex=13` / `not in callback 7 closed slots 0-12` / `attempts=0` and never fired.

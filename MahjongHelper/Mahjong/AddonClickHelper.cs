@@ -941,12 +941,15 @@ public static unsafe class AddonClickHelper
             return false;
         }
 
-        // Use index 0 for accepting calls. All call button events have param=1 (a
-        // constant, NOT a unique item index). ListItemClick(0) selects the first
-        // call option (Chi/Pon/Kan/Ron/Riichi) which is the correct "accept" target.
-        // NOTE: Skip is NOT a list item — skip must use callback 8, not ListItemClick.
-        int buttonIndex = 0;
-        Log($"[CALL-ACCEPT] {callName}: buttonIndex={buttonIndex} listener={(nint)listItemClickEvt->Listener:X}");
+        // Resolve the list item by label (Riichi/Chi/Pon/...), never hardcoded 0.
+        // Skip/Pass is not a valid accept target — that must stay callback 8.
+        int buttonIndex = ResolveListItemIndexByLabel(parentNode, compNode, callName);
+        if (buttonIndex < 0)
+        {
+            Log($"[CALL-ACCEPT] {callName}: no labeled list item matched — refusing ListItemClick so Skip is never clicked as {callName}");
+            return false;
+        }
+        Log($"[CALL-ACCEPT] {callName}: buttonIndex={buttonIndex} label={callName} listener={(nint)listItemClickEvt->Listener:X}");
 
         // Construct safe event with valid Node field
         var safeEvt = stackalloc AtkEvent[1];
@@ -960,8 +963,160 @@ public static unsafe class AddonClickHelper
         listItemClickEvt->Listener->ReceiveEvent(
             AtkEventType.ListItemClick, buttonIndex, safeEvt, (AtkEventData*)eventData);
         LogAtkSnapshot(addon, $"post-accept-{callName}");
-        Log($"[CALL-ACCEPT] {callName}: dispatched ListItemClick index={buttonIndex}");
+        Log($"[CALL-ACCEPT] {callName}: dispatched ListItemClick index={buttonIndex} label={callName}");
         return true;
+    }
+
+    /// <summary>
+    /// Finds the ListItemClick index of the call option whose visible label matches
+    /// <paramref name="callName"/>, among visible list items sorted left-to-right.
+    /// Returns -1 if the name is Skip/Pass or no matching non-Skip item exists.
+    /// </summary>
+    private static int ResolveListItemIndexByLabel(AtkResNode* parentNode, AtkComponentNode* targetButton, string callName)
+    {
+        if (IsSkipOrPassName(callName))
+        {
+            Log($"[CALL-ACCEPT] {callName}: Skip/Pass is not a list-item accept — use callback 8");
+            return -1;
+        }
+
+        var items = new List<(int Index, string Label, float X, nint Ptr, bool IsSkip)>();
+        if ((int)parentNode->Type >= 1000)
+        {
+            var parentCompNode = (AtkComponentNode*)parentNode;
+            var parentComp = parentCompNode->Component;
+            if (parentComp != null)
+            {
+                var uld = parentComp->UldManager;
+                var found = new List<(string Label, float X, nint Ptr)>();
+                for (int i = 0; i < uld.NodeListCount && i < 64; i++)
+                {
+                    var cn = uld.NodeList[i];
+                    if (cn == null) continue;
+                    if ((int)cn->Type < 1000) continue;
+                    bool vis = false;
+                    try { vis = cn->IsVisible(); } catch { }
+                    if (!vis) continue;
+                    var label = ReadComponentLabel((AtkComponentNode*)cn) ?? "";
+                    found.Add((label, cn->X, (nint)cn));
+                }
+
+                found.Sort((a, b) =>
+                {
+                    var cmp = a.X.CompareTo(b.X);
+                    return cmp != 0 ? cmp : a.Ptr.CompareTo(b.Ptr);
+                });
+
+                for (int i = 0; i < found.Count; i++)
+                {
+                    var isSkip = IsSkipOrPassName(found[i].Label);
+                    items.Add((i, string.IsNullOrEmpty(found[i].Label) ? "(none)" : found[i].Label, found[i].X, found[i].Ptr, isSkip));
+                }
+            }
+        }
+
+        var listed = string.Join(", ", items.Select(i => $"{i.Index}:{i.Label}(x={i.X:F0} skip={i.IsSkip})"));
+        Log($"[CALL-ACCEPT] {callName}: list items [{listed}]");
+
+        for (int i = 0; i < items.Count; i++)
+        {
+            if (items[i].IsSkip)
+                continue;
+            if (LabelMatchesCall(items[i].Label, callName))
+            {
+                Log($"[CALL-ACCEPT] {callName}: resolved index={items[i].Index} label={items[i].Label}");
+                return items[i].Index;
+            }
+        }
+
+        for (int i = 0; i < items.Count; i++)
+        {
+            if (items[i].Ptr != (nint)targetButton || items[i].IsSkip)
+                continue;
+            Log($"[CALL-ACCEPT] {callName}: resolved index={items[i].Index} via target button ptr (label={items[i].Label})");
+            return items[i].Index;
+        }
+
+        Log($"[CALL-ACCEPT] {callName}: no matching non-Skip list item");
+        return -1;
+    }
+
+    private static string? ReadComponentLabel(AtkComponentNode* compNode)
+    {
+        if (compNode == null || compNode->Component == null)
+            return null;
+        return ReadComponentLabelRecursive(compNode->Component, 0, 3);
+    }
+
+    private static string? ReadComponentLabelRecursive(AtkComponentBase* comp, int depth, int maxDepth)
+    {
+        if (comp == null || depth > maxDepth)
+            return null;
+
+        var uld = comp->UldManager;
+        for (int i = 0; i < uld.NodeListCount && i < 64; i++)
+        {
+            var cn = uld.NodeList[i];
+            if (cn == null) continue;
+
+            if (cn->Type == NodeType.Text)
+            {
+                bool vis = false;
+                try { vis = cn->IsVisible(); } catch { }
+                if (!vis) continue;
+                var txt = (AtkTextNode*)cn;
+                string text;
+                try { text = Marshal.PtrToStringUTF8((nint)txt->NodeText.StringPtr.Value) ?? ""; }
+                catch { continue; }
+                var trimmed = text.Trim();
+                if (string.IsNullOrWhiteSpace(trimmed) || trimmed.EndsWith("!"))
+                    continue;
+                return trimmed;
+            }
+
+            if ((int)cn->Type >= 1000)
+            {
+                var sub = (AtkComponentNode*)cn;
+                if (sub->Component != null)
+                {
+                    var nested = ReadComponentLabelRecursive(sub->Component, depth + 1, maxDepth);
+                    if (!string.IsNullOrEmpty(nested))
+                        return nested;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsSkipOrPassName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return false;
+        var lower = name.Trim().ToLowerInvariant();
+        return lower.Contains("skip") || lower.Contains("pass") || lower.Contains("cancel")
+               || lower.Contains("スキップ") || lower.Contains("キャンセル");
+    }
+
+    private static bool LabelMatchesCall(string label, string callName)
+    {
+        if (string.IsNullOrWhiteSpace(label) || string.IsNullOrWhiteSpace(callName))
+            return false;
+        var lower = label.Trim().ToLowerInvariant();
+        var want = callName.Trim().ToLowerInvariant();
+        if (want.Contains("riichi") || want.Contains("reach"))
+            return lower.Contains("riichi") || lower.Contains("リーチ") || lower.Contains("reach");
+        if (want.Contains("chi") && !want.Contains("riichi"))
+            return (lower.Contains("chi") || lower.Contains("チー")) && !lower.Contains("riichi") && !lower.Contains("リーチ");
+        if (want.Contains("pon"))
+            return lower.Contains("pon") || lower.Contains("ポン");
+        if (want.Contains("kan"))
+            return lower.Contains("kan") || lower.Contains("カン");
+        if (want.Contains("ron"))
+            return lower.Contains("ron") || lower.Contains("ロン");
+        if (want.Contains("tsumo"))
+            return lower.Contains("tsumo") || lower.Contains("ツモ");
+        return lower.Contains(want);
     }
 
     /// <summary>
