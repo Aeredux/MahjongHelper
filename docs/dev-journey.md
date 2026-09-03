@@ -32,6 +32,12 @@
 
 **Result:** Build-only verification; still no in-game client.
 
+## 2026-09-03: KAN-12 plugin Author is aeredux
+
+**What:** Set `MahjongHelper.json` Author from `alvin` to `aeredux`. Name, Punchline, and Description were already plugin-specific (not SamplePlugin leftovers).
+
+**Result:** Plugin installer metadata shows aeredux.
+
 ## 2026-06-01: README rewritten to match current plugin behavior
 
 **What:** Replaced the template `README.md` content with project-specific documentation for Mahjong Helper's current feature set.
