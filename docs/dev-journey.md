@@ -26,6 +26,12 @@
 
 **Result:** Cloud VM still cannot in-game test unload-with-settings-open, `/mj auto` with settings open, or Print Screen.
 
+## 2026-09-03: KAN-12 nits — row shanten color and dispose finally
+
+**What:** Full overlay rows now color shanten with `ShantenColor` (same as compact/header). `DisposeAsync` runs `KamiToolKitLibrary.Dispose` in a finally so a NativeAddon teardown throw cannot skip library cleanup.
+
+**Result:** Build-only verification; still no in-game client.
+
 ## 2026-06-01: README rewritten to match current plugin behavior
 
 **What:** Replaced the template `README.md` content with project-specific documentation for Mahjong Helper's current feature set.

@@ -754,32 +754,37 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
 
     public async ValueTask DisposeAsync()
     {
-        _iconCapture.Dispose();
-        _serverClient.Dispose();
-        AddonLifecycle.UnregisterListener(OnMahjongDraw);
-        AddonLifecycle.UnregisterListener(OnMahjongFinalize);
-        Framework.Update -= OnFrameworkUpdate;
-        PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
-        PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
-        PluginInterface.UiBuilder.OpenMainUi -= ToggleMainUi;
-
-        WindowSystem.RemoveAllWindows();
-        MainWindow.Dispose();
-
-        // NativeAddon.Dispose() Close()s without waiting; unload with settings open would
-        // free nodes mid-close animation (ConfigWindow has no DisableCloseTransition).
-        // Match VanillaPlus: await DisposeAsync, then KamiToolKitLibrary.Dispose on the
-        // framework thread. CloseAsync must not run on the main thread.
-        if (Framework.IsInFrameworkUpdateThread)
+        try
         {
-            await Task.Run(DisposeNativeAddonsAsync).ConfigureAwait(false);
-        }
-        else
-        {
-            await DisposeNativeAddonsAsync().ConfigureAwait(false);
-        }
+            _iconCapture.Dispose();
+            _serverClient.Dispose();
+            AddonLifecycle.UnregisterListener(OnMahjongDraw);
+            AddonLifecycle.UnregisterListener(OnMahjongFinalize);
+            Framework.Update -= OnFrameworkUpdate;
+            PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
+            PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
+            PluginInterface.UiBuilder.OpenMainUi -= ToggleMainUi;
 
-        await Framework.Run(KamiToolKitLibrary.Dispose);
+            WindowSystem.RemoveAllWindows();
+            MainWindow.Dispose();
+
+            // NativeAddon.Dispose() Close()s without waiting; unload with settings open would
+            // free nodes mid-close animation (ConfigWindow has no DisableCloseTransition).
+            // Match VanillaPlus: await DisposeAsync, then KamiToolKitLibrary.Dispose on the
+            // framework thread. CloseAsync must not run on the main thread.
+            if (Framework.IsInFrameworkUpdateThread)
+            {
+                await Task.Run(DisposeNativeAddonsAsync).ConfigureAwait(false);
+            }
+            else
+            {
+                await DisposeNativeAddonsAsync().ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            await Framework.Run(KamiToolKitLibrary.Dispose);
+        }
 
         CommandManager.RemoveHandler(CommandName);
     }

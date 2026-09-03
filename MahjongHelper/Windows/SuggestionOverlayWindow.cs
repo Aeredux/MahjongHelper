@@ -489,7 +489,7 @@ public class SuggestionOverlayWindow : NativeAddon
             tile.String = suggestion.Tile;
             tile.TextColor = isTop ? NativeUi.Gold : NativeUi.White;
             shanten.String = suggestion.Shanten?.ToString() ?? "?";
-            shanten.TextColor = NativeUi.Cyan;
+            shanten.TextColor = NativeUi.ShantenColor(suggestion.Shanten);
             ukeire.String = suggestion.Ukeire?.ToString() ?? "-";
             ukeire.TextColor = NativeUi.UkeireColor(suggestion.Ukeire);
             conf.String = suggestion.Confidence.HasValue ? $"{suggestion.Confidence:F1}" : "-";
