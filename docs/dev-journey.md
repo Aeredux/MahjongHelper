@@ -14,6 +14,12 @@
 
 **Result:** Overlay and settings are native addons. Debug dump remains ImGui. Live in-game Print Screen verification was not possible on the cloud VM.
 
+## 2026-09-03: KAN-12 review — Open/Close race and full overlay rows
+
+**What:** Review fixes on `cursor/kan-12-native-addon-6e0c`. Overlay `ApplyVisibility` now Open()s only when `InternalAddon` is null and Close()s only when currently visible, so close-animation ticks cannot skip a later Open. Full overlay is one HorizontalListNode per suggestion (no PadRight), with top-pick gold, per-row reasoning tooltips, and restored shanten/ukeire/server-status colors. Refresh runs in OnDraw and only resizes on layout change. Settings live-sync `/mj auto` in OnUpdate and use ScrollingNode (max height 400). CI checks out submodules recursively.
+
+**Result:** Build still needs a client for Print Screen and live `/mj overlay` during EmjL.
+
 ## 2026-06-01: README rewritten to match current plugin behavior
 
 **What:** Replaced the template `README.md` content with project-specific documentation for Mahjong Helper's current feature set.

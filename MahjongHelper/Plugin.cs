@@ -216,7 +216,7 @@ public sealed partial class Plugin : IDalamudPlugin
         OverlayWindow.AutoPlayPaused = _autoPlayManager.IsPaused;
         OverlayWindow.PendingAutoAction = _autoPlayManager.PendingAction;
 
-        // Native addon Open/Close (not ImGui IsOpen). Data is already on the overlay object.
+        // Edge-triggered NativeAddon Open/Close. Open only if unallocated; Close only if visible.
         OverlayWindow.ApplyVisibility(Configuration.OverlayVisible && _lastReaderStatus == AddonReaderStatus.NoErrors);
 
         if (Configuration.AutoPlayEnabled && _lastAddonAddress != 0)

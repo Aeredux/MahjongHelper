@@ -17,6 +17,22 @@ internal static class NativeUi
     public static readonly Vector4 Cyan = new(0.4f, 0.9f, 1f, 1f);
     public static readonly Vector4 Red = new(1f, 0.4f, 0.4f, 1f);
 
+    public static Vector4 ShantenColor(int? shanten) => shanten switch
+    {
+        0 => Gold,
+        1 => Green,
+        2 => Cyan,
+        _ => White,
+    };
+
+    public static Vector4 UkeireColor(int? ukeire) => ukeire switch
+    {
+        > 80 => Green,
+        > 40 => Cyan,
+        > 0 => White,
+        _ => Gray,
+    };
+
     public static TextNode Text(float width, float height, uint fontSize = 12, bool wrap = false)
     {
         var node = new TextNode

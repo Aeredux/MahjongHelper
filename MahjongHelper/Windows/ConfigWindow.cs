@@ -14,9 +14,11 @@ namespace MahjongHelper.Windows;
 public class ConfigWindow : NativeAddon
 {
     private static readonly string[] ProviderNames = ["In-Game", "Server"];
+    private const float WindowWidth = 400f;
+    private const float MaximumHeight = 400f;
 
     private readonly Configuration configuration;
-    private VerticalListNode? root;
+    private ScrollingNode<VerticalListNode>? scroll;
     private VerticalListNode? autoPlayDetails;
     private StringDropDownNode? providerDropDown;
     private CheckboxNode? autoPlayCheckbox;
@@ -35,7 +37,7 @@ public class ConfigWindow : NativeAddon
         configuration = plugin.Configuration;
         InternalName = "MahjongHelperCfg";
         Title = "Settings";
-        Size = new Vector2(400f, 280f);
+        Size = new Vector2(WindowWidth, 280f);
         RememberClosePosition = true;
     }
 
@@ -45,18 +47,21 @@ public class ConfigWindow : NativeAddon
 
         var width = Math.Max(280f, ContentSize.X);
 
-        root = new VerticalListNode
+        scroll = new ScrollingNode<VerticalListNode>
         {
-            Position = ContentStartPosition,
-            Width = width,
-            ItemSpacing = 6f,
-            FitContents = true,
-            FitWidth = true,
+            ContentNode =
+            {
+                FitContents = true,
+                FitWidth = true,
+                ItemSpacing = 6f,
+            },
+            AutoHideScrollBar = true,
         };
 
-        root.AddNode(new CategoryTextNode { String = "Auto-Play" });
-        root.AddNode(NativeUi.Separator(width));
-        root.AddNode(SetString(NativeUi.Text(width, 20f), "Strategy Provider"));
+        var content = scroll.ContentNode;
+        content.AddNode(new CategoryTextNode { String = "Auto-Play" });
+        content.AddNode(NativeUi.Separator(width));
+        content.AddNode(SetString(NativeUi.Text(width, 20f), "Strategy Provider"));
 
         var providerIndex = Math.Clamp(configuration.StrategyProvider, 0, ProviderNames.Length - 1);
         providerDropDown = new StringDropDownNode
@@ -67,7 +72,7 @@ public class ConfigWindow : NativeAddon
             SelectedOption = ProviderNames[providerIndex],
         };
         providerDropDown.OnOptionSelected = OnProviderSelected;
-        root.AddNode(providerDropDown);
+        content.AddNode(providerDropDown);
 
         autoPlayCheckbox = new CheckboxNode
         {
@@ -76,7 +81,7 @@ public class ConfigWindow : NativeAddon
             IsChecked = configuration.AutoPlayEnabled,
         };
         autoPlayCheckbox.OnClick = OnAutoPlayToggled;
-        root.AddNode(autoPlayCheckbox);
+        content.AddNode(autoPlayCheckbox);
 
         autoPlayDetails = new VerticalListNode
         {
@@ -140,14 +145,29 @@ public class ConfigWindow : NativeAddon
                 configuration.Save();
             }));
 
-        root.AddNode(autoPlayDetails);
-        root.AttachNode(this);
+        content.AddNode(autoPlayDetails);
+        scroll.AttachNode(this);
+        RecalculateWindowSize();
+    }
+
+    protected override unsafe void OnUpdate(AtkUnitBase* addon)
+    {
+        base.OnUpdate(addon);
+        if (!IsOpen || autoPlayCheckbox is null || autoPlayDetails is null)
+            return;
+
+        var enabled = configuration.AutoPlayEnabled;
+        if (autoPlayCheckbox.IsChecked == enabled && autoPlayDetails.IsVisible == enabled)
+            return;
+
+        autoPlayCheckbox.IsChecked = enabled;
+        autoPlayDetails.IsVisible = enabled;
         RecalculateWindowSize();
     }
 
     protected override unsafe void OnFinalize(AtkUnitBase* addon)
     {
-        root = null;
+        scroll = null;
         autoPlayDetails = null;
         providerDropDown = null;
         autoPlayCheckbox = null;
@@ -182,21 +202,22 @@ public class ConfigWindow : NativeAddon
 
     private void RecalculateWindowSize()
     {
-        if (root is null)
+        if (scroll is null)
             return;
 
-        root.Width = Math.Max(280f, ContentSize.X);
-        root.RecalculateLayout();
+        scroll.RecalculateSizes();
 
-        const float maxHeight = 420f;
-        const float width = 400f;
-        var contentHeight = root.Height + ContentStartPosition.Y + 24f;
-        Size = new Vector2(width, Math.Clamp(contentHeight, 200f, maxHeight));
+        if (scroll.ContentNode.Height < MaximumHeight)
+            Size = new Vector2(WindowWidth, scroll.ContentNode.Height + ContentStartPosition.Y + 24f);
+        else
+            Size = new Vector2(WindowWidth, MaximumHeight + ContentStartPosition.Y + 24f);
+
         SetWindowSize(Size);
 
-        root.Size = ContentSize + new Vector2(0f, ContentPadding.Y);
-        root.Position = ContentStartPosition;
-        root.RecalculateLayout();
+        scroll.Size = ContentSize + new Vector2(0f, ContentPadding.Y);
+        scroll.Position = ContentStartPosition - new Vector2(0f, ContentPadding.Y);
+        scroll.RecalculateSizes();
+        scroll.ContentNode.RecalculateLayout();
     }
 
     private static HorizontalListNode BuildDelayRow(
