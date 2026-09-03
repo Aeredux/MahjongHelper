@@ -4,6 +4,7 @@ using Dalamud.Plugin;
 using System.IO;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
+using KamiToolKit;
 using MahjongHelper.Windows;
 using Dalamud.Game.Addon.Lifecycle;
 using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
@@ -15,11 +16,12 @@ using System;
 using System.Linq;
 using System.Collections.Generic;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace MahjongHelper;
 
-public sealed partial class Plugin : IDalamudPlugin
+public sealed partial class Plugin : IAsyncDalamudPlugin
 {
     private static readonly string CacheDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MahjongHelper");
     private static readonly string MappingReportPath = Path.Combine(CacheDirectory, "mapping_progress_report.txt");
@@ -54,12 +56,12 @@ public sealed partial class Plugin : IDalamudPlugin
     [PluginService]
     private static IFramework Framework { get; set; } = null!;
 
-    public Configuration Configuration { get; init; }
+    public Configuration Configuration { get; private set; } = null!;
 
     public readonly WindowSystem WindowSystem = new("MahjongHelper");
-    private ConfigWindow ConfigWindow { get; init; }
-    private MainWindow MainWindow { get; init; }
-    private SuggestionOverlayWindow OverlayWindow { get; init; }
+    private ConfigWindow ConfigWindow { get; set; } = null!;
+    private MainWindow MainWindow { get; set; } = null!;
+    private SuggestionOverlayWindow OverlayWindow { get; set; } = null!;
     private DateTime _nextDumpAtUtc = DateTime.MinValue;
     private DateTime _nextUiStateCaptureAtUtc = DateTime.MinValue;
     private bool _startupDumpDone = false;
@@ -98,8 +100,9 @@ public sealed partial class Plugin : IDalamudPlugin
     private EmjUiReader.UiState? _lastUiState;
     private string _lastActionProbeSignature = string.Empty;
     private DateTime _nextAutoplayHeartbeatUtc = DateTime.MinValue;
+    private bool _snapRequested;
 
-    public Plugin()
+    public Task LoadAsync(CancellationToken cancellationToken)
     {
         _iconCapture = new IconIdCapture(GameInterop);
         _iconMap = new MahjongIconMap();
@@ -118,18 +121,25 @@ public sealed partial class Plugin : IDalamudPlugin
         _autoPlayManager = new AutoPlayManager(Configuration, _iconMap);
         ApplyStrategyProvider(Configuration.StrategyProvider);
 
+        KamiToolKitLibrary.Initialize(PluginInterface, "Mahjong Helper");
+
         ConfigWindow = new ConfigWindow(this);
         ConfigWindow.OnStrategyProviderChanged = ApplyStrategyProvider;
+        ConfigWindow.OnAutoPlayChanged = enabled =>
+        {
+            if (!enabled)
+                _autoPlayManager.ClearPending();
+        };
         MainWindow = new MainWindow(this);
         OverlayWindow = new SuggestionOverlayWindow(Configuration);
+        OverlayWindow.OnOpenSettings = ToggleConfigUi;
+        OverlayWindow.OnLeaveMatch = LeaveStuckMatch;
 
-        WindowSystem.AddWindow(ConfigWindow);
         WindowSystem.AddWindow(MainWindow);
-        WindowSystem.AddWindow(OverlayWindow);
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "/mj — toggle debug window | /mj overlay | /mj compact | /mj auto | /mj pause | /mj mark discard|call | /mj probecallback <a> <b> [run] | /mj clicktile <nodeIndex> [run]"
+            HelpMessage = "/mj — toggle debug window | /mj overlay | /mj compact | /mj auto | /mj pause | /mj leave | /mj snap | /mj mark discard|call | /mj probecallback <a> <b> [run] | /mj clicktile <nodeIndex> [run]"
         });
 
         // Tell the UI system that we want our windows to be drawn through the window system
@@ -153,6 +163,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
         // Always dump startup diagnostics so pipeline state can be inspected offline
         DumpStartupDiagnostics();
+        return Task.CompletedTask;
     }
 
     private void OnFrameworkUpdate(IFramework framework)
@@ -163,6 +174,14 @@ public sealed partial class Plugin : IDalamudPlugin
 
         _readerScheduler.Update(delta);
         _iconCapture.FlushIfNeeded();
+
+        if (SnapCapture.TryConsumeRequest())
+            _snapRequested = true;
+        if (_snapRequested)
+        {
+            _snapRequested = false;
+            WriteSnapCapture("framework");
+        }
 
         var readerStatus = _emjReader.Status;
         if (MainWindow.IsOpen)
@@ -197,9 +216,9 @@ public sealed partial class Plugin : IDalamudPlugin
                 : "Off";
         }
 
-        // Feed overlay data
-        OverlayWindow.IsOpen = Configuration.OverlayVisible && _lastReaderStatus == AddonReaderStatus.NoErrors;
-        OverlayWindow.ServerStatus = _serverClient.GetStatusText();
+        OverlayWindow.ServerStatus = Configuration.StrategyProvider == 1
+            ? _serverClient.GetStatusText()
+            : null;
         if (_lastMergedState != null)
         {
             OverlayWindow.HandDescription = _lastMergedState.HandDescription.Value;
@@ -213,10 +232,13 @@ public sealed partial class Plugin : IDalamudPlugin
             };
         }
 
-        // Auto-play: feed status to overlay and execute scheduled actions
         OverlayWindow.AutoPlayEnabled = Configuration.AutoPlayEnabled;
         OverlayWindow.AutoPlayPaused = _autoPlayManager.IsPaused;
         OverlayWindow.PendingAutoAction = _autoPlayManager.PendingAction;
+
+        // Edge-triggered NativeAddon Open/Close. Open only if unallocated; Close only if visible.
+        OverlayWindow.ApplyVisibility(Configuration.OverlayVisible && _lastReaderStatus == AddonReaderStatus.NoErrors);
+
         if (Configuration.AutoPlayEnabled && _lastAddonAddress != 0)
         {
             unsafe
@@ -743,25 +765,47 @@ public sealed partial class Plugin : IDalamudPlugin
         return sources.Count == 0 ? "Unknown" : string.Join("+", sources.OrderBy(s => s.ToString()));
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
-        _iconCapture.Dispose();
-        _serverClient.Dispose();
-        AddonLifecycle.UnregisterListener(OnMahjongDraw);
-        AddonLifecycle.UnregisterListener(OnMahjongFinalize);
-        Framework.Update -= OnFrameworkUpdate;
-        // Unregister all actions to not leak anything during disposal of plugin
-        PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
-        PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
-        PluginInterface.UiBuilder.OpenMainUi -= ToggleMainUi;
-        
-        WindowSystem.RemoveAllWindows();
+        try
+        {
+            _iconCapture.Dispose();
+            _serverClient.Dispose();
+            AddonLifecycle.UnregisterListener(OnMahjongDraw);
+            AddonLifecycle.UnregisterListener(OnMahjongFinalize);
+            Framework.Update -= OnFrameworkUpdate;
+            PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
+            PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
+            PluginInterface.UiBuilder.OpenMainUi -= ToggleMainUi;
 
-        ConfigWindow.Dispose();
-        MainWindow.Dispose();
-        OverlayWindow.Dispose();
+            WindowSystem.RemoveAllWindows();
+            MainWindow.Dispose();
+
+            // NativeAddon.Dispose() Close()s without waiting; unload with settings open would
+            // free nodes mid-close animation (ConfigWindow has no DisableCloseTransition).
+            // Match VanillaPlus: await DisposeAsync, then KamiToolKitLibrary.Dispose on the
+            // framework thread. CloseAsync must not run on the main thread.
+            if (Framework.IsInFrameworkUpdateThread)
+            {
+                await Task.Run(DisposeNativeAddonsAsync).ConfigureAwait(false);
+            }
+            else
+            {
+                await DisposeNativeAddonsAsync().ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            await Framework.Run(KamiToolKitLibrary.Dispose);
+        }
 
         CommandManager.RemoveHandler(CommandName);
+    }
+
+    private async Task DisposeNativeAddonsAsync()
+    {
+        await OverlayWindow.DisposeAsync();
+        await ConfigWindow.DisposeAsync();
     }
 
     private void ApplyStrategyProvider(int provider)
@@ -797,6 +841,15 @@ public sealed partial class Plugin : IDalamudPlugin
         else if (lower == "pause")
         {
             _autoPlayManager.TogglePause();
+        }
+        else if (lower == "leave" || lower == "close")
+        {
+            LeaveStuckMatch();
+        }
+        else if (lower == "snap")
+        {
+            _snapRequested = true;
+            Log.Information("/mj snap queued — writing sidecar JSON on the next framework tick");
         }
         else if (lower == "mark discard")
         {
@@ -1120,4 +1173,139 @@ public sealed partial class Plugin : IDalamudPlugin
 
     public void ToggleConfigUi() => ConfigWindow.Toggle();
     public void ToggleMainUi() => MainWindow.Toggle();
+
+    private void WriteSnapCapture(string source)
+    {
+        try
+        {
+            Directory.CreateDirectory(SnapCapture.CapturesDirectory);
+
+            var suggestion = _lastUiState?.GameInfo?.Suggestion;
+            var calls = _lastUiState?.GameInfo?.AvailableCalls;
+            var overlaySuggestion = OverlayWindow.LastSuggestion;
+
+            int rawAtk0 = -1;
+            int[] atkValues = Array.Empty<int>();
+            object[] closedHand = Array.Empty<object>();
+            object? drawnTile = null;
+
+            unsafe
+            {
+                if (_lastAddonAddress != 0)
+                {
+                    var addon = (AtkUnitBase*)_lastAddonAddress;
+                    var n = addon->AtkValues == null ? 0 : Math.Min(20, (int)addon->AtkValuesCount);
+                    atkValues = new int[n];
+                    for (var i = 0; i < n; i++)
+                    {
+                        try { atkValues[i] = addon->AtkValues[i].Int; }
+                        catch { atkValues[i] = int.MinValue; }
+                    }
+                    if (n > 0)
+                        rawAtk0 = atkValues[0];
+
+                    var hand = MahjongHandReader.Read(addon, _iconCapture, _iconMap);
+                    closedHand = hand.HandTiles
+                        .OrderBy(t => t.X)
+                        .Select(t => (object)new
+                        {
+                            t.NodeIndex,
+                            t.NodeId,
+                            t.NodeType,
+                            t.X,
+                            t.Y,
+                            t.IconId,
+                            t.TileCode,
+                        })
+                        .ToArray();
+                    if (hand.DrawnTile != null)
+                    {
+                        var d = hand.DrawnTile;
+                        drawnTile = new
+                        {
+                            d.NodeIndex,
+                            d.NodeId,
+                            d.NodeType,
+                            d.X,
+                            d.Y,
+                            d.IconId,
+                            d.TileCode,
+                        };
+                    }
+                }
+            }
+
+            var payload = new
+            {
+                capturedAtUtc = DateTime.UtcNow.ToString("O"),
+                source,
+                command = "/mj snap",
+                phase = _lastMergedState?.GamePhase.Value,
+                rawAtk0,
+                atkValues,
+                pendingAction = _autoPlayManager.PendingAction,
+                availableCalls = calls?.ToString(),
+                suggestion = suggestion == null
+                    ? null
+                    : new
+                    {
+                        type = suggestion.Type.ToString(),
+                        raw = suggestion.RawText,
+                        tile = suggestion.TileName,
+                        icon = suggestion.TileIconId,
+                    },
+                overlay = new
+                {
+                    visible = Configuration.OverlayVisible,
+                    compact = Configuration.OverlayCompactMode,
+                    autoPlay = Configuration.AutoPlayEnabled,
+                    paused = _autoPlayManager.IsPaused,
+                    pending = OverlayWindow.PendingAutoAction,
+                    handDescription = OverlayWindow.HandDescription,
+                    serverStatus = OverlayWindow.ServerStatus,
+                    callRecommendation = OverlayWindow.CallRecommendation,
+                    inGameSuggestion = _lastMergedState?.InGameSuggestion.Value,
+                    serverSuggestions = overlaySuggestion?.Suggestions?
+                        .Select(s => new
+                        {
+                            s.Tile,
+                            s.Shanten,
+                            s.Ukeire,
+                            s.Confidence,
+                            s.Reasoning,
+                        })
+                        .ToArray(),
+                    serverError = overlaySuggestion?.Error,
+                },
+                closedHand,
+                drawnTile,
+            };
+
+            var path = SnapCapture.WriteJson(payload);
+            var msg = $"[SNAP] wrote {path} phase={payload.phase} sug={suggestion?.Type}:{suggestion?.TileName} icon={suggestion?.TileIconId} pending={_autoPlayManager.PendingAction} atk0={rawAtk0}";
+            LogToFile("autoplay.log", msg);
+            Log.Information(msg);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "/mj snap failed");
+            LogToFile("autoplay.log", $"[SNAP] failed: {ex.Message}");
+        }
+    }
+
+    private void LeaveStuckMatch()
+    {
+        if (_lastAddonAddress == 0)
+        {
+            Log.Information("Leave match: EmjL is not open");
+            return;
+        }
+
+        unsafe
+        {
+            var addon = (AtkUnitBase*)_lastAddonAddress;
+            var ok = AddonClickHelper.TryLeaveMatch(addon);
+            Log.Information($"Leave match: withdraw(16)+close(19) result={ok}");
+        }
+    }
 }

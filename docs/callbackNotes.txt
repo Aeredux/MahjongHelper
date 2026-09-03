@@ -1,7 +1,9 @@
 7 and 8: seems to discard the drawn tile
 Callback ID sweep results (using /mj firecb <id> <slot> run):
 
-7: DISCARD SPECIFIC TILE — second value is hand position (0 = leftmost tile in sorted hand)
+7: DISCARD SPECIFIC TILE — second value is hand position (0 = leftmost tile in sorted hand, 0-13 on a 14-tile discard turn)
+8: DISCARD DRAWN TILE (tsumogiri) — always discards the drawn tile regardless of second value
+   ALSO: skip/pass on call prompts (any second value works)
 8: DISCARD DRAWN TILE (tsumogiri) — always discards the drawn tile regardless of second value
    ALSO: skip/pass on call prompts (any second value works)
 10: causes a "draw" (ryuukyoku/tie screen) — forces end-of-round with no winner. Game gets stuck after.
