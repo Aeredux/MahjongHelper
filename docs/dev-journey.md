@@ -44,6 +44,12 @@
 
 **Result:** Cloud VM cannot in-game test cog, Leave, or post-riichi discard. Author remains aeredux.
 
+## 2026-09-03: Post-riichi discard must change ATK
+
+**What:** Live AZPC log showed Riichi ListItemClick succeeding (atk[1]/[18]=11) then a fake tsumogiri ReceiveEvent on closed-hand node 54 (S9), ATK unchanged, hang in RiichiDecisionPrompt. Capture the discard tile from the last Discard suggestion / node 45 / provider BEFORE clicking Riichi. After accept, immediately FireCallback 7 for: suggestion tile, then ATK slot [18]/[1], then MahjongHandReader DrawnTile (node 101 / type 1022). Each candidate is tried until ATK actually changes. Never callback 8, never the gap-heuristic draw node, never ReceiveEvent on a closed-hand 1055 node.
+
+**Result:** Needs an in-game reload on AZPC to confirm autoplay.log: accept then discard with ATK change then phase != RiichiDecisionPrompt.
+
 ## 2026-06-01: README rewritten to match current plugin behavior
 
 **What:** Replaced the template `README.md` content with project-specific documentation for Mahjong Helper's current feature set.
