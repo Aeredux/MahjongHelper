@@ -1,126 +1,261 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
-using Dalamud.Bindings.ImGui;
-using Dalamud.Interface.Windowing;
-using Dalamud.Plugin.Services;
+using FFXIVClientStructs.FFXIV.Component.GUI;
+using KamiToolKit.BaseTypes;
+using KamiToolKit.Nodes;
 
 namespace MahjongHelper.Windows;
 
-public class ConfigWindow : Window, IDisposable
+/// <summary>
+/// Native FFXIV settings window (KamiToolKit NativeAddon).
+/// Covers strategy provider, auto-play toggles, and min/max action delays.
+/// </summary>
+public class ConfigWindow : NativeAddon
 {
-    private readonly Configuration configuration;
     private static readonly string[] ProviderNames = ["In-Game", "Server"];
+
+    private readonly Configuration configuration;
+    private VerticalListNode? root;
+    private VerticalListNode? autoPlayDetails;
+    private StringDropDownNode? providerDropDown;
+    private CheckboxNode? autoPlayCheckbox;
+    private CheckboxNode? autoDiscardCheckbox;
+    private CheckboxNode? autoCallCheckbox;
+    private NumericInputNode? discardMinInput;
+    private NumericInputNode? discardMaxInput;
+    private NumericInputNode? callMinInput;
+    private NumericInputNode? callMaxInput;
 
     public Action<int>? OnStrategyProviderChanged;
 
-    public ConfigWindow(Plugin plugin) : base("Mahjong Helper Settings###MahjongHelperConfig")
+    [SetsRequiredMembers]
+    public ConfigWindow(Plugin plugin)
     {
-        Flags = ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar |
-                ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.AlwaysAutoResize;
-
-        SizeConstraints = new WindowSizeConstraints
-        {
-            MinimumSize = new Vector2(320, 200),
-            MaximumSize = new Vector2(400, 500),
-        };
-
         configuration = plugin.Configuration;
+        InternalName = "MahjongHelperCfg";
+        Title = "Settings";
+        Size = new Vector2(400f, 280f);
+        RememberClosePosition = true;
     }
 
-    public void Dispose() { }
-
-    public override void Draw()
+    protected override unsafe void OnSetup(AtkUnitBase* addon, Span<AtkValue> atkValueSpan)
     {
-        // ─── Auto-Play ───
-        ImGui.TextColored(new Vector4(1, 0.8f, 0.3f, 1), "Auto-Play");
-        ImGui.Separator();
+        base.OnSetup(addon, atkValueSpan);
 
-        ImGui.Text("Strategy Provider");
-        var provider = configuration.StrategyProvider;
-        ImGui.SetNextItemWidth(160);
-        if (ImGui.Combo("##StrategyProvider", ref provider, ProviderNames, ProviderNames.Length))
+        var width = Math.Max(280f, ContentSize.X);
+
+        root = new VerticalListNode
         {
-            configuration.StrategyProvider = provider;
+            Position = ContentStartPosition,
+            Width = width,
+            ItemSpacing = 6f,
+            FitContents = true,
+            FitWidth = true,
+        };
+
+        root.AddNode(new CategoryTextNode { String = "Auto-Play" });
+        root.AddNode(NativeUi.Separator(width));
+        root.AddNode(SetString(NativeUi.Text(width, 20f), "Strategy Provider"));
+
+        var providerIndex = Math.Clamp(configuration.StrategyProvider, 0, ProviderNames.Length - 1);
+        providerDropDown = new StringDropDownNode
+        {
+            Size = new Vector2(175f, 28f),
+            MaxListOptions = ProviderNames.Length,
+            Options = [.. ProviderNames],
+            SelectedOption = ProviderNames[providerIndex],
+        };
+        providerDropDown.OnOptionSelected = OnProviderSelected;
+        root.AddNode(providerDropDown);
+
+        autoPlayCheckbox = new CheckboxNode
+        {
+            Height = 24f,
+            String = "Enable Auto-Play",
+            IsChecked = configuration.AutoPlayEnabled,
+        };
+        autoPlayCheckbox.OnClick = OnAutoPlayToggled;
+        root.AddNode(autoPlayCheckbox);
+
+        autoPlayDetails = new VerticalListNode
+        {
+            Width = width,
+            ItemSpacing = 6f,
+            FitContents = true,
+            FitWidth = true,
+            IsVisible = configuration.AutoPlayEnabled,
+        };
+
+        autoDiscardCheckbox = new CheckboxNode
+        {
+            Height = 24f,
+            String = "Auto-Discard",
+            IsChecked = configuration.AutoDiscardEnabled,
+        };
+        autoDiscardCheckbox.OnClick = enabled =>
+        {
+            configuration.AutoDiscardEnabled = enabled;
             configuration.Save();
-            OnStrategyProviderChanged?.Invoke(provider);
-        }
+        };
 
-        ImGui.Spacing();
-
-        var autoPlay = configuration.AutoPlayEnabled;
-        if (ImGui.Checkbox("Enable Auto-Play", ref autoPlay))
+        autoCallCheckbox = new CheckboxNode
         {
-            configuration.AutoPlayEnabled = autoPlay;
+            Height = 24f,
+            String = "Auto-Call Decisions",
+            IsChecked = configuration.AutoCallEnabled,
+        };
+        autoCallCheckbox.OnClick = enabled =>
+        {
+            configuration.AutoCallEnabled = enabled;
             configuration.Save();
-        }
+        };
 
-        if (autoPlay)
+        autoPlayDetails.AddNode(autoDiscardCheckbox);
+        autoPlayDetails.AddNode(autoCallCheckbox);
+        autoPlayDetails.AddNode(new CategoryTextNode { String = "Timing" });
+        autoPlayDetails.AddNode(NativeUi.Separator(width));
+        autoPlayDetails.AddNode(SetString(NativeUi.Text(width, 20f), "Discard Delay (ms)"));
+        autoPlayDetails.AddNode(BuildDelayRow(
+            configuration.AutoDiscardDelayMinMs,
+            configuration.AutoDiscardDelayMaxMs,
+            out discardMinInput,
+            out discardMaxInput,
+            (min, max) =>
+            {
+                configuration.AutoDiscardDelayMinMs = min;
+                configuration.AutoDiscardDelayMaxMs = max;
+                configuration.Save();
+            }));
+        autoPlayDetails.AddNode(SetString(NativeUi.Text(width, 20f), "Call Decision Delay (ms)"));
+        autoPlayDetails.AddNode(BuildDelayRow(
+            configuration.AutoCallDelayMinMs,
+            configuration.AutoCallDelayMaxMs,
+            out callMinInput,
+            out callMaxInput,
+            (min, max) =>
+            {
+                configuration.AutoCallDelayMinMs = min;
+                configuration.AutoCallDelayMaxMs = max;
+                configuration.Save();
+            }));
+
+        root.AddNode(autoPlayDetails);
+        root.AttachNode(this);
+        RecalculateWindowSize();
+    }
+
+    protected override unsafe void OnFinalize(AtkUnitBase* addon)
+    {
+        root = null;
+        autoPlayDetails = null;
+        providerDropDown = null;
+        autoPlayCheckbox = null;
+        autoDiscardCheckbox = null;
+        autoCallCheckbox = null;
+        discardMinInput = null;
+        discardMaxInput = null;
+        callMinInput = null;
+        callMaxInput = null;
+        base.OnFinalize(addon);
+    }
+
+    private void OnProviderSelected(string option)
+    {
+        var index = Array.IndexOf(ProviderNames, option);
+        if (index < 0)
+            return;
+
+        configuration.StrategyProvider = index;
+        configuration.Save();
+        OnStrategyProviderChanged?.Invoke(index);
+    }
+
+    private void OnAutoPlayToggled(bool enabled)
+    {
+        configuration.AutoPlayEnabled = enabled;
+        configuration.Save();
+        if (autoPlayDetails is not null)
+            autoPlayDetails.IsVisible = enabled;
+        RecalculateWindowSize();
+    }
+
+    private void RecalculateWindowSize()
+    {
+        if (root is null)
+            return;
+
+        root.Width = Math.Max(280f, ContentSize.X);
+        root.RecalculateLayout();
+
+        const float maxHeight = 420f;
+        const float width = 400f;
+        var contentHeight = root.Height + ContentStartPosition.Y + 24f;
+        Size = new Vector2(width, Math.Clamp(contentHeight, 200f, maxHeight));
+        SetWindowSize(Size);
+
+        root.Size = ContentSize + new Vector2(0f, ContentPadding.Y);
+        root.Position = ContentStartPosition;
+        root.RecalculateLayout();
+    }
+
+    private static HorizontalListNode BuildDelayRow(
+        int minValue,
+        int maxValue,
+        out NumericInputNode minInput,
+        out NumericInputNode maxInput,
+        Action<int, int> onChanged)
+    {
+        var row = new HorizontalListNode
         {
-            ImGui.Indent(16);
+            Height = 28f,
+            ItemSpacing = 8f,
+            FitToContentHeight = true,
+        };
 
-            var autoDiscard = configuration.AutoDiscardEnabled;
-            if (ImGui.Checkbox("Auto-Discard", ref autoDiscard))
-            {
-                configuration.AutoDiscardEnabled = autoDiscard;
-                configuration.Save();
-            }
+        var min = new NumericInputNode
+        {
+            Size = new Vector2(110f, 24f),
+            Min = 200,
+            Max = 10000,
+            Step = 50,
+            Value = minValue,
+        };
+        var max = new NumericInputNode
+        {
+            Size = new Vector2(110f, 24f),
+            Min = 200,
+            Max = 10000,
+            Step = 50,
+            Value = maxValue,
+        };
 
-            var autoCall = configuration.AutoCallEnabled;
-            if (ImGui.Checkbox("Auto-Call Decisions", ref autoCall))
-            {
-                configuration.AutoCallEnabled = autoCall;
-                configuration.Save();
-            }
+        min.OnValueUpdate = value =>
+        {
+            if (value > max.Value)
+                max.Value = value;
+            onChanged(value, max.Value);
+        };
+        max.OnValueUpdate = value =>
+        {
+            if (value < min.Value)
+                min.Value = value;
+            onChanged(min.Value, value);
+        };
 
-            ImGui.Unindent(16);
+        row.AddNode(SetString(NativeUi.Text(32f, 20f), "Min"));
+        row.AddNode(min);
+        row.AddNode(SetString(NativeUi.Text(32f, 20f), "Max"));
+        row.AddNode(max);
 
-            ImGui.Spacing();
-            ImGui.TextColored(new Vector4(1, 0.8f, 0.3f, 1), "Timing");
-            ImGui.Separator();
+        minInput = min;
+        maxInput = max;
+        return row;
+    }
 
-            // Discard delay
-            ImGui.Text("Discard Delay (ms)");
-            var discardMin = configuration.AutoDiscardDelayMinMs;
-            var discardMax = configuration.AutoDiscardDelayMaxMs;
-            ImGui.SetNextItemWidth(120);
-            if (ImGui.DragInt("Min##DiscardMin", ref discardMin, 50, 200, 10000))
-            {
-                if (discardMin > discardMax) discardMax = discardMin;
-                configuration.AutoDiscardDelayMinMs = discardMin;
-                configuration.AutoDiscardDelayMaxMs = discardMax;
-                configuration.Save();
-            }
-            ImGui.SameLine();
-            ImGui.SetNextItemWidth(120);
-            if (ImGui.DragInt("Max##DiscardMax", ref discardMax, 50, 200, 10000))
-            {
-                if (discardMax < discardMin) discardMin = discardMax;
-                configuration.AutoDiscardDelayMinMs = discardMin;
-                configuration.AutoDiscardDelayMaxMs = discardMax;
-                configuration.Save();
-            }
-
-            // Call delay
-            ImGui.Text("Call Decision Delay (ms)");
-            var callMin = configuration.AutoCallDelayMinMs;
-            var callMax = configuration.AutoCallDelayMaxMs;
-            ImGui.SetNextItemWidth(120);
-            if (ImGui.DragInt("Min##CallMin", ref callMin, 50, 200, 10000))
-            {
-                if (callMin > callMax) callMax = callMin;
-                configuration.AutoCallDelayMinMs = callMin;
-                configuration.AutoCallDelayMaxMs = callMax;
-                configuration.Save();
-            }
-            ImGui.SameLine();
-            ImGui.SetNextItemWidth(120);
-            if (ImGui.DragInt("Max##CallMax", ref callMax, 50, 200, 10000))
-            {
-                if (callMax < callMin) callMin = callMax;
-                configuration.AutoCallDelayMinMs = callMin;
-                configuration.AutoCallDelayMaxMs = callMax;
-                configuration.Save();
-            }
-        }
+    private static TextNode SetString(TextNode node, string value)
+    {
+        node.String = value;
+        return node;
     }
 }

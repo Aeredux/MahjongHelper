@@ -5,14 +5,17 @@ Mahjong Helper is a Dalamud plugin for FFXIV Doman Mahjong (EmjL).
 It reads live Mahjong UI state, shows recommendations, can query a local Mahjong solver server, and can optionally execute discard/call actions automatically with configurable delays.
 Can be used with https://github.com/Aeredux/MahjongSolver
 
+The in-game **suggestion overlay** and **settings window** are KamiToolKit NativeAddon windows, so they render in the FFXIV native UI tree and appear in Print Screen / vanilla screenshots. The debug dump window remains Dalamud ImGui (it will not appear in those screenshots).
+
 ## What It Currently Does
 
 - Reads the EmjL addon state continuously (hand, drawn tile, discards, dora indicators, winds, scores, call prompts, turn/phase).
 - Merges probe and node data into a normalized game state model used by UI, logging, and automation.
-- Shows a suggestion overlay in-game:
+- Shows a native-UI suggestion overlay in-game (visible in Print Screen):
   - compact mode (single best discard)
   - full mode (ranked suggestions, shanten, ukeire, confidence, reasoning)
   - server health status and call recommendation text
+  - auto-play status (`/mj auto`, `/mj pause`)
 - Supports two suggestion providers for auto-play:
   - In-Game provider (uses in-game suggestion signals)
   - Server provider (uses local HTTP API responses)
@@ -44,7 +47,7 @@ Advanced debug/probing commands are also available (for callback and click-path 
 
 ## Settings
 
-The settings window currently includes:
+The settings window is a native FFXIV addon (plugin installer config button, or **Show Settings** from the debug window). It includes:
 
 - strategy provider selection (In-Game or Server)
 - auto-play enable/disable
@@ -55,8 +58,20 @@ The settings window currently includes:
 ## Prerequisites
 
 - XIVLauncher, FFXIV, and Dalamud installed and working.
-- .NET 8 SDK.
+- .NET 8 SDK (Dalamud 15 / plugin build may require a newer SDK matching the current Dalamud.NET.Sdk).
 - Optional but recommended for server mode: local Mahjong solver server on `localhost:8080` implementing the endpoints above.
+
+This repo includes KamiToolKit as a git submodule (VanillaPlus-style NativeAddon windows). Clone with submodules:
+
+```powershell
+git clone --recurse-submodules https://github.com/Aeredux/MahjongHelper.git
+```
+
+If you already cloned without submodules:
+
+```powershell
+git submodule update --init --recursive
+```
 
 ## Build
 
@@ -98,3 +113,4 @@ Common files include:
 - This plugin automates in-game decisions and click actions when auto-play is enabled.
 - Server suggestions are only used when server mode is selected and the local server is reachable.
 - If the overlay is enabled but EmjL is not open, the overlay will remain hidden until a readable Mahjong state is available.
+- Native overlay and settings windows appear in vanilla screenshots. The ImGui debug dump (`/mj`) does not.

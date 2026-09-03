@@ -1,5 +1,19 @@
 # Dev Journey
 
+## 2026-09-03: KAN-12 NativeAddon overlay and settings
+
+**What:** Switched the suggestion overlay and settings window from Dalamud ImGui to KamiToolKit NativeAddon windows. Left the debug dump window as ImGui.
+
+**Why:** Native FFXIV screenshots omit Dalamud ImGui, so `/mj snap` PNGs (KAN-11) miss the overlay even when sidecar JSON has the text. KamiToolKit native addons render in the game UI tree and appear in Print Screen, matching VanillaPlus.
+
+**Changes made:**
+- Added MidoriKami/KamiToolKit as a git submodule and project reference (Dalamud.NET.Sdk 15).
+- Rewrote `SuggestionOverlayWindow` and `ConfigWindow` as `NativeAddon` subclasses (compact/full overlay, provider/auto-play/delay settings).
+- Kept `MainWindow` on `WindowSystem` ImGui. `/mj`, `/mj overlay`, `/mj compact`, `/mj auto`, `/mj pause` still wired in `Plugin.cs`.
+- README notes native UI vs ImGui debug window; CI checks out submodules.
+
+**Result:** Overlay and settings are native addons. Debug dump remains ImGui. Live in-game Print Screen verification was not possible on the cloud VM.
+
 ## 2026-06-01: README rewritten to match current plugin behavior
 
 **What:** Replaced the template `README.md` content with project-specific documentation for Mahjong Helper's current feature set.

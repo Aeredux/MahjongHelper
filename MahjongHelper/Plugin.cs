@@ -4,6 +4,7 @@ using Dalamud.Plugin;
 using System.IO;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
+using KamiToolKit;
 using MahjongHelper.Windows;
 using Dalamud.Game.Addon.Lifecycle;
 using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
@@ -118,14 +119,14 @@ public sealed partial class Plugin : IDalamudPlugin
         _autoPlayManager = new AutoPlayManager(Configuration, _iconMap);
         ApplyStrategyProvider(Configuration.StrategyProvider);
 
+        KamiToolKitLibrary.Initialize(PluginInterface, "Mahjong Helper");
+
         ConfigWindow = new ConfigWindow(this);
         ConfigWindow.OnStrategyProviderChanged = ApplyStrategyProvider;
         MainWindow = new MainWindow(this);
         OverlayWindow = new SuggestionOverlayWindow(Configuration);
 
-        WindowSystem.AddWindow(ConfigWindow);
         WindowSystem.AddWindow(MainWindow);
-        WindowSystem.AddWindow(OverlayWindow);
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
@@ -197,8 +198,6 @@ public sealed partial class Plugin : IDalamudPlugin
                 : "Off";
         }
 
-        // Feed overlay data
-        OverlayWindow.IsOpen = Configuration.OverlayVisible && _lastReaderStatus == AddonReaderStatus.NoErrors;
         OverlayWindow.ServerStatus = _serverClient.GetStatusText();
         if (_lastMergedState != null)
         {
@@ -213,10 +212,13 @@ public sealed partial class Plugin : IDalamudPlugin
             };
         }
 
-        // Auto-play: feed status to overlay and execute scheduled actions
         OverlayWindow.AutoPlayEnabled = Configuration.AutoPlayEnabled;
         OverlayWindow.AutoPlayPaused = _autoPlayManager.IsPaused;
         OverlayWindow.PendingAutoAction = _autoPlayManager.PendingAction;
+
+        // Native addon Open/Close (not ImGui IsOpen). Data is already on the overlay object.
+        OverlayWindow.ApplyVisibility(Configuration.OverlayVisible && _lastReaderStatus == AddonReaderStatus.NoErrors);
+
         if (Configuration.AutoPlayEnabled && _lastAddonAddress != 0)
         {
             unsafe
@@ -760,6 +762,7 @@ public sealed partial class Plugin : IDalamudPlugin
         ConfigWindow.Dispose();
         MainWindow.Dispose();
         OverlayWindow.Dispose();
+        KamiToolKitLibrary.Dispose();
 
         CommandManager.RemoveHandler(CommandName);
     }

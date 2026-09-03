@@ -1,271 +1,319 @@
 using System;
-using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
-using Dalamud.Bindings.ImGui;
-using Dalamud.Interface.Windowing;
+using System.Text;
+using FFXIVClientStructs.FFXIV.Component.GUI;
+using KamiToolKit.BaseTypes;
+using KamiToolKit.Nodes;
 using MahjongHelper.Mahjong;
 
 namespace MahjongHelper.Windows;
 
 /// <summary>
-/// Compact in-game overlay showing Mahjong AI suggestions.
-/// Supports two modes:
-///   Compact: single line with best discard + shanten
-///   Full: ranked suggestion list with ukeire, confidence, reasoning
+/// Native FFXIV suggestion overlay (KamiToolKit NativeAddon).
+/// Compact mode is a single best-discard line; full mode shows the ranked list.
+/// Appears in Print Screen / vanilla screenshots because it lives in the game UI tree.
 /// </summary>
-public class SuggestionOverlayWindow : Window, IDisposable
+public class SuggestionOverlayWindow : NativeAddon
 {
     private readonly Configuration configuration;
+    private bool pluginDrivenClose;
 
-    // Data fed from Plugin.cs
+    private VerticalListNode? root;
+    private HorizontalListNode? headerRow;
+    private TextNode? headerText;
+    private TextButtonNode? modeButton;
+    private HorizontalLineNode? separator;
+    private TextNode? bodyText;
+    private TextNode? callText;
+    private TextNode? autoPlayText;
+    private bool renderedCompact = true;
+
     public SuggestMoveResponse? LastSuggestion { get; set; }
     public string? ServerStatus { get; set; }
     public string? HandDescription { get; set; }
-    public int? CurrentTurnIndex { get; set; } // 0=player
+    public int? CurrentTurnIndex { get; set; }
     public string? CallRecommendation { get; set; }
     public bool IsPlayerTurn => CurrentTurnIndex == 0;
     public bool AutoPlayEnabled { get; set; }
     public bool AutoPlayPaused { get; set; }
     public string? PendingAutoAction { get; set; }
 
+    [SetsRequiredMembers]
     public SuggestionOverlayWindow(Configuration configuration)
-        : base("Mahjong Helper##Overlay")
     {
         this.configuration = configuration;
+        InternalName = "MahjongHelperOvl";
+        Title = "Suggestions";
+        Size = new Vector2(320f, 160f);
+        OpenWindowSoundEffectId = 0;
+        RespectCloseAll = false;
+        DisableCloseTransition = true;
+        RememberClosePosition = true;
+    }
 
-        Flags = ImGuiWindowFlags.NoScrollbar
-              | ImGuiWindowFlags.NoScrollWithMouse
-              | ImGuiWindowFlags.AlwaysAutoResize;
-
-        Size = new Vector2(280, 0);
-        SizeCondition = ImGuiCond.FirstUseEver;
-        SizeConstraints = new WindowSizeConstraints
+    /// <summary>
+    /// Opens or closes the native addon to match overlay visibility.
+    /// Must be called from the game main thread.
+    /// </summary>
+    public void ApplyVisibility(bool shouldBeVisible)
+    {
+        if (shouldBeVisible)
         {
-            MinimumSize = new Vector2(200, 40),
-            MaximumSize = new Vector2(500, 800),
+            if (!IsOpen)
+                Open();
+            return;
+        }
+
+        if (!IsOpen)
+            return;
+
+        pluginDrivenClose = true;
+        Close();
+    }
+
+    protected override unsafe void OnSetup(AtkUnitBase* addon, Span<AtkValue> atkValueSpan)
+    {
+        base.OnSetup(addon, atkValueSpan);
+
+        var width = Math.Max(200f, ContentSize.X);
+
+        root = new VerticalListNode
+        {
+            Position = ContentStartPosition,
+            Width = width,
+            ItemSpacing = 4f,
+            FitContents = true,
+            FitWidth = true,
         };
+
+        headerRow = new HorizontalListNode
+        {
+            Width = width,
+            Height = 28f,
+            ItemSpacing = 8f,
+            FitHeight = true,
+        };
+
+        headerText = NativeUi.Text(width - 96f, 28f, 14);
+        modeButton = new TextButtonNode
+        {
+            Size = new Vector2(88f, 28f),
+            String = configuration.OverlayCompactMode ? "Full" : "Compact",
+            OnClick = ToggleCompactMode,
+        };
+        headerRow.AddNode(headerText);
+        headerRow.AddNode(modeButton);
+
+        separator = NativeUi.Separator(width);
+        bodyText = NativeUi.Text(width, 180f, 12, wrap: true);
+        callText = NativeUi.Text(width, 48f, 12, wrap: true);
+        callText.TextColor = NativeUi.Gold;
+        autoPlayText = NativeUi.Text(width, 22f, 12);
+
+        root.AddNode(headerRow);
+        root.AddNode(separator);
+        root.AddNode(bodyText);
+        root.AddNode(callText);
+        root.AddNode(autoPlayText);
+        root.AttachNode(this);
+
+        renderedCompact = configuration.OverlayCompactMode;
+        RefreshDisplay();
     }
 
-    public void Dispose() { }
-
-    public override void PreDraw()
+    protected override unsafe void OnUpdate(AtkUnitBase* addon)
     {
-        // Semi-transparent background
-        ImGui.PushStyleColor(ImGuiCol.WindowBg, new Vector4(0.08f, 0.08f, 0.12f, 0.92f));
+        base.OnUpdate(addon);
+        RefreshDisplay();
     }
 
-    public override void PostDraw()
+    protected override unsafe void OnHide(AtkUnitBase* addon)
     {
-        ImGui.PopStyleColor();
+        // Closing via the native X (not /mj overlay or leaving EmjL) should persist hidden.
+        if (!pluginDrivenClose)
+        {
+            configuration.OverlayVisible = false;
+            configuration.Save();
+        }
+
+        pluginDrivenClose = false;
+        base.OnHide(addon);
     }
 
-    public override void Draw()
+    protected override unsafe void OnFinalize(AtkUnitBase* addon)
     {
-        if (configuration.OverlayCompactMode)
-            DrawCompact();
-        else
-            DrawFull();
+        root = null;
+        headerRow = null;
+        headerText = null;
+        modeButton = null;
+        separator = null;
+        bodyText = null;
+        callText = null;
+        autoPlayText = null;
+        base.OnFinalize(addon);
     }
 
-    private void DrawCompact()
+    private void ToggleCompactMode()
     {
+        configuration.OverlayCompactMode = !configuration.OverlayCompactMode;
+        configuration.Save();
+        RefreshDisplay();
+    }
+
+    private void RefreshDisplay()
+    {
+        if (root is null || headerText is null || modeButton is null || bodyText is null || callText is null || autoPlayText is null || separator is null)
+            return;
+
+        var compact = configuration.OverlayCompactMode;
+        if (compact != renderedCompact)
+        {
+            renderedCompact = compact;
+            Size = compact ? new Vector2(320f, 160f) : new Vector2(360f, 380f);
+            SetWindowSize(Size);
+            root.Width = Math.Max(200f, ContentSize.X);
+            if (headerRow is not null)
+                headerRow.Width = root.Width;
+            bodyText.Width = root.Width;
+            callText.Width = root.Width;
+            autoPlayText.Width = root.Width;
+            separator.Width = root.Width;
+        }
+
+        modeButton.String = compact ? "Full" : "Compact";
+
         var suggestion = LastSuggestion;
-        if (suggestion == null || suggestion.Suggestions.Count == 0)
+        headerText.TextColor = NativeUi.White;
+
+        if (compact)
         {
-            ImGui.TextColored(Gray, "Waiting for suggestion...");
-            return;
-        }
-
-        if (!string.IsNullOrEmpty(suggestion.Error))
-        {
-            ImGui.TextColored(Red, $"Error: {suggestion.Error}");
-            return;
-        }
-
-        var best = suggestion.Suggestions[0];
-        var shantenText = suggestion.Shanten.HasValue ? $"shanten {suggestion.Shanten}" : "";
-
-        // Compact: "Discard P4  shanten 3  ukeire 123"
-        ImGui.TextColored(White, "Discard");
-        ImGui.SameLine();
-        ImGui.TextColored(Gold, best.Tile);
-        if (!string.IsNullOrEmpty(shantenText))
-        {
-            ImGui.SameLine();
-            ImGui.TextColored(Cyan, shantenText);
-        }
-        if (best.Ukeire.HasValue)
-        {
-            ImGui.SameLine();
-            ImGui.TextColored(Green, $"ukeire {best.Ukeire}");
-        }
-
-        // Toggle hint
-        ImGui.SameLine();
-        ImGui.TextColored(Gray, " [+]");
-        if (ImGui.IsItemClicked())
-            configuration.OverlayCompactMode = false;
-
-        // Call recommendation if present
-        DrawCallRecommendation();
-
-        // Auto-play status
-        DrawAutoPlayStatus();
-    }
-
-    private void DrawFull()
-    {
-        var suggestion = LastSuggestion;
-
-        // Header: shanten + toggle
-        DrawHeader(suggestion);
-
-        ImGui.Separator();
-
-        if (suggestion == null || suggestion.Suggestions.Count == 0)
-        {
-            ImGui.TextColored(Gray, "No suggestions available.");
-            DrawCallRecommendation();
-            return;
-        }
-
-        if (!string.IsNullOrEmpty(suggestion.Error))
-        {
-            ImGui.TextColored(Red, suggestion.Error);
-            return;
-        }
-
-        // Ranked suggestion table
-        DrawSuggestionTable(suggestion.Suggestions);
-
-        // Call recommendation if present
-        DrawCallRecommendation();
-
-        // Auto-play status
-        DrawAutoPlayStatus();
-    }
-
-    private void DrawHeader(SuggestMoveResponse? suggestion)
-    {
-        // Shanten
-        if (suggestion?.Shanten != null)
-        {
-            ImGui.TextColored(White, "Shanten:");
-            ImGui.SameLine();
-            var shantenColor = suggestion.Shanten.Value switch
-            {
-                0 => Gold,
-                1 => Green,
-                2 => Cyan,
-                _ => White,
-            };
-            ImGui.TextColored(shantenColor, suggestion.Shanten.Value.ToString());
+            separator.IsVisible = false;
+            bodyText.IsVisible = false;
+            headerText.String = BuildCompactLine(suggestion);
+            headerText.TextColor = SuggestionHeaderColor(suggestion);
         }
         else
         {
-            ImGui.TextColored(Gray, "Shanten: ?");
+            separator.IsVisible = true;
+            bodyText.IsVisible = true;
+            headerText.String = BuildFullHeader(suggestion);
+            bodyText.String = BuildFullBody(suggestion);
+            bodyText.TextTooltip = suggestion?.Suggestions is { Count: > 0 } list
+                ? list[0].Reasoning ?? string.Empty
+                : string.Empty;
         }
 
-        // Server status (right-aligned area)
-        ImGui.SameLine();
-        var statusColor = ServerStatus != null && ServerStatus.StartsWith("Connected") ? Green : Red;
-        ImGui.TextColored(statusColor, $"  [{(ServerStatus ?? "?")}]");
-
-        // Compact toggle
-        ImGui.SameLine();
-        ImGui.TextColored(Gray, " [-]");
-        if (ImGui.IsItemClicked())
-            configuration.OverlayCompactMode = true;
-    }
-
-    private static void DrawSuggestionTable(List<DiscardSuggestion> suggestions)
-    {
-        // Column headers
-        ImGui.TextColored(Gray, "Tile     Shanten  Ukeire  Conf");
-        ImGui.Separator();
-
-        var maxToShow = Math.Min(suggestions.Count, 8);
-        for (int i = 0; i < maxToShow; i++)
+        if (string.IsNullOrEmpty(CallRecommendation))
         {
-            var s = suggestions[i];
-            var isTop = i == 0;
+            callText.IsVisible = false;
+        }
+        else
+        {
+            callText.IsVisible = true;
+            callText.String = $"Call: {CallRecommendation}";
+        }
 
-            // Tile name (highlighted for top pick)
-            var tileColor = isTop ? Gold : White;
-            ImGui.TextColored(tileColor, PadRight(s.Tile, 9));
-
-            // Shanten after discard
-            ImGui.SameLine();
-            ImGui.TextColored(Cyan, PadRight(s.Shanten?.ToString() ?? "?", 9));
-
-            // Ukeire
-            ImGui.SameLine();
-            var ukeireColor = s.Ukeire switch
+        if (!AutoPlayEnabled)
+        {
+            autoPlayText.IsVisible = false;
+        }
+        else
+        {
+            autoPlayText.IsVisible = true;
+            if (AutoPlayPaused)
             {
-                > 80 => Green,
-                > 40 => Cyan,
-                > 0 => White,
-                _ => Gray,
-            };
-            ImGui.TextColored(ukeireColor, PadRight(s.Ukeire?.ToString() ?? "-", 8));
-
-            // Confidence
-            ImGui.SameLine();
-            var confText = s.Confidence.HasValue ? $"{s.Confidence:F1}" : "-";
-            ImGui.TextColored(White, confText);
-
-            // Reasoning tooltip
-            if (!string.IsNullOrEmpty(s.Reasoning) && ImGui.IsItemHovered())
+                autoPlayText.TextColor = NativeUi.Gray;
+                autoPlayText.String = "Auto-Play: PAUSED";
+            }
+            else if (!string.IsNullOrEmpty(PendingAutoAction))
             {
-                ImGui.BeginTooltip();
-                ImGui.PushTextWrapPos(300);
-                ImGui.TextUnformatted(s.Reasoning);
-                ImGui.PopTextWrapPos();
-                ImGui.EndTooltip();
+                autoPlayText.TextColor = NativeUi.Gold;
+                autoPlayText.String = $"Auto-Play: {PendingAutoAction}...";
+            }
+            else
+            {
+                autoPlayText.TextColor = NativeUi.Green;
+                autoPlayText.String = "Auto-Play: ON";
             }
         }
 
-        if (suggestions.Count > maxToShow)
-            ImGui.TextColored(Gray, $"  ... +{suggestions.Count - maxToShow} more");
+        root.RecalculateLayout();
+        FitWindowToContent();
     }
 
-    private void DrawCallRecommendation()
+    private void FitWindowToContent()
     {
-        if (string.IsNullOrEmpty(CallRecommendation))
+        if (root is null)
             return;
 
-        ImGui.Separator();
-        ImGui.TextColored(Gold, "Call:");
-        ImGui.SameLine();
-        ImGui.TextWrapped(CallRecommendation);
+        var height = ContentStartPosition.Y + Math.Max(48f, root.Height) + 24f;
+        var width = renderedCompact ? 320f : 360f;
+        if (Math.Abs(Size.Y - height) > 2f || Math.Abs(Size.X - width) > 2f)
+            SetWindowSize(width, height);
     }
 
-    private void DrawAutoPlayStatus()
+    private string BuildCompactLine(SuggestMoveResponse? suggestion)
     {
-        if (!AutoPlayEnabled) return;
+        if (suggestion == null || suggestion.Suggestions.Count == 0)
+            return "Waiting for suggestion...";
 
-        ImGui.Separator();
-        if (AutoPlayPaused)
-        {
-            ImGui.TextColored(Gray, "Auto-Play: PAUSED");
-        }
-        else if (!string.IsNullOrEmpty(PendingAutoAction))
-        {
-            ImGui.TextColored(Gold, $"Auto-Play: {PendingAutoAction}...");
-        }
-        else
-        {
-            ImGui.TextColored(Green, "Auto-Play: ON");
-        }
+        if (!string.IsNullOrEmpty(suggestion.Error))
+            return $"Error: {suggestion.Error}";
+
+        var best = suggestion.Suggestions[0];
+        var sb = new StringBuilder();
+        sb.Append("Discard ").Append(best.Tile);
+        if (suggestion.Shanten.HasValue)
+            sb.Append("  shanten ").Append(suggestion.Shanten.Value);
+        if (best.Ukeire.HasValue)
+            sb.Append("  ukeire ").Append(best.Ukeire.Value);
+        return sb.ToString();
     }
 
-    // Color constants
-    private static readonly Vector4 White = new(1f, 1f, 1f, 1f);
-    private static readonly Vector4 Gray = new(0.6f, 0.6f, 0.6f, 1f);
-    private static readonly Vector4 Gold = new(1f, 0.84f, 0f, 1f);
-    private static readonly Vector4 Green = new(0.4f, 1f, 0.4f, 1f);
-    private static readonly Vector4 Cyan = new(0.4f, 0.9f, 1f, 1f);
-    private static readonly Vector4 Red = new(1f, 0.4f, 0.4f, 1f);
+    private string BuildFullHeader(SuggestMoveResponse? suggestion)
+    {
+        var shanten = suggestion?.Shanten != null ? suggestion.Shanten.Value.ToString() : "?";
+        var status = ServerStatus ?? "?";
+        return $"Shanten: {shanten}   [{status}]";
+    }
+
+    private static string BuildFullBody(SuggestMoveResponse? suggestion)
+    {
+        if (suggestion == null || suggestion.Suggestions.Count == 0)
+            return "No suggestions available.";
+
+        if (!string.IsNullOrEmpty(suggestion.Error))
+            return suggestion.Error;
+
+        var sb = new StringBuilder();
+        sb.AppendLine("Tile     Shanten  Ukeire  Conf");
+        var maxToShow = Math.Min(suggestion.Suggestions.Count, 8);
+        for (var i = 0; i < maxToShow; i++)
+        {
+            var s = suggestion.Suggestions[i];
+            var confText = s.Confidence.HasValue ? $"{s.Confidence:F1}" : "-";
+            sb.Append(PadRight(s.Tile, 9));
+            sb.Append(PadRight(s.Shanten?.ToString() ?? "?", 9));
+            sb.Append(PadRight(s.Ukeire?.ToString() ?? "-", 8));
+            sb.Append(confText);
+            sb.AppendLine();
+        }
+
+        if (suggestion.Suggestions.Count > maxToShow)
+            sb.Append("  ... +").Append(suggestion.Suggestions.Count - maxToShow).Append(" more");
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private static Vector4 SuggestionHeaderColor(SuggestMoveResponse? suggestion)
+    {
+        if (suggestion == null || suggestion.Suggestions.Count == 0)
+            return NativeUi.Gray;
+        if (!string.IsNullOrEmpty(suggestion.Error))
+            return NativeUi.Red;
+        return NativeUi.Gold;
+    }
 
     private static string PadRight(string s, int width)
         => s.Length >= width ? s : s + new string(' ', width - s.Length);
