@@ -252,17 +252,24 @@ public sealed class AutoPlayManager
         }
 
         // Safety net: if WaitingForDiscard with no pending action for >8 seconds,
-        // the suggestion reader may have failed (e.g. AtkValues[6] repurposed as int
-        // after riichi). Fall back to tsumogiri so the game doesn't hang.
+        // retry the last live hint. Do not FireCallback 8 (skip while atk0=6).
         if (gamePhase == "WaitingForDiscard" && _pendingAction == null &&
             _config.AutoPlayEnabled && _config.AutoDiscardEnabled && !_paused &&
             DateTime.UtcNow > _discardPhaseEnteredUtc.AddSeconds(8))
         {
-            Log($"Fallback: tsumogiri after 8s in WaitingForDiscard with no provider suggestion");
-            _pendingAction = "riichi-tsumogiri";
-            _lastActionSignature = "";
-            _actionScheduledAtUtc = DateTime.UtcNow;
-            _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(500);
+            if (!string.IsNullOrEmpty(_lastSeenDiscardTile))
+            {
+                Log($"Fallback: retrying live hint '{_lastSeenDiscardTile}' after 8s with no pending discard — not tsumogiri/callback 8");
+                _pendingAction = $"discard:{_lastSeenDiscardTile}";
+                _lastActionSignature = "";
+                _actionScheduledAtUtc = DateTime.UtcNow;
+                _actionExecuteAtUtc = DateTime.UtcNow.AddMilliseconds(500);
+            }
+            else if (_lastActionSignature != "no-hint-8s")
+            {
+                Log("Fallback: 8s in WaitingForDiscard with no live hint — not firing callback 8/tsumogiri");
+                _lastActionSignature = "no-hint-8s";
+            }
         }
 
         // Similarly, always try scheduling a call response when in a call phase.
@@ -337,17 +344,13 @@ public sealed class AutoPlayManager
             return false;
         }
 
-        // If discards keep failing (5+ attempts with no state change), fall back
-        // to tsumogiri. This handles cases where the hand reader returns stale icons
-        // and can't find the suggested tile.
+        // Live AZPC: 5 failed hint clicks then FireCallback 8 (labeled tsumogiri)
+        // is skip while atk0=6, not a discard. Keep retrying the hinted tile
+        // via callback 7; never unstick by tsumogiri/skip.
         if (_consecutiveFailedDiscards >= 5 && _pendingAction != null && _pendingAction.StartsWith("discard:"))
         {
-            Log($"Stuck-discard detected ({_consecutiveFailedDiscards} fails for '{_pendingAction}'), falling back to tsumogiri");
-            _pendingAction = null;
-            _lastActionSignature = "";
+            Log($"Stuck-discard detected ({_consecutiveFailedDiscards} fails for '{_pendingAction}') — retrying hinted tile via callback 7, not callback 8/tsumogiri");
             _consecutiveFailedDiscards = 0;
-            AddonClickHelper.TryDiscardDrawnTile(addon);
-            return true;
         }
 
         // If call accept/skip keeps failing (5+ attempts with no phase change), stop.
@@ -375,9 +378,15 @@ public sealed class AutoPlayManager
                 ? addon->AtkValues[0].Int : -1;
 
             var tileCode = action.Substring(8);
+            int? hintIcon = null;
+            if (_lastSeenDiscardIconId is > 0 &&
+                !string.IsNullOrEmpty(_lastSeenDiscardTile) &&
+                TileCodesMatch(_lastSeenDiscardTile, tileCode))
+                hintIcon = _lastSeenDiscardIconId;
+
             var result = _awaitingRiichiDiscard
                 ? ExecuteDeclaredRiichiDiscard(addon)
-                : ExecuteDiscard(addon, tileCode);
+                : ExecuteHintedDiscard(addon, tileCode, hintIcon, allowUnhintedDrawn: false);
 
             if (result)
             {
@@ -491,7 +500,10 @@ public sealed class AutoPlayManager
                 return ok;
             }
 
-            return AddonClickHelper.TryDiscardDrawnTile(addon);
+            // No live hint: discard the true drawn tile via callback 7 pos 13,
+            // never callback 8 (skip while atk0=6).
+            Log("[RIICHI-DIAG] No awaiting-riichi flag — callback 7 on DrawnTile, not callback 8");
+            return ExecuteHintedDiscard(addon, _lastSeenDiscardTile ?? "", _lastSeenDiscardIconId, allowUnhintedDrawn: true);
         }
 
         return false;
@@ -533,7 +545,7 @@ public sealed class AutoPlayManager
         // suggestion often doesn't include a specific tile name.
         if (string.IsNullOrEmpty(bestTile) && _lastCallIntentWasAccept)
         {
-            Log($"[RIICHI-DIAG] Post-riichi discard with no tile suggestion — scheduling tsumogiri");
+            Log($"[RIICHI-DIAG] Post-riichi discard with no tile suggestion — scheduling DrawnTile via callback 7 (not callback 8)");
             var tsumSig = "riichi-tsumogiri";
             if (tsumSig == _lastActionSignature)
                 return;
@@ -893,51 +905,91 @@ public sealed class AutoPlayManager
         Log($"Scheduled: {sig} attempt={_chiChoiceAttempts} preferred=[{string.Join(",", _preChiSuggestionTiles ?? new List<string>())}] (execute at +{delayMs}ms)");
     }
 
-    private unsafe bool ExecuteDiscard(AtkUnitBase* addon, string tileCode)
+    /// <summary>
+    /// Discard the live hint via FireCallback 7 (same as a working normal turn).
+    /// Matches MahjongHandReader closed-hand type 1055 tiles first, then the true
+    /// drawn type 1022 tile only if it is the hint. Never FireCallback 8.
+    /// Success requires ATK to change.
+    /// </summary>
+    private unsafe bool ExecuteHintedDiscard(AtkUnitBase* addon, string tileCode, int? hintIconId, bool allowUnhintedDrawn)
     {
-        if (_lastHandSlots == null || _lastHandSlots.Count == 0)
+        var before = SnapshotAtk(addon);
+        var snapshot = MahjongHandReader.Read(addon, _iconCapture, _iconMap);
+        var closedHand = snapshot.HandTiles.OrderBy(t => t.X).ToList();
+        var drawn = snapshot.DrawnTile;
+
+        bool MatchesHint(MahjongHandReader.MahjongTileObservation t)
         {
-            Log($"Cannot discard {tileCode}: no hand slots available");
+            var nameMatch = !string.IsNullOrEmpty(tileCode) && t.TileCode != null &&
+                            TileCodesMatch(t.TileCode, tileCode);
+            var iconMatch = hintIconId is > 0 && t.IconId == (uint)hintIconId.Value;
+            return nameMatch || iconMatch;
+        }
+
+        var attempts = new List<(int Pos, int Node, string Reason)>();
+
+        void AddAttempt(int pos, int node, string reason)
+        {
+            if (pos is < 0 or > 13)
+                return;
+            if (attempts.Any(a => a.Pos == pos))
+                return;
+            attempts.Add((pos, node, reason));
+        }
+
+        var hasHint = !string.IsNullOrEmpty(tileCode) || hintIconId is > 0;
+        if (hasHint)
+        {
+            for (var i = 0; i < closedHand.Count; i++)
+            {
+                var t = closedHand[i];
+                if (MatchesHint(t))
+                    AddAttempt(i, t.NodeIndex, $"hint-closed pos={i} node={t.NodeIndex} code={t.TileCode} icon={t.IconId}");
+            }
+
+            if (drawn != null && MatchesHint(drawn))
+                AddAttempt(13, drawn.NodeIndex, $"hint-drawn node={drawn.NodeIndex} code={drawn.TileCode} — callback 7 pos=13, not callback 8");
+        }
+
+        if (attempts.Count == 0 && allowUnhintedDrawn && drawn != null)
+            AddAttempt(13, drawn.NodeIndex, $"unhinted-drawn node={drawn.NodeIndex} code={drawn.TileCode} type={drawn.NodeType}");
+
+        var closedDesc = string.Join(",", closedHand.Select(t => $"{t.TileCode ?? "?"}(icon={t.IconId} node={t.NodeIndex})"));
+        var drawnDesc = drawn != null ? $"{drawn.TileCode}(icon={drawn.IconId} node={drawn.NodeIndex} type={drawn.NodeType})" : "none";
+        Log($"[DISCARD] Hint tile={tileCode ?? "(none)"} icon={hintIconId?.ToString() ?? "(none)"} atk0={before.ElementAtOrDefault(0)} closed=[{closedDesc}] draw={drawnDesc} attempts={attempts.Count}");
+
+        if (attempts.Count == 0)
+        {
+            Log($"[DISCARD] No MahjongHandReader match for hint '{tileCode}' — not clicking a latest/drawn tile and not firing callback 8");
             return false;
         }
 
-        // Get the canonical hand (sorted left-to-right, excluding drawn tile)
-        var handSlots = _lastHandSlots
-            .Where(s => s.Kind == EmjUiReader.SlotKind.CanonicalPlayerHand)
-            .Where(s => s.Visible && s.TileCode != null)
-            .OrderBy(s => s.SlotIndex)
-            .ToList();
-
-        // Check if the drawn tile matches the suggested discard (tsumogiri)
-        var drawnSlot = _lastHandSlots
-            .Where(s => s.Kind == EmjUiReader.SlotKind.CanonicalPlayerDraw)
-            .Where(s => s.Visible && s.TileCode != null)
-            .FirstOrDefault();
-
-        if (drawnSlot != null && TileCodesMatch(drawnSlot.TileCode!, tileCode))
+        foreach (var attempt in attempts)
         {
-            Log($"Executing tsumogiri: {tileCode} (drawn tile matches suggestion)");
-            return AddonClickHelper.TryDiscardDrawnTile(addon);
+            Log($"[DISCARD] FireCallback 7 handPos={attempt.Pos} reason={attempt.Reason}");
+            AddonClickHelper.TryDiscardTile(addon, attempt.Pos);
+            var after7 = SnapshotAtk(addon);
+            if (AtkChanged(before, after7))
+            {
+                Log($"[DISCARD] Callback 7 pos={attempt.Pos} changed ATK atk0 {before.ElementAtOrDefault(0)}->{after7.ElementAtOrDefault(0)}");
+                return true;
+            }
+
+            Log($"[DISCARD] Callback 7 pos={attempt.Pos} did not change ATK — clicking hint node {attempt.Node}");
+            foreach (var method in new[] { 1, 2, 5 })
+            {
+                AddonClickHelper.TryClickTileNode(addon, attempt.Node, execute: true, method);
+                var afterNode = SnapshotAtk(addon);
+                if (AtkChanged(before, afterNode))
+                {
+                    Log($"[DISCARD] Hint node {attempt.Node} method={method} changed ATK");
+                    return true;
+                }
+            }
         }
 
-        // Find the hand position (0 = leftmost) of the tile to discard
-        // Server returns M5/P5/S5 for red doras, but hand uses M0/P0/S0 — match both
-        var matchingSlot = handSlots
-            .FirstOrDefault(s => TileCodesMatch(s.TileCode!, tileCode));
-
-        if (matchingSlot == null)
-        {
-            var handTiles = string.Join(",", handSlots.Select(s => $"{s.TileCode}(icon={s.IconId} idx={s.SlotIndex})"));
-            var drawnTileInfo = drawnSlot != null ? $"{drawnSlot.TileCode}(icon={drawnSlot.IconId})" : "none";
-            var totalSlots = _lastHandSlots.Count;
-            var canonCount = handSlots.Count;
-            Log($"Cannot discard {tileCode}: no matching hand slot found in canonical hand ({canonCount} canonical, {totalSlots} total). hand=[{handTiles}] draw={drawnTileInfo}");
-            return false;
-        }
-
-        var handPos = matchingSlot.SlotIndex;
-        Log($"Executing discard: {tileCode} handPos={handPos} (slot {matchingSlot.SlotIndex})");
-        return AddonClickHelper.TryDiscardTile(addon, handPos);
+        Log($"[DISCARD] Hint '{tileCode}' did not change ATK (still atk0={ReadAtkInt(addon, 0)}) — will retry hint, not tsumogiri");
+        return false;
     }
 
     /// <summary>

@@ -100,6 +100,7 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
     private EmjUiReader.UiState? _lastUiState;
     private string _lastActionProbeSignature = string.Empty;
     private DateTime _nextAutoplayHeartbeatUtc = DateTime.MinValue;
+    private bool _snapRequested;
 
     public Task LoadAsync(CancellationToken cancellationToken)
     {
@@ -138,7 +139,7 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "/mj — toggle debug window | /mj overlay | /mj compact | /mj auto | /mj pause | /mj leave | /mj mark discard|call | /mj probecallback <a> <b> [run] | /mj clicktile <nodeIndex> [run]"
+            HelpMessage = "/mj — toggle debug window | /mj overlay | /mj compact | /mj auto | /mj pause | /mj leave | /mj snap | /mj mark discard|call | /mj probecallback <a> <b> [run] | /mj clicktile <nodeIndex> [run]"
         });
 
         // Tell the UI system that we want our windows to be drawn through the window system
@@ -173,6 +174,14 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
 
         _readerScheduler.Update(delta);
         _iconCapture.FlushIfNeeded();
+
+        if (SnapCapture.TryConsumeRequest())
+            _snapRequested = true;
+        if (_snapRequested)
+        {
+            _snapRequested = false;
+            WriteSnapCapture("framework");
+        }
 
         var readerStatus = _emjReader.Status;
         if (MainWindow.IsOpen)
@@ -837,6 +846,11 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
         {
             LeaveStuckMatch();
         }
+        else if (lower == "snap")
+        {
+            _snapRequested = true;
+            Log.Information("/mj snap queued — writing sidecar JSON on the next framework tick");
+        }
         else if (lower == "mark discard")
         {
             AnnotateComparisonEvent("manual_discard", "User manually discarded a tile");
@@ -1159,6 +1173,125 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
 
     public void ToggleConfigUi() => ConfigWindow.Toggle();
     public void ToggleMainUi() => MainWindow.Toggle();
+
+    private void WriteSnapCapture(string source)
+    {
+        try
+        {
+            Directory.CreateDirectory(SnapCapture.CapturesDirectory);
+
+            var suggestion = _lastUiState?.GameInfo?.Suggestion;
+            var calls = _lastUiState?.GameInfo?.AvailableCalls;
+            var overlaySuggestion = OverlayWindow.LastSuggestion;
+
+            int rawAtk0 = -1;
+            int[] atkValues = Array.Empty<int>();
+            object[] closedHand = Array.Empty<object>();
+            object? drawnTile = null;
+
+            unsafe
+            {
+                if (_lastAddonAddress != 0)
+                {
+                    var addon = (AtkUnitBase*)_lastAddonAddress;
+                    var n = addon->AtkValues == null ? 0 : Math.Min(20, (int)addon->AtkValuesCount);
+                    atkValues = new int[n];
+                    for (var i = 0; i < n; i++)
+                    {
+                        try { atkValues[i] = addon->AtkValues[i].Int; }
+                        catch { atkValues[i] = int.MinValue; }
+                    }
+                    if (n > 0)
+                        rawAtk0 = atkValues[0];
+
+                    var hand = MahjongHandReader.Read(addon, _iconCapture, _iconMap);
+                    closedHand = hand.HandTiles
+                        .OrderBy(t => t.X)
+                        .Select(t => (object)new
+                        {
+                            t.NodeIndex,
+                            t.NodeId,
+                            t.NodeType,
+                            t.X,
+                            t.Y,
+                            t.IconId,
+                            t.TileCode,
+                        })
+                        .ToArray();
+                    if (hand.DrawnTile != null)
+                    {
+                        var d = hand.DrawnTile;
+                        drawnTile = new
+                        {
+                            d.NodeIndex,
+                            d.NodeId,
+                            d.NodeType,
+                            d.X,
+                            d.Y,
+                            d.IconId,
+                            d.TileCode,
+                        };
+                    }
+                }
+            }
+
+            var payload = new
+            {
+                capturedAtUtc = DateTime.UtcNow.ToString("O"),
+                source,
+                command = "/mj snap",
+                phase = _lastMergedState?.GamePhase.Value,
+                rawAtk0,
+                atkValues,
+                pendingAction = _autoPlayManager.PendingAction,
+                availableCalls = calls?.ToString(),
+                suggestion = suggestion == null
+                    ? null
+                    : new
+                    {
+                        type = suggestion.Type.ToString(),
+                        raw = suggestion.RawText,
+                        tile = suggestion.TileName,
+                        icon = suggestion.TileIconId,
+                    },
+                overlay = new
+                {
+                    visible = Configuration.OverlayVisible,
+                    compact = Configuration.OverlayCompactMode,
+                    autoPlay = Configuration.AutoPlayEnabled,
+                    paused = _autoPlayManager.IsPaused,
+                    pending = OverlayWindow.PendingAutoAction,
+                    handDescription = OverlayWindow.HandDescription,
+                    serverStatus = OverlayWindow.ServerStatus,
+                    callRecommendation = OverlayWindow.CallRecommendation,
+                    inGameSuggestion = _lastMergedState?.InGameSuggestion.Value,
+                    serverSuggestions = overlaySuggestion?.Suggestions?
+                        .Select(s => new
+                        {
+                            s.Tile,
+                            s.Shanten,
+                            s.Ukeire,
+                            s.Confidence,
+                            s.Reasoning,
+                        })
+                        .ToArray(),
+                    serverError = overlaySuggestion?.Error,
+                },
+                closedHand,
+                drawnTile,
+            };
+
+            var path = SnapCapture.WriteJson(payload);
+            var msg = $"[SNAP] wrote {path} phase={payload.phase} sug={suggestion?.Type}:{suggestion?.TileName} icon={suggestion?.TileIconId} pending={_autoPlayManager.PendingAction} atk0={rawAtk0}";
+            LogToFile("autoplay.log", msg);
+            Log.Information(msg);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "/mj snap failed");
+            LogToFile("autoplay.log", $"[SNAP] failed: {ex.Message}");
+        }
+    }
 
     private void LeaveStuckMatch()
     {

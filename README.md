@@ -28,7 +28,7 @@ The in-game **suggestion overlay** and **settings window** are KamiToolKit Nativ
   - auto-discard when it is your discard phase
   - auto call accept/pass decisions during call prompts
   - pause/resume and randomized action delays
-  - safety fallbacks for stuck phases (for example, delayed tsumogiri fallback)
+  - safety fallbacks for stuck phases (retry the live hint via FireCallback 7; never callback 8 as a discard)
 - Provides a debug window with live diagnostics, normalized state, mapping/status text, transition history, and export/copy helpers.
 
 ## Slash Commands
@@ -41,6 +41,7 @@ Main command: `/mj`
 - `/mj auto` toggles auto-play.
 - `/mj pause` pauses/resumes pending auto-play actions.
 - `/mj leave` withdraws and closes a stuck NPC mahjong match (FireCallback 16 then 19). Overlay **Leave** asks for confirmation first.
+- `/mj snap` writes overlay/suggestion sidecar JSON under `%APPDATA%/MahjongHelper/captures/` (plus a `request_snap` file-watch fallback). `scripts/mj-snap.ps1` POSTs Telesto ExecuteCommand to `http://localhost:45678/` (Host **localhost**, not `127.0.0.1`). The plugin keeps the last 10 capture files.
 - `/mj mark discard` records a manual discard marker in diagnostics.
 - `/mj mark call` records a manual call marker in diagnostics.
 
@@ -104,6 +105,7 @@ Common files include:
 
 - `server_log.txt` (HTTP request/response logs)
 - `autoplay.log` (auto-play action traces)
+- `captures/` (`/mj snap` sidecar JSON; last 10 files kept)
 - `mahjong_ui_state_history.log` (deduped UI state history)
 - `normalized_state_history.log` (deduped normalized state history)
 - `probe_history.log`, `probe_signals.log`, `tile_candidates.log` (reverse-engineering logs)

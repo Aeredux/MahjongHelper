@@ -93,8 +93,9 @@ public static unsafe class AddonClickHelper
     }
 
     /// <summary>
-    /// Discards the drawn tile (tsumogiri).
-    /// Uses FireCallback(2, [8, 0], true).
+    /// Discards the drawn tile (tsumogiri) via FireCallback(2, [8, 0], true).
+    /// At atk0=6 this same callback is skip/pass, not a discard — refuse it.
+    /// Auto-play discards must use callback 7 instead.
     /// </summary>
     public static bool TryDiscardDrawnTile(AtkUnitBase* addon)
     {
@@ -102,6 +103,15 @@ public static unsafe class AddonClickHelper
 
         try
         {
+            int atk0 = -1;
+            if (addon->AtkValues != null && addon->AtkValuesCount > 0)
+                atk0 = addon->AtkValues[0].Int;
+            if (atk0 == 6)
+            {
+                Log("[DISCARD] Refusing callback 8: atk0=6 is skip/pass, not tsumogiri");
+                return false;
+            }
+
             LogAtkSnapshot(addon, "pre-tsumogiri");
 
             var values = stackalloc AtkValue[2];
@@ -109,7 +119,7 @@ public static unsafe class AddonClickHelper
             values[1] = new AtkValue { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = 0 };
             addon->FireCallback(2, values, true);
 
-            Log($"[DISCARD] Fired callback 8 (tsumogiri)");
+            Log($"[DISCARD] Fired callback 8 (tsumogiri) atk0={atk0}");
             LogAtkSnapshot(addon, "post-tsumogiri");
             return true;
         }

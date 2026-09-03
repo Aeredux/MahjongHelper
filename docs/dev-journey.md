@@ -1,5 +1,11 @@
 # Dev Journey
 
+## 2026-09-03: Play the in-game hint; `/mj snap` (KAN-11)
+
+**What:** Live AZPC `794ab82` still discarded “latest” after 5 failed hint clicks by FireCallback 8 labeled tsumogiri. At atk0=6 that callback is skip, not a discard (ATK unchanged). Hint discards now use MahjongHandReader closed-hand/hint nodes and FireCallback 7 until ATK changes; stuck-discard retries the hint instead of tsumogiri. `/mj snap` (KAN-11) writes overlay/suggestion sidecar JSON under `%APPDATA%/MahjongHelper/captures/`, watches `request_snap`, and `scripts/mj-snap.ps1` POSTs Telesto at `http://localhost:45678/` (Host localhost). Last 10 capture files kept; PNGs are not committed.
+
+**Result:** Needs AZPC reload: autoplay.log should show callback 7 for `sug=Discard tile=X` with ATK change; `/mj snap` should write captures JSON.
+
 ## 2026-09-03: KAN-12 NativeAddon overlay and settings
 
 **What:** Switched the suggestion overlay and settings window from Dalamud ImGui to KamiToolKit NativeAddon windows. Left the debug dump window as ImGui.
