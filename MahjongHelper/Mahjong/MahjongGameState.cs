@@ -22,6 +22,11 @@ public sealed record StateField<T>(
     public static StateField<T> Missing() => new(default, MahjongStateSource.Unknown, false, false);
 }
 
+public sealed record ObservedMeld(string Type, IReadOnlyList<string> Tiles)
+{
+    public override string ToString() => Tiles.Count == 0 ? Type : $"{Type}:{string.Join(" ", Tiles)}";
+}
+
 public sealed record MahjongGameState(
     DateTime UtcCapturedAt,
     StateField<int> AgentState,
@@ -44,7 +49,15 @@ public sealed record MahjongGameState(
     StateField<string> AvailableCalls,
     StateField<string> GamePhase,
     StateField<string> CurrentTurn,
-    StateField<string> InGameSuggestion)
+    StateField<string> InGameSuggestion,
+    StateField<IReadOnlyList<bool>> PlayerTsumogiri,
+    StateField<IReadOnlyList<bool>> RightTsumogiri,
+    StateField<IReadOnlyList<bool>> OppositeTsumogiri,
+    StateField<IReadOnlyList<bool>> LeftTsumogiri,
+    StateField<IReadOnlyList<ObservedMeld>> PlayerMelds,
+    StateField<IReadOnlyList<ObservedMeld>> RightMelds,
+    StateField<IReadOnlyList<ObservedMeld>> OppositeMelds,
+    StateField<IReadOnlyList<ObservedMeld>> LeftMelds)
 {
     public string ToDisplayText()
     {
@@ -64,11 +77,15 @@ public sealed record MahjongGameState(
         sb.AppendLine($"RiichiStatus: {FormatValue(RiichiStatus)}");
         sb.AppendLine($"AvailableCalls: {FormatValue(AvailableCalls)}");
         sb.AppendLine($"CurrentTurn: {FormatValue(CurrentTurn)}");
-        sb.AppendLine($"PlayerDiscards: {FormatValue(PlayerDiscards)}");
-        sb.AppendLine($"RightDiscards: {FormatValue(RightDiscards)}");
-        sb.AppendLine($"OppositeDiscards: {FormatValue(OppositeDiscards)}");
-        sb.AppendLine($"LeftDiscards: {FormatValue(LeftDiscards)}");
-        sb.AppendLine($"DoraIndicators: {FormatValue(DoraIndicators)}");
+        sb.AppendLine($"PlayerDiscards: {FormatPond(PlayerDiscards, PlayerTsumogiri)}");
+        sb.AppendLine($"RightDiscards: {FormatPond(RightDiscards, RightTsumogiri)}");
+        sb.AppendLine($"OppositeDiscards: {FormatPond(OppositeDiscards, OppositeTsumogiri)}");
+        sb.AppendLine($"LeftDiscards: {FormatPond(LeftDiscards, LeftTsumogiri)}");
+        sb.AppendLine($"DoraIndicators: {FormatValue(DoraIndicators)}  (Doman panel = dora, no Tenhou remap)");
+        sb.AppendLine($"PlayerMelds: {FormatMelds(PlayerMelds)}");
+        sb.AppendLine($"RightMelds: {FormatMelds(RightMelds)}");
+        sb.AppendLine($"OppositeMelds: {FormatMelds(OppositeMelds)}");
+        sb.AppendLine($"LeftMelds: {FormatMelds(LeftMelds)}");
         return sb.ToString();
     }
 
@@ -80,6 +97,7 @@ public sealed record MahjongGameState(
             IReadOnlyList<uint> ids => ids.Count == 0 ? "(empty)" : string.Join(", ", ids),
             IReadOnlyList<string> strs => strs.Count == 0 ? "(empty)" : string.Join(" ", strs),
             IReadOnlyList<bool> bools => string.Join(", ", bools.Select(b => b ? "Y" : "N")),
+            IReadOnlyList<ObservedMeld> melds => melds.Count == 0 ? "(empty)" : string.Join(" | ", melds),
             _ => field.Value!.ToString() ?? "(missing)",
         };
 
@@ -94,10 +112,39 @@ public sealed record MahjongGameState(
 
         return $"{valueText} [{string.Join(", ", tags)}]";
     }
+
+    private static string FormatPond(StateField<IReadOnlyList<string>> tiles, StateField<IReadOnlyList<bool>> tsumogiri)
+    {
+        if (tiles.Value == null || tiles.Value.Count == 0)
+            return FormatValue(tiles);
+
+        var flags = tsumogiri.Value;
+        var parts = new List<string>();
+        for (var i = 0; i < tiles.Value.Count; i++)
+        {
+            var tile = tiles.Value[i];
+            var mark = flags != null && i < flags.Count && flags[i] ? "*" : "";
+            parts.Add(tile + mark);
+        }
+
+        var tags = new List<string>
+        {
+            $"src={tiles.Source}",
+            tiles.IsAuthoritative ? "authoritative" : "non-authoritative",
+        };
+        if (tiles.IsFallback)
+            tags.Add("fallback");
+        return $"{string.Join(" ", parts)}  (* = tsumogiri) [{string.Join(", ", tags)}]";
+    }
+
+    private static string FormatMelds(StateField<IReadOnlyList<ObservedMeld>> field)
+        => FormatValue(field);
 }
 
 public static class MahjongGameStateBuilder
 {
+    internal static readonly PondTsumogiriTracker TsumogiriTracker = new();
+
     public static MahjongGameState Merge(int? probeAgentState, EmjUiReader.UiState nodeState, MahjongGameState? previous)
     {
         var now = DateTime.UtcNow;
@@ -194,6 +241,32 @@ public static class MahjongGameStateBuilder
             ? new StateField<string>(turnStr, MahjongStateSource.Node, IsAuthoritative: true, IsFallback: false)
             : StateField<string>.Missing();
 
+        if (phaseStr is "BetweenRounds" or "GameOver")
+            TsumogiriTracker.Reset();
+
+        var drawCode = nodeState.Slots
+            .Where(s => s.Kind == EmjUiReader.SlotKind.CanonicalPlayerDraw)
+            .Select(s => s.TileCode)
+            .FirstOrDefault(MeldClassifier.IsUsableTile);
+
+        var mergedPlayerTsumogiri = MergeTsumogiri(
+            PondTsumogiriTracker.Player, nodeState, EmjUiReader.SlotKind.PlayerDiscard,
+            mergedPlayerDiscards, drawCode, previous?.PlayerTsumogiri);
+        var mergedRightTsumogiri = MergeTsumogiri(
+            PondTsumogiriTracker.Right, nodeState, EmjUiReader.SlotKind.RightDiscard,
+            mergedRightDiscards, null, previous?.RightTsumogiri);
+        var mergedOppositeTsumogiri = MergeTsumogiri(
+            PondTsumogiriTracker.Opposite, nodeState, EmjUiReader.SlotKind.OppositeDiscard,
+            mergedOppositeDiscards, null, previous?.OppositeTsumogiri);
+        var mergedLeftTsumogiri = MergeTsumogiri(
+            PondTsumogiriTracker.Left, nodeState, EmjUiReader.SlotKind.LeftDiscard,
+            mergedLeftDiscards, null, previous?.LeftTsumogiri);
+
+        var mergedPlayerMelds = MergeMeldField(nodeState, EmjUiReader.SlotKind.PlayerMeld, previous?.PlayerMelds);
+        var mergedRightMelds = MergeMeldField(nodeState, EmjUiReader.SlotKind.RightMeld, previous?.RightMelds);
+        var mergedOppositeMelds = MergeMeldField(nodeState, EmjUiReader.SlotKind.OppositeMeld, previous?.OppositeMelds);
+        var mergedLeftMelds = MergeMeldField(nodeState, EmjUiReader.SlotKind.LeftMeld, previous?.LeftMelds);
+
         return new MahjongGameState(
             now,
             mergedAgentState,
@@ -216,7 +289,15 @@ public static class MahjongGameStateBuilder
             mergedCalls,
             mergedPhase,
             mergedCurrentTurn,
-            mergedSuggestion);
+            mergedSuggestion,
+            mergedPlayerTsumogiri,
+            mergedRightTsumogiri,
+            mergedOppositeTsumogiri,
+            mergedLeftTsumogiri,
+            mergedPlayerMelds,
+            mergedRightMelds,
+            mergedOppositeMelds,
+            mergedLeftMelds);
     }
 
     private static StateField<int> MergeNullableInt(int? current, StateField<int>? previous)
@@ -248,6 +329,74 @@ public static class MahjongGameStateBuilder
             return prev with { Source = MahjongStateSource.Cached, IsAuthoritative = false, IsFallback = true };
 
         return StateField<IReadOnlyList<string>>.Missing();
+    }
+
+    private static StateField<IReadOnlyList<bool>> MergeTsumogiri(
+        int playerIndex,
+        EmjUiReader.UiState nodeState,
+        EmjUiReader.SlotKind kind,
+        StateField<IReadOnlyList<string>> discards,
+        string? playerDraw,
+        StateField<IReadOnlyList<bool>>? previous)
+    {
+        var slots = nodeState.Slots
+            .Where(s => s.Kind == kind)
+            .OrderBy(s => s.SlotIndex)
+            .ToArray();
+
+        if (slots.Length == 0)
+        {
+            if (previous is { Value: not null } prev && prev.Value.Count > 0)
+                return prev with { Source = MahjongStateSource.Cached, IsAuthoritative = false, IsFallback = true };
+            return StateField<IReadOnlyList<bool>>.Missing();
+        }
+
+        var observed = slots.Select(s => s.Tsumogiri).ToArray();
+        var flags = TsumogiriTracker.Update(playerIndex, discards.Value, observed, playerDraw);
+        return new StateField<IReadOnlyList<bool>>(flags, MahjongStateSource.Node, IsAuthoritative: true, IsFallback: false);
+    }
+
+    private static StateField<IReadOnlyList<ObservedMeld>> MergeMeldField(
+        EmjUiReader.UiState nodeState,
+        EmjUiReader.SlotKind kind,
+        StateField<IReadOnlyList<ObservedMeld>>? previous)
+    {
+        var slots = nodeState.Slots
+            .Where(s => s.Kind == kind)
+            .OrderBy(s => s.SlotIndex)
+            .ToArray();
+
+        if (slots.Length == 0)
+        {
+            if (previous is { Value: not null } prev && prev.Value.Count > 0)
+                return prev with { Source = MahjongStateSource.Cached, IsAuthoritative = false, IsFallback = true };
+            return StateField<IReadOnlyList<ObservedMeld>>.Missing();
+        }
+
+        var byParent = slots
+            .GroupBy(s => s.ParentNodeId)
+            .OrderBy(g => g.Min(s => s.SlotIndex))
+            .ToList();
+
+        var melds = new List<ObservedMeld>();
+        foreach (var group in byParent)
+        {
+            var tiles = group
+                .OrderBy(s => s.SlotIndex)
+                .Select(s => s.TileCode ?? (s.IconId > 0 ? $"ICON_{s.IconId}" : "?"))
+                .Where(MeldClassifier.IsUsableTile)
+                .ToArray();
+            melds.AddRange(MeldClassifier.SplitIntoMelds(tiles));
+        }
+
+        if (melds.Count == 0)
+        {
+            if (previous is { Value: not null } prev && prev.Value.Count > 0)
+                return prev with { Source = MahjongStateSource.Cached, IsAuthoritative = false, IsFallback = true };
+            return StateField<IReadOnlyList<ObservedMeld>>.Missing();
+        }
+
+        return new StateField<IReadOnlyList<ObservedMeld>>(melds, MahjongStateSource.Node, IsAuthoritative: true, IsFallback: false);
     }
 
     private static string BuildHandDescription(EmjUiReader.UiState nodeState)

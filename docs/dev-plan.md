@@ -65,7 +65,7 @@ A Dalamud plugin for FFXIV's Doman Mahjong (Gold Saucer) that reads in-game stat
 | Endpoint | Method | Purpose |
 |---|---|---|
 | `/api/health` | GET | Health check |
-| `/api/suggest-move` | POST | Given hand (13–14 tiles), returns ranked discard suggestions with shanten, ukeire, confidence, reasoning |
+| `/api/suggest-move` | POST | Given hand (13–14 tiles) plus table state (`dora`, own `discard_tiles`, opponent ponds with `tsumogiri`, own+opponent `melds`, seat/round wind), returns ranked discard suggestions with shanten, ukeire, confidence, reasoning |
 | `/api/evaluate-call` | POST | Evaluates whether to chi/pon/kan/ron/riichi/tsumo |
 | `/api/validate-move` | POST | Checks if a discard is legal |
 | `/api/history` | GET | Past suggestion history |

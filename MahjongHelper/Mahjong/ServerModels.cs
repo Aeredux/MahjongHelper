@@ -21,6 +21,30 @@ public sealed class SuggestMoveRequest
 
     [JsonPropertyName("round_wind")]
     public string? RoundWind { get; set; }
+
+    /// <summary>
+    /// Doman dora panel tiles as displayed. The panel tile IS the dora (no Tenhou +1 remap).
+    /// </summary>
+    [JsonPropertyName("dora")]
+    public List<string>? Dora { get; set; }
+
+    /// <summary>
+    /// Caller's own pond (Java <c>discardTiles</c> / API <c>discard_tiles</c>).
+    /// </summary>
+    [JsonPropertyName("discard_tiles")]
+    public List<string>? DiscardTiles { get; set; }
+
+    /// <summary>
+    /// Caller's own open/closed melds.
+    /// </summary>
+    [JsonPropertyName("melds")]
+    public List<MeldInfo>? Melds { get; set; }
+
+    /// <summary>
+    /// Caller's pond + tsumogiri + melds + riichi, same shape as an opponents[] entry.
+    /// </summary>
+    [JsonPropertyName("player")]
+    public OpponentInfo? Player { get; set; }
 }
 
 public sealed class OpponentInfo
@@ -33,6 +57,18 @@ public sealed class OpponentInfo
 
     [JsonPropertyName("riichi")]
     public bool Riichi { get; set; }
+
+    [JsonPropertyName("melds")]
+    public List<MeldInfo>? Melds { get; set; }
+}
+
+public sealed class MeldInfo
+{
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = "";
+
+    [JsonPropertyName("tiles")]
+    public List<string> Tiles { get; set; } = [];
 }
 
 public sealed class DiscardedTile
@@ -75,6 +111,18 @@ public sealed class EvaluateCallRequest
 
     [JsonPropertyName("round_wind")]
     public string? RoundWind { get; set; }
+
+    [JsonPropertyName("dora")]
+    public List<string>? Dora { get; set; }
+
+    [JsonPropertyName("discard_tiles")]
+    public List<string>? DiscardTiles { get; set; }
+
+    [JsonPropertyName("melds")]
+    public List<MeldInfo>? Melds { get; set; }
+
+    [JsonPropertyName("player")]
+    public OpponentInfo? Player { get; set; }
 }
 
 public sealed class ValidateMoveRequest

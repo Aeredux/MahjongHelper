@@ -311,7 +311,11 @@ public class MainWindow : Window, IDisposable
                 line.StartsWith("RightDiscards:", StringComparison.Ordinal) ||
                 line.StartsWith("OppositeDiscards:", StringComparison.Ordinal) ||
                 line.StartsWith("LeftDiscards:", StringComparison.Ordinal) ||
-                line.StartsWith("DoraIndicators:", StringComparison.Ordinal))
+                line.StartsWith("DoraIndicators:", StringComparison.Ordinal) ||
+                line.StartsWith("PlayerMelds:", StringComparison.Ordinal) ||
+                line.StartsWith("RightMelds:", StringComparison.Ordinal) ||
+                line.StartsWith("OppositeMelds:", StringComparison.Ordinal) ||
+                line.StartsWith("LeftMelds:", StringComparison.Ordinal))
             {
                 sb.AppendLine(line);
             }
