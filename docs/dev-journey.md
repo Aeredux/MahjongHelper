@@ -1,5 +1,20 @@
 # Dev Journey
 
+## 2026-09-05: KAN-55 `/mj screenshot` via game API / PrintScreen
+
+**What:** Added `/mj screenshot` (alias `/mj printscreen`) on master after KAN-12 NativeAddon. `/mj snap` stays JSON-only.
+
+**Why:** Telesto `ExecuteCommand` can run slash commands but cannot press PrintScreen. The game already writes PNGs to the usual screenshots folder.
+
+**Approach (in plugin, Telesto not required):**
+1. `FFXIVClientStructs` `ScreenShot.Instance()->ScheduleScreenShot` on the next framework tick.
+2. Else look up `InputId.KEY_SCREENSHOT` and `SendInput` that virtual key (+ modifiers).
+3. Else emulate `VK_SNAPSHOT` / PrintScreen (`SendInput`, then `keybd_event` if SendInput returns 0) so the game’s normal screenshot handler runs.
+4. Chat line with folder hint; ~2s later print the newest PNG/JPG if one appeared. Hide UI / Scroll Lock is not toggled (not reliable enough to flip blindly).
+
+**Result:** Cloud VM cannot press a live client. AZPC: rebuild Release, reload plugin, `/mj screenshot` during EmjL with overlay on; expect a new file under `Documents\My Games\FINAL FANTASY XIV - A Realm Reborn\screenshots`. Chat may appear in the shot.
+
+
 ## 2026-09-03: Same-tick FireCallback 7 after Riichi ListItemClick passes riichi
 
 **What:** Live AZPC 10:56:08Z. Provider accepted Riichi (savedTile=M7). ListItemClick index=0, then **same tick** FireCallback 7 handPos=8 for M7. ATK unchanged on the discard; 40ms later RiichiDecisionPrompt → OpponentTurn, pending `riichi-discard` cleared as stale. Heartbeat still `calls=Riichi, Skip`. M7 went out as a normal discard; later `discard:WEST` — they were not in riichi. Contrast 11:20:55Z S5: same same-tick callback 7 but it targeted the **wrong** tile (S0 vs S5); ListItemClick itself completed riichi+discard of S5.

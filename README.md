@@ -41,7 +41,8 @@ Main command: `/mj`
 - `/mj auto` toggles auto-play.
 - `/mj pause` pauses/resumes pending auto-play actions.
 - `/mj leave` withdraws and closes a stuck NPC mahjong match (FireCallback 16 then 19). Overlay **Leave** asks for confirmation first.
-- `/mj snap` writes overlay/suggestion sidecar JSON under `%APPDATA%/MahjongHelper/captures/` (plus a `request_snap` file-watch fallback). `scripts/mj-snap.ps1` POSTs Telesto ExecuteCommand to `http://localhost:45678/` (Host **localhost**, not `127.0.0.1`). The plugin keeps the last 10 capture files.
+- `/mj snap` writes overlay/suggestion sidecar JSON under `%APPDATA%/MahjongHelper/captures/` (plus a `request_snap` file-watch fallback). JSON-only — it does **not** take a PNG. `scripts/mj-snap.ps1` POSTs Telesto ExecuteCommand to `http://localhost:45678/` (Host **localhost**, not `127.0.0.1`). The plugin keeps the last 10 capture files.
+- `/mj screenshot` (alias `/mj printscreen`) fires FFXIV’s built-in screenshot so a PNG lands in `Documents\My Games\FINAL FANTASY XIV - A Realm Reborn\screenshots` (or the current client path). Priority: game `ScreenShot.ScheduleScreenShot` → bound `KEY_SCREENSHOT` key → emulate `VK_SNAPSHOT` / PrintScreen. Telesto is not required (PrintScreen is a keybind, not a slash command); Telesto can still `ExecuteCommand` `/mj screenshot` if you want a remote trigger. Hide UI / Scroll Lock is **not** toggled — hide HUD yourself if you want a clean table shot. After firing, chat prints the folder and, when a new file appears within ~2s, the newest path.
 - `/mj mark discard` records a manual discard marker in diagnostics.
 - `/mj mark call` records a manual call marker in diagnostics.
 
@@ -116,4 +117,4 @@ Common files include:
 - This plugin automates in-game decisions and click actions when auto-play is enabled.
 - Server suggestions are only used when server mode is selected and the local server is reachable.
 - If the overlay is enabled but EmjL is not open, the overlay will remain hidden until a readable Mahjong state is available.
-- Native overlay and settings windows appear in vanilla screenshots. The ImGui debug dump (`/mj`) does not.
+- Native overlay and settings windows appear in vanilla screenshots (`/mj screenshot` / Print Screen). The ImGui debug dump (`/mj`) does not.

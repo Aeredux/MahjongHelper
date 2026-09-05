@@ -19,4 +19,4 @@ catch {
 
 $capturesDir = Join-Path $env:APPDATA 'MahjongHelper\captures'
 Write-Host "Sidecar JSON (if the plugin is healthy) lands in $capturesDir"
-Write-Host 'Print Screen / monitor PNG is separate; never commit PNGs. Plugin keeps the last 10 capture files.'
+Write-Host 'JSON-only. For a vanilla FFXIV PNG use /mj screenshot (in-plugin game API / PrintScreen). Telesto can ExecuteCommand that slash command too; it does not fire PrintScreen itself. Never commit PNGs. Plugin keeps the last 10 capture files.'
