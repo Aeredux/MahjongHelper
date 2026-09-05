@@ -48,13 +48,13 @@ public sealed class PondTsumogiriTracker
             shared = 0;
 
         var flags = new bool[tiles.Length];
-        var grewByOne = tiles.Length == prevTiles.Length + 1;
+        var pondGrew = tiles.Length > prevTiles.Length;
         for (var i = 0; i < tiles.Length; i++)
         {
             var fromUi = i < observed.Length && observed[i];
             var fromHistory = i < shared && i < prevFlags.Length && prevFlags[i];
             var fromDraw = playerIndex == Player
-                           && grewByOne
+                           && pondGrew
                            && i == tiles.Length - 1
                            && string.Equals(tiles[i], _lastPlayerDraw, StringComparison.Ordinal);
             flags[i] = fromUi || fromHistory || fromDraw;
@@ -63,7 +63,7 @@ public sealed class PondTsumogiriTracker
         _ponds[playerIndex] = tiles;
         _flags[playerIndex] = flags;
 
-        if (playerIndex == Player && grewByOne)
+        if (playerIndex == Player && pondGrew)
             _lastPlayerDraw = null;
 
         return flags;
