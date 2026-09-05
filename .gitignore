@@ -2,3 +2,8 @@
 obj/
 bin/
 *.user
+# KAN-11 capture evidence lives in %APPDATA%/MahjongHelper/captures — never commit PNGs
+captures/
+*.png
+!Data/goat.png
+!**/goat.png

@@ -1,5 +1,99 @@
 # Dev Journey
 
+## 2026-09-03: Same-tick FireCallback 7 after Riichi ListItemClick passes riichi
+
+**What:** Live AZPC 10:56:08Z. Provider accepted Riichi (savedTile=M7). ListItemClick index=0, then **same tick** FireCallback 7 handPos=8 for M7. ATK unchanged on the discard; 40ms later RiichiDecisionPrompt → OpponentTurn, pending `riichi-discard` cleared as stale. Heartbeat still `calls=Riichi, Skip`. M7 went out as a normal discard; later `discard:WEST` — they were not in riichi. Contrast 11:20:55Z S5: same same-tick callback 7 but it targeted the **wrong** tile (S0 vs S5); ListItemClick itself completed riichi+discard of S5.
+
+**Why:** FireCallback 7 on the declared tile before riichi is armed races the declaration. Hitting the correct tile = pass + normal discard. ListItemClick used hardcoded index=0, not the Riichi label.
+
+**Fix:** After Riichi click, do not FireCallback 7 in the same tick. Retry the Riichi button (resolved by label, never Skip) until the prompt is gone and calls no longer include Riichi. Then discard the saved tile with callback 7 if still needed. OpponentTurn without Riichi in calls is success (discard already landed). OpponentTurn with Riichi still in calls is a failed declare — do not assume riichi, do not tsumogiri. Keep: no ReceiveEvent on tiles, no callback 8 as discard, one callback 7 per tick, atk0 2/6/30, delay floor 1500ms.
+
+**Result:** Needs AZPC reload. Expect `[RIICHI-DIAG] skipping same-tick FireCallback 7` then either SUCCESS (OpponentTurn, no Riichi in calls) or a later callback 7 after the button is gone.
+
+## 2026-09-03: Callback 7 handPos 13 is the 14th closed tile
+
+**What:** Live AZPC 03:51–03:52 PT on `5aa1659` after rebuild+auto-reload. `WaitingForDiscard` `atk0=6` `sug=Discard tile=RED icon=76074`. Eligible listed RED at **index 13** (`node=54`); draw was M1 node 102 type 1022. Matcher logged `eligibleIndex=13` / `not in callback 7 closed slots 0-12` / `attempts=0` and never fired.
+
+**Why:** `TryDiscardTile` already accepts handPos 0–13 (14 tiles). `5aa1659` still required `pos <= 12` after matching, leftover from treating pos 13 as the type-1022 draw. WEST at node 58 was a 55–58 placeholder; dropping it left 14 eligible tiles, so RED at 13 is the 14th closed slot, not an illegal “latest”.
+
+**Fix:** FireCallback 7 for a live hint at eligibleIndex 0–13. Do not treat slot 13 as type-1022. Do not ReceiveEvent. Do not callback 8 at atk0=6/30. If callback 7 is a no-op, wait and retry.
+
+**Result:** Needs AZPC reload. Jade waits ~10s after rebuild for auto-reload. Expect `[DISCARD] FireCallback 7 handPos=13` for RED with ATK change.
+
+## 2026-09-03: GREEN at node 54 never reached callback 7
+
+**What:** Live AZPC 03:20 PT / 10:20 UTC, head `8390867`. `WaitingForDiscard` `atk0=30` `sug=Discard tile=GREEN icon=76073`. Overlay dump listed `GREEN(icon=76073 node=54)` in closed hand; draw was M1 node 104 type 1022. Matcher logged `No MahjongHandReader match` / `attempts=0`, rescheduled +1500ms, and stuck-discard never fired callback 7.
+
+**Why:** `MahjongHandReader` collects every visible type-1055 42×55 node, including stale placeholders 55–58. Matching used that unfiltered X-index as FireCallback 7 pos and dropped `pos > 13`, so GREEN at 54 could be logged and still never qualify. Node 54 is a real closed slot (draw is type 1022), not a tsumogiri to skip.
+
+**Fix:** Match icon id and tile code from the same closed=[] list already logged. Map hits onto callback 7 pos 0–12 via nodes 54 + 59–71 only. Keep node 54. Do not ReceiveEvent-click nodes. Do not FireCallback 8. If callback 7 is a no-op, wait and retry callback 7.
+
+**Result:** Needs AZPC reload. Expect `[DISCARD] FireCallback 7` for GREEN with ATK change, not `attempts=0`. `/mj leave` still unsticks.
+
+## 2026-09-03: Native crash — no ReceiveEvent discard fallback; delay floor 1500ms
+
+**What:** AZPC dump `dalamud_appcrash_20260903_011955_213_26372`: `C0000005` in `Client::UI::AddonEmj.ReceiveEvent`. Managed stack `TryClickTileNode` → `ExecuteHintedDiscard` → `Update` → `OnFrameworkUpdate`. All delays were 500ms. Log: `atk0=15`, FireCallback 7 pos=13 then ReceiveEvent methods 1/2/5 on closed-hand node 59 (WHITE). Game died on method 2.
+
+**Verified:** atk0=15 is opponent/incoming-call, not discard-ready (2/6/30). ReceiveEvent on a 1055 tile in that state native-crashes. Removed autoplay `TryClickTileNode`. One FireCallback 7 per tick; retry later if ATK unchanged. Delay min/max floor 1500ms in config + settings UI.
+
+**Result:** Needs AZPC reload. autoplay.log should not contain CLICK-TEST/ReceiveEvent on hand tiles; atk0=15 should log “Not discard-ready” and wait.
+
+## 2026-09-03: Play the in-game hint; `/mj snap` (KAN-11)
+
+**What:** Live AZPC `794ab82` still discarded “latest” after 5 failed hint clicks by FireCallback 8 labeled tsumogiri. At atk0=6 that callback is skip, not a discard (ATK unchanged). Hint discards now use MahjongHandReader closed-hand/hint nodes and FireCallback 7 until ATK changes; stuck-discard retries the hint instead of tsumogiri. `/mj snap` (KAN-11) writes overlay/suggestion sidecar JSON under `%APPDATA%/MahjongHelper/captures/`, watches `request_snap`, and `scripts/mj-snap.ps1` POSTs Telesto at `http://localhost:45678/` (Host localhost). Last 10 capture files kept; PNGs are not committed.
+
+**Result:** Needs AZPC reload: autoplay.log should show callback 7 for `sug=Discard tile=X` with ATK change; `/mj snap` should write captures JSON.
+
+## 2026-09-03: KAN-12 NativeAddon overlay and settings
+
+**What:** Switched the suggestion overlay and settings window from Dalamud ImGui to KamiToolKit NativeAddon windows. Left the debug dump window as ImGui.
+
+**Why:** Native FFXIV screenshots omit Dalamud ImGui, so `/mj snap` PNGs (KAN-11) miss the overlay even when sidecar JSON has the text. KamiToolKit native addons render in the game UI tree and appear in Print Screen, matching VanillaPlus.
+
+**Changes made:**
+- Added MidoriKami/KamiToolKit as a git submodule and project reference (Dalamud.NET.Sdk 15).
+- Rewrote `SuggestionOverlayWindow` and `ConfigWindow` as `NativeAddon` subclasses (compact/full overlay, provider/auto-play/delay settings).
+- Kept `MainWindow` on `WindowSystem` ImGui. `/mj`, `/mj overlay`, `/mj compact`, `/mj auto`, `/mj pause` still wired in `Plugin.cs`.
+- README notes native UI vs ImGui debug window; CI checks out submodules.
+
+**Result:** Overlay and settings are native addons. Debug dump remains ImGui. Live in-game Print Screen verification was not possible on the cloud VM.
+
+## 2026-09-03: KAN-12 review — Open/Close race and full overlay rows
+
+**What:** Review fixes on `cursor/kan-12-native-addon-6e0c`. Overlay `ApplyVisibility` now Open()s only when `InternalAddon` is null and Close()s only when currently visible, so close-animation ticks cannot skip a later Open. Full overlay is one HorizontalListNode per suggestion (no PadRight), with top-pick gold, per-row reasoning tooltips, and restored shanten/ukeire/server-status colors. Refresh runs in OnDraw and only resizes on layout change. Settings live-sync `/mj auto` in OnUpdate and use ScrollingNode (max height 400). CI checks out submodules recursively.
+
+**Result:** Build still needs a client for Print Screen and live `/mj overlay` during EmjL.
+
+## 2026-09-03: KAN-12 second review — async dispose, settings auto-off, checkbox write-back
+
+**What:** Second-reviewer follow-up on `cursor/kan-12-native-addon-6e0c`. Plugin is `IAsyncDalamudPlugin`. Unload awaits NativeAddon `DisposeAsync` (so ConfigWindow's close animation can finish) then runs `KamiToolKitLibrary.Dispose` on the framework thread, matching VanillaPlus. Settings auto-play off now `ClearPending()` like `/mj auto`. `OnUpdate` still re-reads `AutoPlayEnabled` and ignores `IsChecked`-triggered `OnClick` so `/mj auto` cannot write a stale checkbox bool back into config.
+
+**Result:** Cloud VM still cannot in-game test unload-with-settings-open, `/mj auto` with settings open, or Print Screen.
+
+## 2026-09-03: KAN-12 nits — row shanten color and dispose finally
+
+**What:** Full overlay rows now color shanten with `ShantenColor` (same as compact/header). `DisposeAsync` runs `KamiToolKitLibrary.Dispose` in a finally so a NativeAddon teardown throw cannot skip library cleanup.
+
+**Result:** Build-only verification; still no in-game client.
+
+## 2026-09-03: KAN-12 plugin Author is aeredux
+
+**What:** Set `MahjongHelper.json` Author from `alvin` to `aeredux`. Name, Punchline, and Description were already plugin-specific (not SamplePlugin leftovers).
+
+**Result:** Plugin installer metadata shows aeredux.
+
+## 2026-09-03: Overlay cog, server-status gate, riichi discard, leave match
+
+**What:** In-game follow-up on `cursor/kan-12-native-addon-6e0c`. Overlay gained a settings cog (opens ConfigWindow) and a confirmed Leave control (`/mj leave` fires FireCallback 16 then 19). Server health / Disconnected is shown only when StrategyProvider is Server. After auto-play accepts Riichi, the next click is the saved riichi tile (callback 7 / tile node) while phase is still `RiichiDecisionPrompt`; callback 8 is not used because it skips the call prompt. Chi/pon/skip paths unchanged.
+
+**Result:** Cloud VM cannot in-game test cog, Leave, or post-riichi discard. Author remains aeredux.
+
+## 2026-09-03: Post-riichi discard must change ATK
+
+**What:** Live AZPC log showed Riichi ListItemClick succeeding (atk[1]/[18]=11) then a fake tsumogiri ReceiveEvent on closed-hand node 54 (S9), ATK unchanged, hang in RiichiDecisionPrompt. Capture the discard tile from the last Discard suggestion / node 45 / provider BEFORE clicking Riichi. After accept, immediately FireCallback 7 for: suggestion tile, then ATK slot [18]/[1], then MahjongHandReader DrawnTile (node 101 / type 1022). Each candidate is tried until ATK actually changes. Never callback 8, never the gap-heuristic draw node, never ReceiveEvent on a closed-hand 1055 node.
+
+**Result:** Needs an in-game reload on AZPC to confirm autoplay.log: accept then discard with ATK change then phase != RiichiDecisionPrompt.
+
 ## 2026-06-01: README rewritten to match current plugin behavior
 
 **What:** Replaced the template `README.md` content with project-specific documentation for Mahjong Helper's current feature set.

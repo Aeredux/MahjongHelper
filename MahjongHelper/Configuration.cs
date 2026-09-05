@@ -32,20 +32,57 @@ public class Configuration : IPluginConfiguration
     public bool AutoCallEnabled { get; set; } = true;
 
     /// <summary>Minimum delay in milliseconds before auto-discard executes.</summary>
-    public int AutoDiscardDelayMinMs { get; set; } = 1000;
+    public int AutoDiscardDelayMinMs { get; set; } = DelayFloorMs;
 
     /// <summary>Maximum delay in milliseconds before auto-discard executes.</summary>
     public int AutoDiscardDelayMaxMs { get; set; } = 3000;
 
     /// <summary>Minimum delay in milliseconds before auto-call decision executes.</summary>
-    public int AutoCallDelayMinMs { get; set; } = 500;
+    public int AutoCallDelayMinMs { get; set; } = DelayFloorMs;
 
     /// <summary>Maximum delay in milliseconds before auto-call decision executes.</summary>
-    public int AutoCallDelayMaxMs { get; set; } = 2000;
+    public int AutoCallDelayMaxMs { get; set; } = 3000;
+
+    /// <summary>
+    /// Floor for all autoplay delays. 500ms scheduled a native crash storm
+    /// (ReceiveEvent on a hand tile every tick at atk0=15).
+    /// </summary>
+    public const int DelayFloorMs = 1500;
+
+    public const int DelayCeilMs = 10000;
+
+    public static int ClampDelayMs(int ms)
+        => Math.Clamp(ms, DelayFloorMs, DelayCeilMs);
+
+    public void ClampAutoPlayDelays()
+    {
+        AutoDiscardDelayMinMs = ClampDelayMs(AutoDiscardDelayMinMs);
+        AutoDiscardDelayMaxMs = ClampDelayMs(AutoDiscardDelayMaxMs);
+        if (AutoDiscardDelayMaxMs < AutoDiscardDelayMinMs)
+            AutoDiscardDelayMaxMs = AutoDiscardDelayMinMs;
+
+        AutoCallDelayMinMs = ClampDelayMs(AutoCallDelayMinMs);
+        AutoCallDelayMaxMs = ClampDelayMs(AutoCallDelayMaxMs);
+        if (AutoCallDelayMaxMs < AutoCallDelayMinMs)
+            AutoCallDelayMaxMs = AutoCallDelayMinMs;
+    }
+
+    public int NextDiscardDelayMs(Random rng)
+    {
+        ClampAutoPlayDelays();
+        return rng.Next(AutoDiscardDelayMinMs, AutoDiscardDelayMaxMs + 1);
+    }
+
+    public int NextCallDelayMs(Random rng)
+    {
+        ClampAutoPlayDelays();
+        return rng.Next(AutoCallDelayMinMs, AutoCallDelayMaxMs + 1);
+    }
 
     // The below exists just to make saving less cumbersome
     public void Save()
     {
+        ClampAutoPlayDelays();
         Plugin.PluginInterface.SavePluginConfig(this);
     }
 }

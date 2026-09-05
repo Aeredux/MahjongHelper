@@ -1150,12 +1150,23 @@ public static unsafe class EmjUiReader
 
                 if (sugNode != null)
                 {
-                    // Inside node 45, find the visible tile component (child id=2)
+                    // Child id=2 is the recommended tile. Read it even if the node
+                    // reports invisible — Riichi prompts often leave tile=(none) otherwise.
                     var tileNode = FindDirectChildById(sugNode, 2);
-                    if (tileNode != null && tileNode->IsVisible())
+                    if (tileNode != null)
                     {
                         uint iconId = 0;
                         if (TryFindIcon(tileNode, iconCapture, out iconId) && iconId > 0)
+                        {
+                            tileIconId = (int)iconId;
+                            tileName = iconMap?.Resolve(iconId);
+                        }
+                    }
+
+                    if (tileIconId is null or 0)
+                    {
+                        uint iconId = 0;
+                        if (TryFindIcon(sugNode, iconCapture, out iconId) && iconId > 0)
                         {
                             tileIconId = (int)iconId;
                             tileName = iconMap?.Resolve(iconId);
@@ -1191,6 +1202,9 @@ public static unsafe class EmjUiReader
         }
         catch { return new InGameSuggestion(SuggestionType.None, ""); }
     }
+
+    public static CallOptions ScanAvailableCalls(AtkUnitBase* addon, out Dictionary<CallOptions, nint> buttonNodes)
+        => ReadCallPrompts(addon, out buttonNodes);
 
     private static CallOptions ReadCallPrompts(AtkUnitBase* addon, out Dictionary<CallOptions, nint> buttonNodes)
     {
@@ -1317,6 +1331,14 @@ public static unsafe class EmjUiReader
     }
 
     /// <summary>
+    /// ATK[0] values where FireCallback 7 is a tile discard.
+    /// 30 = draw turn, 2 = after-call discard, 6 = after draw animation / post-riichi tile select.
+    /// 15 = opponent turn or incoming call (not discard-ready). 22 = draw animation.
+    /// 25 = chi/pon choice. 29/32 = score.
+    /// </summary>
+    public static bool IsDiscardReadyAtk(int atk0) => atk0 is 2 or 6 or 30;
+
+    /// <summary>
     /// Infers the current game phase from available signals:
     /// - In-game suggestion from AtkValues[6] is the single source of truth
     /// - AtkVal[0] only used as fallback when suggestion is empty/None
@@ -1331,16 +1353,16 @@ public static unsafe class EmjUiReader
         if (sugType == SuggestionType.Scoring)
             return GamePhase.BetweenRounds;
 
-        // Discard with a visible suggestion tile = definitely our turn.
-        // Discard WITHOUT a tile icon = stale [6]="Discard" from a previous turn;
-        // only trust it when atk0 also confirms (30 = draw turn, 2 = after-call discard).
+        // Discard with a visible suggestion tile is our turn only when ATK[0] is
+        // discard-ready. [6]="Discard" stays stale into atk0=15 (opponent discard /
+        // incoming call) — clicking a hand tile there native-crashed AddonEmj.
         if (sugType == SuggestionType.Discard)
         {
-            if (suggestion?.TileIconId != null)
+            if (IsDiscardReadyAtk(atkPhase) && suggestion?.TileIconId != null)
                 return GamePhase.WaitingForDiscard;
             if (atkPhase == 30 || atkPhase == 2)
                 return GamePhase.WaitingForDiscard;
-            // Stale Discard with no tile — fall through to AtkVal fallback
+            // Stale Discard with no tile, or Discard during atk0=15/22 — fall through
         }
 
         if (sugType == SuggestionType.Pass || sugType == SuggestionType.Chi ||
