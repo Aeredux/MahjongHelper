@@ -61,7 +61,7 @@ The settings window is a native FFXIV addon (plugin installer config button, or 
 ## Prerequisites
 
 - XIVLauncher, FFXIV, and Dalamud installed and working.
-- .NET 8 SDK (Dalamud 15 / plugin build may require a newer SDK matching the current Dalamud.NET.Sdk).
+- .NET 10 SDK (Dalamud 15 / `Dalamud.NET.Sdk` currently targets `net10.0`).
 - Optional but recommended for server mode: local Mahjong solver server on `localhost:8080` implementing the endpoints above.
 
 This repo includes KamiToolKit as a git submodule (VanillaPlus-style NativeAddon windows). Clone with submodules:
