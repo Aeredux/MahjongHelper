@@ -12,5 +12,8 @@ Offline goldens for leftover / hand-strip classify. Live captures stay under
 5. Trim `allIconNodes` to trays + leftover faces + ponds + own strip needed
    for the assert. Keep `expected.snapLine`. Do not commit a 389KB snap.
 
+Goldens: `south-seat-west-chi-m4-m6`, `west-seat-empty-table`,
+`west-seat-north-pon-s2-p1`.
+
 `/mj snap` still writes `captures/snap-*.json`. A dump-ui file is the same
 node fields plus seat/round and an optional expected sidecar.
