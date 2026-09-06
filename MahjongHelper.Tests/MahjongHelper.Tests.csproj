@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <Compile Include="..\MahjongHelper\Mahjong\FfxivCfgScreenshotDir.cs" Link="FfxivCfgScreenshotDir.cs" />
+    <Compile Include="..\MahjongHelper\Mahjong\ScreenshotStuckRecovery.cs" Link="ScreenshotStuckRecovery.cs" />
   </ItemGroup>
 
   <ItemGroup>

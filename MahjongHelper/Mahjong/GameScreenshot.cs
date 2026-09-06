@@ -19,6 +19,7 @@ public static class GameScreenshot
     public const ushort VkSnapshot = 0x2C;
     public const int StuckRequestWaitMs = 3000;
     public const int CompletionWaitMs = 5000;
+    public const int StaleRequestSeconds = ScreenshotStuckRecovery.StaleRequestSeconds;
     public const int PollIntervalMs = 100;
     public const int ScreenShotLocationOffset = 0x78;
     public const int FileAccessPathLongStringOffset = 0x208;
@@ -100,6 +101,39 @@ public static class GameScreenshot
                 ? $"ScheduleScreenShot=true CanTake={canTake} RequestedNow={shot->ScreenShotRequested} priorResult={resultBefore}"
                 : $"ScheduleScreenShot=false CanTake={canTake} RequestedNow={shot->ScreenShotRequested} priorResult={resultBefore}";
             return new ScheduleAttempt(ok, canTake, requested, resultBefore, detail);
+        }
+    }
+
+    /// <summary>
+    /// Unsafe write: clear a stuck <c>ScreenShotRequested</c> so
+    /// <c>ScheduleScreenShot</c> can be retried. Framework-thread only.
+    /// </summary>
+    public static bool TryForceClearRequested(out string detail)
+    {
+        unsafe
+        {
+            var shot = ScreenShot.Instance();
+            if (shot == null)
+            {
+                detail = "ScreenShot.Instance null — cannot force-clear ScreenShotRequested";
+                return false;
+            }
+
+            var before = shot->ScreenShotRequested;
+            var result = shot->ScreenShotResult.ToString();
+            var location = TryReadLocation(shot) ?? "(none)";
+            if (!before)
+            {
+                detail = $"ScreenShotRequested already false Result={result} Location={location}";
+                return true;
+            }
+
+            shot->ScreenShotRequested = false;
+            var after = shot->ScreenShotRequested;
+            detail =
+                $"FORCE-CLEARED ScreenShotRequested true→{after} Result={result} Location={location} " +
+                "(stuck bit; relog also clears this)";
+            return !after;
         }
     }
 
@@ -191,10 +225,18 @@ public static class GameScreenshot
         var resolved = ResolveScreenshotsDirectory();
         var dirs = string.Join(" | ", EnumerateScreenshotDirectoryCandidates());
         var instance = api.InstanceAvailable ? "yes" : "null";
+        var loc = api.Location ?? "(none)";
+        var locOnDisk = api.Location == null
+            ? "n/a"
+            : (ScreenshotStuckRecovery.IsLocationMissingOnDisk(api.Location) ? "missing" : "exists");
+        var phantom = ScreenshotStuckRecovery.IsPhantomSuccess(api.Result, api.Location)
+            ? $" {ScreenshotStuckRecovery.FormatPhantomSuccess(api.Location)}"
+            : string.Empty;
         return
             $"Instance={instance} CanTake={api.CanTake} Requested={api.Requested} Result={api.Result} " +
-            $"Location={api.Location ?? "(none)"} Timestamp={api.Timestamp} " +
-            $"cfgScreenShotDir={configured} cfgFiles=[{cfgFiles}] resolved={resolved} candidates=[{dirs}]";
+            $"Location={loc} LocationOnDisk={locOnDisk} Timestamp={api.Timestamp} " +
+            $"cfgScreenShotDir={configured} cfgFiles=[{cfgFiles}] resolved={resolved} candidates=[{dirs}]" +
+            phantom;
     }
 
     /// <summary>

@@ -62,41 +62,26 @@ public sealed partial class Plugin
             ? $"watching cfg ScreenShotDir={configured} (plus fallbacks; resolved={folder})"
             : $"watching resolved={folder} (cfg ScreenShotDir unset; scanning all candidates)";
 
-        GameScreenshot.ApiSnapshot before;
-        GameScreenshot.ScheduleAttempt attempt;
+        var forceClearUsed = false;
+        GameScreenshot.ScheduleAttempt attempt = default;
+        GameScreenshot.ApiSnapshot snap;
+
         try
         {
-            before = GameScreenshot.CaptureApiSnapshot();
+            snap = GameScreenshot.CaptureApiSnapshot();
             NotifyScreenshot(
-                $"/mj screenshot pre-schedule: CanTake={before.CanTake} Requested={before.Requested} " +
-                $"Result={before.Result} Location={before.Location ?? "(none)"} — {watchNote}");
-            attempt = GameScreenshot.TryScheduleOnce();
+                $"/mj screenshot pre-schedule: CanTake={snap.CanTake} Requested={snap.Requested} " +
+                $"Result={snap.Result} Location={snap.Location ?? "(none)"} — {watchNote}");
         }
         catch (Exception ex)
         {
-            before = new GameScreenshot.ApiSnapshot(false, false, false, "n/a", null, 0);
-            attempt = new GameScreenshot.ScheduleAttempt(false, false, false, "n/a", ex.Message);
+            snap = new GameScreenshot.ApiSnapshot(false, false, false, "n/a", null, 0);
+            NotifyScreenshot($"/mj screenshot pre-schedule failed: {ex.Message} — {watchNote}");
         }
 
-        if (!attempt.Scheduled && before.Requested)
+        // At most: natural wait retry + one force-clear retry.
+        for (var pass = 0; pass < 3; pass++)
         {
-            NotifyScreenshot(
-                $"/mj screenshot game API did not schedule ({attempt.Detail}). " +
-                $"Waiting up to {GameScreenshot.StuckRequestWaitMs}ms for ScreenShotRequested to clear, then retrying once.");
-            var cleared = await WaitOnFrameworkAsync(
-                () => !GameScreenshot.CaptureApiSnapshot().Requested,
-                GameScreenshot.StuckRequestWaitMs).ConfigureAwait(false);
-
-            if (!cleared)
-            {
-                var stuck = SafeCapture();
-                NotifyScreenshot(
-                    $"/mj screenshot game API stuck: ScreenShotRequested still true after {GameScreenshot.StuckRequestWaitMs}ms. " +
-                    $"CanTake={stuck.CanTake} Result={stuck.Result} Location={stuck.Location ?? "(none)"}. " +
-                    "Not injecting PrintScreen while a request is pending.");
-                return;
-            }
-
             try
             {
                 attempt = GameScreenshot.TryScheduleOnce();
@@ -105,40 +90,92 @@ public sealed partial class Plugin
             {
                 attempt = new GameScreenshot.ScheduleAttempt(false, false, false, "n/a", ex.Message);
             }
-        }
 
-        if (attempt.Scheduled)
-        {
-            NotifyScreenshot(
-                $"/mj screenshot scheduled via game API ({attempt.Detail}). " +
-                "Waiting for ScreenShotRequested to clear — not injecting a key on this request.");
-            var done = await WaitOnFrameworkAsync(
-                () => !GameScreenshot.CaptureApiSnapshot().Requested,
-                GameScreenshot.CompletionWaitMs).ConfigureAwait(false);
-            var after = SafeCapture();
-            var newest = GameScreenshot.TryFindNewestScreenshot(requestedAtUtc.AddSeconds(-2));
-            var loc = after.Location ?? "(none)";
-            var file = newest ?? "(none)";
-
-            if (!done)
+            if (!attempt.Scheduled && (attempt.RequestedBefore || SafeCapture().Requested))
             {
                 NotifyScreenshot(
-                    $"/mj screenshot game API timed out: ScreenShotRequested still true after {GameScreenshot.CompletionWaitMs}ms. " +
-                    $"Result={after.Result} Location={loc} file={file}.");
+                    $"/mj screenshot game API did not schedule ({attempt.Detail}). " +
+                    $"Waiting up to {GameScreenshot.StuckRequestWaitMs}ms for ScreenShotRequested to clear.");
+                var cleared = await WaitOnFrameworkAsync(
+                    () => !GameScreenshot.CaptureApiSnapshot().Requested,
+                    GameScreenshot.StuckRequestWaitMs).ConfigureAwait(false);
+                if (cleared)
+                    continue;
+
+                if (await TryForceClearIfStuckAsync(requestedAtUtc, forceClearUsed).ConfigureAwait(false) is true)
+                {
+                    forceClearUsed = true;
+                    continue;
+                }
+
+                NotifyScreenshot(
+                    "/mj screenshot game API stuck: ScreenShotRequested still true. " +
+                    "Not injecting PrintScreen while a request is pending (relog also clears the bit).");
                 return;
             }
 
-            if (string.Equals(after.Result, "Success", StringComparison.OrdinalIgnoreCase) || newest != null)
+            if (attempt.Scheduled)
             {
                 NotifyScreenshot(
-                    $"/mj screenshot game API Result={after.Result} Location={loc} file={file}.");
-            }
-            else
-            {
-                NotifyScreenshot(
-                    $"/mj screenshot game API finished but not success: Result={after.Result} Location={loc} file={file}.");
+                    $"/mj screenshot scheduled via game API ({attempt.Detail}). " +
+                    "Waiting for ScreenShotRequested to clear — not injecting a key on this request.");
+                var done = await WaitOnFrameworkAsync(
+                    () => !GameScreenshot.CaptureApiSnapshot().Requested,
+                    GameScreenshot.CompletionWaitMs).ConfigureAwait(false);
+                var after = SafeCapture();
+                var newest = GameScreenshot.TryFindNewestScreenshot(requestedAtUtc.AddSeconds(-2));
+
+                if (!done && after.Requested)
+                {
+                    if (await TryForceClearIfStuckAsync(requestedAtUtc, forceClearUsed).ConfigureAwait(false) is true)
+                    {
+                        forceClearUsed = true;
+                        continue;
+                    }
+
+                    NotifyScreenshot(
+                        $"/mj screenshot game API timed out: ScreenShotRequested still true after {GameScreenshot.CompletionWaitMs}ms. " +
+                        $"Result={after.Result} Location={after.Location ?? "(none)"} file={newest ?? "(none)"}. " +
+                        "Not injecting PrintScreen while a request is pending.");
+                    return;
+                }
+
+                if (ScreenshotStuckRecovery.IsPhantomSuccess(after.Result, after.Location))
+                {
+                    NotifyScreenshot(
+                        $"/mj screenshot {ScreenshotStuckRecovery.FormatPhantomSuccess(after.Location)}.");
+                    await ForceClearOnFrameworkAsync().ConfigureAwait(false);
+                    if (!forceClearUsed)
+                    {
+                        forceClearUsed = true;
+                        NotifyScreenshot("/mj screenshot retrying ScheduleScreenShot once after phantom Success.");
+                        continue;
+                    }
+
+                    NotifyScreenshot(
+                        "/mj screenshot game API Result=Success but file still missing after retry. Not injecting PrintScreen.");
+                    return;
+                }
+
+                var loc = after.Location ?? "(none)";
+                var file = newest ?? "(none)";
+                if (string.Equals(after.Result, "Success", StringComparison.OrdinalIgnoreCase) || newest != null)
+                    NotifyScreenshot($"/mj screenshot game API Result={after.Result} Location={loc} file={file}.");
+                else
+                    NotifyScreenshot($"/mj screenshot game API finished but not success: Result={after.Result} Location={loc} file={file}.");
+                return;
             }
 
+            // Requested is false and schedule failed — keys are allowed.
+            break;
+        }
+
+        snap = SafeCapture();
+        if (snap.Requested)
+        {
+            NotifyScreenshot(
+                $"/mj screenshot game API still Requested=true after recovery. " +
+                "Not injecting PrintScreen while a request is pending.");
             return;
         }
 
@@ -171,6 +208,51 @@ public sealed partial class Plugin
             keyFile != null
                 ? $"/mj screenshot wrote {keyFile}"
                 : $"/mj screenshot: no new file detected after {GameScreenshot.CompletionWaitMs}ms — scanned all candidates (resolved={folder}).");
+    }
+
+    /// <returns>true if the stuck bit was force-cleared and the caller should retry schedule.</returns>
+    private async Task<bool> TryForceClearIfStuckAsync(DateTime requestedAtUtc, bool forceClearUsed)
+    {
+        if (forceClearUsed)
+            return false;
+
+        var stuck = SafeCapture();
+        var newest = GameScreenshot.TryFindNewestScreenshot(requestedAtUtc.AddSeconds(-2));
+        if (!ScreenshotStuckRecovery.ShouldForceClearStuckRequest(
+                stuck.Requested,
+                stuck.Location,
+                stuck.Timestamp,
+                newest != null,
+                DateTime.UtcNow))
+        {
+            return false;
+        }
+
+        if (ScreenshotStuckRecovery.IsPhantomSuccess(stuck.Result, stuck.Location))
+            NotifyScreenshot($"/mj screenshot {ScreenshotStuckRecovery.FormatPhantomSuccess(stuck.Location)}.");
+
+        return await ForceClearOnFrameworkAsync().ConfigureAwait(false);
+    }
+
+    private async Task<bool> ForceClearOnFrameworkAsync()
+    {
+        var cleared = false;
+        var detail = "force-clear not run";
+        await Framework.RunOnFrameworkThread(() =>
+        {
+            try
+            {
+                cleared = GameScreenshot.TryForceClearRequested(out detail);
+            }
+            catch (Exception ex)
+            {
+                cleared = false;
+                detail = ex.Message;
+            }
+        }).ConfigureAwait(false);
+
+        NotifyScreenshot($"/mj screenshot {detail}");
+        return cleared;
     }
 
     private static string FormatKeyInjectMessage(GameScreenshot.TriggerResult keys, string folder)

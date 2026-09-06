@@ -1,5 +1,17 @@
 # Dev Journey
 
+## 2026-09-06: KAN-55 stuck ScreenShotRequested + phantom Location
+
+**What:** AZPC after `29aea08`: `/mj screenshot status` showed `CanTake=True Requested=True Result=Success Location=…/ffxiv_09052026_170302_038.png` but that file is not on disk. `/mj screenshot` correctly refused PrintScreen while pending. User would otherwise need a relog to clear the bit.
+
+**Changes:**
+- If Requested stays true after the wait and Location is empty/missing (or the request is stale ~8s with no new file), force-clear `ScreenShotRequested` (unsafe write) and retry `ScheduleScreenShot` once. Log the force-clear loudly.
+- `Result=Success` + Location set but file missing is treated as failure: “Result=Success but file missing at Location=… (ReShade/DXGI often causes this)”, then clear Requested and retry once.
+- PrintScreen inject still only after Requested is false and a fresh schedule fails.
+- `/mj screenshot status` now includes `LocationOnDisk`.
+
+**Result:** Cloud VM cannot prove the unsafe write against a live client. AZPC: reload, `/mj screenshot` should FORCE-CLEAR the stuck bit, retry schedule, and either write a real PNG or report phantom Success instead of staying wedged.
+
 ## 2026-09-06: KAN-55 screenshot follow-up — ScreenShotDir + async ScheduleScreenShot
 
 **What:** AZPC showed `/mj screenshot` watching the default `My Games\...\screenshots` folder while live `FFXIV.cfg` had `ScreenShotDir` = `Documents\FF14Modding\Screenshots`. First `ScheduleScreenShot` logged as fired with no file; later calls fell through to `KEY_SCREENSHOT` (`SNAPSHOT+None`) because `ScreenShotRequested` stayed true. PrintScreen is dead on that machine (ReShade/Snipping Tool).
