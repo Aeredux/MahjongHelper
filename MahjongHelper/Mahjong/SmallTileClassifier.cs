@@ -78,6 +78,15 @@ public static class SmallTileClassifier
             var meldKind = MeldKindForPond(pondKind);
             var largest = byParent[0].ToList();
             var (pond, peeled) = PeelSharedParentMelds(largest);
+            // Extra 1023 parent / shared-parent peel is how leftover WHITE/S6
+            // become RightMeld without a type-2 leftover gate. Require a
+            // populated seat slot (not empty 86×35 1062 chrome).
+            if (peeled.Count > 0 && !IconNodeScan.SeatHasLiveFuuroSlot(meldKind, trays))
+            {
+                pond = largest;
+                peeled = [];
+            }
+
             pond.Reverse();
             for (var i = 0; i < pond.Count; i++)
                 result.Add(new ClassifiedTile(pondKind, i, pond[i]));
@@ -93,6 +102,8 @@ public static class SmallTileClassifier
             {
                 var extra = byParent[g].OrderBy(t => t.X).ThenBy(t => t.Y).ToList();
                 if (!LooksLikeOpenMeld(extra))
+                    continue;
+                if (!IconNodeScan.SeatHasLiveFuuroSlot(meldKind, trays))
                     continue;
                 foreach (var tile in extra)
                     result.Add(new ClassifiedTile(meldKind, meldIndex++, tile));
@@ -121,8 +132,7 @@ public static class SmallTileClassifier
                 var owner = GuessMeldOwner(part, pondParents, pondTilesByKind);
                 if (owner == null)
                     continue;
-                if (part.Count(t => t.NodeType == IconNodeScan.ImageNodeType) >= 2
-                    && !IconNodeScan.SeatHasLiveFuuroSlot(owner.Value, trays))
+                if (!IconNodeScan.SeatHasLiveFuuroSlot(owner.Value, trays))
                     continue;
                 if (owner == Kind.OppositeMeld
                     && !IconNodeScan.IsPlausibleOppositeLeftoverFuuro(

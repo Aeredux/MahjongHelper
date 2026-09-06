@@ -90,12 +90,12 @@ public static class IconNodeScan
         => nodeType == CallCueNodeType && HasCallCue(width, height, rotation);
 
     /// <summary>
-    /// Dedicated per-seat fuuro slot arrays. Dump of an empty table has four
-    /// of each, all <c>Visible=N</c>. Leftover type-2 / 1056 icons are
-    /// siblings — they stay self-visible after deal reset — so ancestor
-    /// <c>IsVisible</c> is not enough. A seat's leftover is live only when
-    /// that seat's slot type is on-screen.
-    /// 1060 140×55 = own (bottom). 1061 86×35 = left. 1062 = right. 1063 = opposite.
+    /// Dedicated per-seat fuuro slot arrays. Empty-table dump: four of each.
+    /// 1060 140×55 is the own tile tray (hidden when empty — that fixed own CHIs).
+    /// 1061/1062/1063 at 86×35 are empty-slot chrome, not tile trays. They can
+    /// stay Visible during a hand and must not unlock leftover. Only a
+    /// populated opponent slot (long side ≥100px, short ≥40px) is presence.
+    /// West-seat NORTH is Right (+1) → 1062 was the false-positive.
     /// </summary>
     public static bool IsFuuroTray(ushort nodeType, int width, int height)
         => IsFuuroSlot(nodeType, width, height);
@@ -108,7 +108,7 @@ public static class IconNodeScan
         {
             FuuroTrayNodeType => width >= 100 && height >= 45 && height <= 80,
             LeftFuuroSlotType or RightFuuroSlotType or OppositeFuuroSlotType
-                => min >= 24 && max <= 200,
+                => min >= 40 && max >= 100 && max <= 220,
             _ => false,
         };
     }
@@ -130,7 +130,9 @@ public static class IconNodeScan
             return false;
         for (var i = 0; i < trays.Count; i++)
         {
-            if (FuuroSlotOwner(trays[i].NodeType) == kind)
+            var tray = trays[i];
+            if (FuuroSlotOwner(tray.NodeType) == kind
+                && IsFuuroSlot(tray.NodeType, tray.Width, tray.Height))
                 return true;
         }
 

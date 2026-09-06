@@ -119,16 +119,21 @@ public class IconNodeScanTests
         Assert.True(IconNodeScan.ClusterHasCallCue(with1056, t => t.W, t => t.H, t => t.Rot));
         Assert.True(IconNodeScan.IsCallCueNode(1056, 42, 55, 4.712f));
         Assert.True(IconNodeScan.IsFuuroTray(1060, 140, 55));
-        Assert.True(IconNodeScan.IsFuuroSlot(1061, 86, 35));
-        Assert.True(IconNodeScan.IsFuuroSlot(1062, 86, 35));
-        Assert.True(IconNodeScan.IsFuuroSlot(1063, 86, 35));
+        Assert.False(IconNodeScan.IsFuuroSlot(1062, 86, 35));
+        Assert.False(IconNodeScan.IsFuuroSlot(1061, 86, 35));
+        Assert.False(IconNodeScan.IsFuuroSlot(1063, 86, 35));
+        Assert.True(IconNodeScan.IsFuuroSlot(1062, 55, 140));
+        Assert.True(IconNodeScan.IsFuuroSlot(1061, 55, 140));
+        Assert.True(IconNodeScan.IsFuuroSlot(1063, 140, 55));
         Assert.False(IconNodeScan.IsFuuroSlot(1055, 42, 55));
         Assert.Equal(SmallTileClassifier.Kind.PlayerMeld, IconNodeScan.FuuroSlotOwner(1060));
         Assert.Equal(SmallTileClassifier.Kind.LeftMeld, IconNodeScan.FuuroSlotOwner(1061));
         Assert.Equal(SmallTileClassifier.Kind.RightMeld, IconNodeScan.FuuroSlotOwner(1062));
         Assert.Equal(SmallTileClassifier.Kind.OppositeMeld, IconNodeScan.FuuroSlotOwner(1063));
-        Assert.True(IconNodeScan.SeatHasLiveFuuroSlot(
+        Assert.False(IconNodeScan.SeatHasLiveFuuroSlot(
             SmallTileClassifier.Kind.RightMeld, [new IconNodeScan.Tray(850, 300, 86, 35, 1062)]));
+        Assert.True(IconNodeScan.SeatHasLiveFuuroSlot(
+            SmallTileClassifier.Kind.RightMeld, [new IconNodeScan.Tray(850, 300, 55, 140, 1062)]));
         Assert.False(IconNodeScan.SeatHasLiveFuuroSlot(
             SmallTileClassifier.Kind.RightMeld, [new IconNodeScan.Tray(1525, 972, 140, 55)]));
         Assert.False(IconNodeScan.SeatHasLiveFuuroSlot(SmallTileClassifier.Kind.LeftMeld, []));

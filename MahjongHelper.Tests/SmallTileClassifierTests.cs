@@ -66,7 +66,8 @@ public class SmallTileClassifierTests
             Pond(6, 1024, 77, 68, 0, "M3"),
         };
 
-        var classified = SmallTileClassifier.Classify(tiles);
+        var trays = new[] { new IconNodeScan.Tray(0, 0, 140, 55, 1063) };
+        var classified = SmallTileClassifier.Classify(tiles, trays);
         var pond = classified.Where(c => c.Kind == SmallTileClassifier.Kind.OppositeDiscard).ToList();
         var meld = classified.Where(c => c.Kind == SmallTileClassifier.Kind.OppositeMeld).ToList();
 
@@ -86,7 +87,8 @@ public class SmallTileClassifierTests
         tiles.Add(Pond(7, 1024, 50, 34, -200, "M2"));
         tiles.Add(Pond(8, 1024, 50, 68, -200, "M3"));
 
-        var classified = SmallTileClassifier.Classify(tiles);
+        var trays = new[] { new IconNodeScan.Tray(0, -200, 140, 55, 1063) };
+        var classified = SmallTileClassifier.Classify(tiles, trays);
         var pond = classified.Where(c => c.Kind == SmallTileClassifier.Kind.OppositeDiscard).ToList();
         var meld = classified.Where(c => c.Kind == SmallTileClassifier.Kind.OppositeMeld).ToList();
 
@@ -181,13 +183,40 @@ public class SmallTileClassifierTests
             Pond(3, 1023, 20, 68, 200, "S4", absX: 868, absY: 200),
         };
 
-        var classified = SmallTileClassifier.Classify(tiles);
+        var trays = new[] { new IconNodeScan.Tray(800, 180, 55, 140, 1062) };
+        var classified = SmallTileClassifier.Classify(tiles, trays);
         var pond = classified.Where(c => c.Kind == SmallTileClassifier.Kind.RightDiscard).ToList();
         var meld = classified.Where(c => c.Kind == SmallTileClassifier.Kind.RightMeld).ToList();
 
         Assert.Single(pond);
         Assert.Equal("P8", pond[0].Tile.TileCode);
         Assert.Equal(["S2", "S3", "S4"], meld.Select(c => c.Tile.TileCode).ToList());
+    }
+
+    [Fact]
+    public void Empty_1062_chrome_does_not_peel_right_ghost_melds()
+    {
+        // West-seat NORTH leftovers: extra 1023 WHITE PON + S6 CHI, and
+        // empty 86×35 1062 chrome that can stay Visible. Must stay pond/none.
+        var tiles = new List<SmallTileClassifier.Tile>
+        {
+            Pond(0, 1023, 20, 0, 0, "P8", absX: 1600, absY: 550),
+            Pond(1, 1023, 20, 34, 0, "P7", absX: 1634, absY: 550),
+            Pond(2, 1023, 20, 68, 0, "P6", absX: 1668, absY: 550),
+            Pond(3, 1023, 20, 102, 0, "P5", absX: 1702, absY: 550),
+            Pond(4, 1023, 90, 0, 0, "WHITE", absX: 1580, absY: 420),
+            Pond(5, 1023, 90, 0, 40, "WHITE", absX: 1580, absY: 460),
+            Pond(6, 1023, 90, 0, 80, "WHITE", absX: 1580, absY: 500),
+            Pond(7, 1023, 91, 0, 0, "S6", absX: 1525, absY: 420),
+            Pond(8, 1023, 91, 0, 40, "S0", absX: 1525, absY: 460),
+            Pond(9, 1023, 91, 0, 80, "S4", absX: 1525, absY: 500),
+        };
+        var chrome = new[] { new IconNodeScan.Tray(854, 132, 86, 35, 1062) };
+
+        var classified = SmallTileClassifier.Classify(tiles, chrome);
+        Assert.DoesNotContain(classified, c => c.Kind == SmallTileClassifier.Kind.RightMeld);
+        Assert.DoesNotContain(SmallTileClassifier.Classify(tiles),
+            c => c.Kind == SmallTileClassifier.Kind.RightMeld);
     }
 
     [Fact]
@@ -201,7 +230,8 @@ public class SmallTileClassifierTests
             Pond(3, 1023, 20, 114, 0, "S4"),
         };
 
-        var classified = SmallTileClassifier.Classify(tiles);
+        var trays = new[] { new IconNodeScan.Tray(0, 0, 55, 140, 1062) };
+        var classified = SmallTileClassifier.Classify(tiles, trays);
         var meld = classified.Where(c => c.Kind == SmallTileClassifier.Kind.RightMeld).ToList();
         var pond = classified.Where(c => c.Kind == SmallTileClassifier.Kind.RightDiscard).ToList();
 
@@ -221,7 +251,8 @@ public class SmallTileClassifierTests
             Pond(4, 1031, 88, 858, 80, "EAST", absX: 858, absY: 80),
         };
 
-        var classified = SmallTileClassifier.Classify(tiles);
+        var trays = new[] { new IconNodeScan.Tray(790, 80, 55, 140, 1062) };
+        var classified = SmallTileClassifier.Classify(tiles, trays);
         var meld = classified.Where(c => c.Kind == SmallTileClassifier.Kind.RightMeld).ToList();
 
         Assert.Equal(3, meld.Count);
@@ -243,7 +274,7 @@ public class SmallTileClassifierTests
             Pond(5, 2, 201, 68, 0, "P8", absX: 1022, absY: 889, width: 40, height: 52),
         };
 
-        var trays = new[] { new IconNodeScan.Tray(960, 850, 86, 50, 1061) };
+        var trays = new[] { new IconNodeScan.Tray(960, 850, 55, 140, 1061) };
         var classified = SmallTileClassifier.Classify(tiles, trays);
         var meld = classified.Where(c => c.Kind == SmallTileClassifier.Kind.LeftMeld).ToList();
         Assert.Equal(3, meld.Count);
@@ -274,7 +305,7 @@ public class SmallTileClassifierTests
             Pond(11, 2, 91, 30, 0, "P7", absX: 1510, absY: 390, width: 40, height: 52),
         };
 
-        var trays = new[] { new IconNodeScan.Tray(1520, 400, 86, 120, 1062) };
+        var trays = new[] { new IconNodeScan.Tray(1520, 400, 55, 140, 1062) };
         var classified = SmallTileClassifier.Classify(tiles, trays);
         Assert.DoesNotContain(classified, c => c.Tile.TileCode == "P7" && c.Kind.ToString().EndsWith("Meld"));
         Assert.DoesNotContain(classified, c => c.Kind == SmallTileClassifier.Kind.OppositeMeld);

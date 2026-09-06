@@ -404,7 +404,7 @@ public class OpponentAreaClassifierTests
         var trays = new[]
         {
             new IconNodeScan.Tray(820, 972, 140, 55, 1060),
-            new IconNodeScan.Tray(520, 48, 86, 35, 1063),
+            new IconNodeScan.Tray(520, 48, 140, 55, 1063),
         };
         var assignments = OpponentAreaClassifier.Classify(
             leftovers, ponds, playerStripAbsY: 972, trays: trays);
@@ -465,7 +465,7 @@ public class OpponentAreaClassifierTests
         var trays = new[]
         {
             new IconNodeScan.Tray(1525, 972, 140, 55, 1060),
-            new IconNodeScan.Tray(1041, 396, 86, 35, 1063),
+            new IconNodeScan.Tray(1041, 396, 140, 55, 1063),
         };
 
         var assignments = OpponentAreaClassifier.Classify(
@@ -561,7 +561,7 @@ public class OpponentAreaClassifierTests
             Area(5, 0, 0, 1092, 430, 40, 52, parent: 200, "M0", nodeType: 2),
         };
         var ponds = LiveSouthPonds();
-        var trays = new[] { new IconNodeScan.Tray(960, 850, 86, 50, 1061) };
+        var trays = new[] { new IconNodeScan.Tray(960, 850, 55, 140, 1061) };
 
         var assignments = OpponentAreaClassifier.Classify(leftovers, ponds, playerStripAbsY: 972, trays: trays);
 
@@ -618,8 +618,8 @@ public class OpponentAreaClassifierTests
 
         var trays = new[]
         {
-            new IconNodeScan.Tray(960, 850, 86, 50, 1061),
-            new IconNodeScan.Tray(1555, 520, 86, 50, 1062),
+            new IconNodeScan.Tray(960, 850, 55, 140, 1061),
+            new IconNodeScan.Tray(1555, 520, 55, 140, 1062),
         };
         var assignments = OpponentAreaClassifier.Classify(leftovers, ponds, playerStripAbsY: 972, trays: trays);
         var left = Assert.Single(assignments, a => a.Kind == SmallTileClassifier.Kind.LeftMeld);
@@ -651,7 +651,7 @@ public class OpponentAreaClassifierTests
             Area(10, 49, 34, 1092, 430, 40, 52, parent: 200, "M0", nodeType: 2),
         };
         var ponds = LiveSouthPonds();
-        var trays = new[] { new IconNodeScan.Tray(1520, 400, 86, 120, 1062) };
+        var trays = new[] { new IconNodeScan.Tray(1520, 400, 55, 140, 1062) };
 
         var assignments = OpponentAreaClassifier.Classify(leftovers, ponds, playerStripAbsY: 972, trays: trays);
 
@@ -736,7 +736,7 @@ public class OpponentAreaClassifierTests
             Area(2, 0, 0, 1114, 430, 40, 52, parent: 300, "EAST", nodeType: 2),
         };
         var ponds = LiveSouthPonds();
-        var trays = new[] { new IconNodeScan.Tray(1040, 390, 86, 50, 1063) };
+        var trays = new[] { new IconNodeScan.Tray(1040, 390, 140, 55, 1063) };
 
         var assignments = OpponentAreaClassifier.Classify(leftovers, ponds, playerStripAbsY: 972, trays: trays);
 
@@ -796,6 +796,10 @@ public class OpponentAreaClassifierTests
 
         Assert.Empty(OpponentAreaClassifier.Classify(
             leftovers, LiveSouthPonds(), playerStripAbsY: 972, trays: []));
+        // Empty 86×35 1062 chrome (West-seat NORTH = Right) must not unlock ghosts.
+        var emptyRightChrome = new[] { new IconNodeScan.Tray(850, 200, 86, 35, 1062) };
+        Assert.Empty(OpponentAreaClassifier.Classify(
+            leftovers, LiveSouthPonds(), playerStripAbsY: 972, trays: emptyRightChrome));
 
         var lines = SolverJson.BuildSnapSummaryLines(new SuggestMoveRequest
         {

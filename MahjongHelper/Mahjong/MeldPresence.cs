@@ -9,8 +9,9 @@ namespace MahjongHelper.Mahjong;
 /// opponent calls. Ancestor <c>IsVisible</c> is necessary but not sufficient:
 /// leftover type-2 / 1056 icons stay self-visible after deal reset as
 /// siblings of the hidden slot. The authoritative source is the dedicated
-/// fuuro slot arrays — type 1060 (own) / 1061 (left) / 1062 (right) /
-/// 1063 (opposite) — which are hidden or empty when that seat has no call.
+/// fuuro slot arrays. 1060 140×55 (own) hides when empty. 1061/1062/1063
+/// at 86×35 are empty chrome and can stay Visible — only a populated
+/// opponent slot (long side ≥100px) counts. West-seat NORTH is Right → 1062.
 /// Own cache is only for 1060 flicker, never across a deal with no live slot.
 /// </summary>
 public static class MeldPresence

@@ -406,10 +406,15 @@ public static unsafe class EmjUiReader
         for (int di = 0; di < doraSlots.Count; di++)
             slots.Add(doraSlots[di] with { SlotIndex = di });
 
+        // Scan before pond classification so extra 1023 parent / peel can
+        // see populated 1060–1063 slots. Empty 86×35 1062 chrome is not a tray.
+        var scanned = ScanAddonNodes(addon, iconCapture, iconMap);
+        var fuuroTrays = CollectVisibleFuuroTrays(scanned.IconNodes);
+
         // Classify 34x45 tiles into discard pools and dora indicators by spatial position.
         // In the Mahjong UI, tiles are arranged with the local player at the bottom.
         // The classification uses parent node grouping and Y-position heuristics.
-        ClassifySmallTiles(uld, smallTiles, iconCapture, iconMap, slots);
+        ClassifySmallTiles(uld, smallTiles, iconCapture, iconMap, slots, fuuroTrays);
 
         var canonicalHand = BuildCanonicalHand(rawHand);
         for (var i = 0; i < canonicalHand.Count; i++)
@@ -434,7 +439,6 @@ public static unsafe class EmjUiReader
         // Called sets sit on the same 42×55 Y=0 strip as the closed hand. Peel them out
         // so they become PlayerMeld instead of CanonicalPlayerHand. Live AZPC after
         // 7ad3d5d: own fuuro is nested type-2 40×52 leaves, not 1055/1045.
-        var scanned = ScanAddonNodes(addon, iconCapture, iconMap);
         ApplyHandStripMeldSplit(slots, rawHand, extraStrip, scanned.IconNodes);
         var opponentMeldCandidates = ClassifyOpponentAreaMelds(slots, extraStrip, smallTiles, scanned.IconNodes);
 
@@ -454,7 +458,17 @@ public static unsafe class EmjUiReader
     /// smaller groups are treated as that player's melds.
     /// Dora indicators are read separately (type 1006). Type 1009 is chi-choice UI.
     /// </summary>
-    private static void ClassifySmallTiles(AtkUldManager uld, List<UiSlot> smallTiles, IconIdCapture? iconCapture, MahjongIconMap? iconMap, List<UiSlot> outputSlots)
+    private static List<IconNodeScan.Tray> CollectVisibleFuuroTrays(IReadOnlyList<UiSlot>? nodes)
+    {
+        static float AbsX(UiSlot s) => s.AbsX != 0 || s.AbsY != 0 ? s.AbsX : s.X;
+        static float AbsY(UiSlot s) => s.AbsX != 0 || s.AbsY != 0 ? s.AbsY : s.Y;
+        return (nodes ?? [])
+            .Where(s => s.Visible && IconNodeScan.IsFuuroSlot(s.NodeType, s.Width, s.Height))
+            .Select(s => new IconNodeScan.Tray(AbsX(s), AbsY(s), s.Width, s.Height, s.NodeType))
+            .ToList();
+    }
+
+    private static void ClassifySmallTiles(AtkUldManager uld, List<UiSlot> smallTiles, IconIdCapture? iconCapture, MahjongIconMap? iconMap, List<UiSlot> outputSlots, IReadOnlyList<IconNodeScan.Tray>? trays = null)
     {
         if (smallTiles.Count == 0)
             return;
@@ -467,7 +481,8 @@ public static unsafe class EmjUiReader
             tilesWithIcons.Select((t, i) => new SmallTileClassifier.Tile(
                 i, t.NodeType, t.X, t.Y, t.AbsX, t.AbsY, t.Width, t.Height,
                 t.Rotation, t.ParentNodeId, t.TileCode,
-                t.Tsumogiri || IsRotatedTsumogiri(t.Rotation, t.Width, t.Height))).ToList());
+                t.Tsumogiri || IsRotatedTsumogiri(t.Rotation, t.Width, t.Height))).ToList(),
+            trays);
 
         foreach (var item in classified)
         {
