@@ -42,6 +42,24 @@ public class MeldClassifierTests
     }
 
     [Fact]
+    public void SplitIntoMelds_pair_remainder_is_pon_when_already_classified()
+    {
+        var melds = MeldClassifier.SplitIntoMelds(
+            ["WEST", "WEST", "WEST", "GREEN", "GREEN"], acceptPairRemainder: true);
+        Assert.Equal(2, melds.Count);
+        Assert.Equal("PON", melds[0].Type);
+        Assert.Equal("PON", melds[1].Type);
+        Assert.Equal(["GREEN", "GREEN"], melds[1].Tiles);
+    }
+
+    [Fact]
+    public void SplitIntoMelds_does_not_invent_pons_from_pairs_by_default()
+    {
+        var melds = MeldClassifier.SplitIntoMelds(["GREEN", "GREEN"]);
+        Assert.Empty(melds);
+    }
+
+    [Fact]
     public void IsUsableTile_rejects_placeholders()
     {
         Assert.True(MeldClassifier.IsUsableTile("M0"));

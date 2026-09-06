@@ -15,7 +15,7 @@ public sealed record ObservedMeld(string Type, IReadOnlyList<string> Tiles)
 /// </summary>
 public static class MeldClassifier
 {
-    public static IReadOnlyList<ObservedMeld> SplitIntoMelds(IReadOnlyList<string> tiles)
+    public static IReadOnlyList<ObservedMeld> SplitIntoMelds(IReadOnlyList<string> tiles, bool acceptPairRemainder = false)
     {
         var result = new List<ObservedMeld>();
         if (tiles == null || tiles.Count == 0)
@@ -46,6 +46,16 @@ public static class MeldClassifier
                     result.Add(meld3);
                     i += 3;
                     continue;
+                }
+            }
+
+            if (acceptPairRemainder && remaining.Count - i == 2)
+            {
+                var two = remaining.GetRange(i, 2);
+                if (AllEqual(two.Select(CanonicalKey).ToList()))
+                {
+                    result.Add(new ObservedMeld("PON", two));
+                    break;
                 }
             }
 

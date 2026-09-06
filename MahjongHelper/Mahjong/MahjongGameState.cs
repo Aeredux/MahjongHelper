@@ -381,7 +381,9 @@ public static class MahjongGameStateBuilder
                 .Select(s => s.TileCode ?? (s.IconId > 0 ? $"ICON_{s.IconId}" : "?"))
                 .Where(MeldClassifier.IsUsableTile)
                 .ToArray();
-            melds.AddRange(MeldClassifier.SplitIntoMelds(tiles));
+            // Pair remainder: called set whose sideways tile was a 55×42 / leftover
+            // the 42×55 strip never collected (live AZPC Green pon showed 2 uprights).
+            melds.AddRange(MeldClassifier.SplitIntoMelds(tiles, acceptPairRemainder: true));
         }
 
         if (melds.Count == 0)

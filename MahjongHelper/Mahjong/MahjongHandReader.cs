@@ -30,7 +30,18 @@ public static unsafe class MahjongHandReader
         public PersistedTile? DrawnTile { get; set; }
     }
 
-    public sealed record MahjongTileObservation(int NodeIndex, uint NodeId, ushort NodeType, float X, float Y, uint IconId, string? TileCode);
+    public sealed record MahjongTileObservation(
+        int NodeIndex,
+        uint NodeId,
+        ushort NodeType,
+        float X,
+        float Y,
+        uint IconId,
+        string? TileCode,
+        float Rotation = 0,
+        int Width = 42,
+        int Height = 55,
+        uint ParentNodeId = 0);
 
     public sealed record MahjongHandSnapshot(IReadOnlyList<MahjongTileObservation> HandTiles, MahjongTileObservation? DrawnTile, bool IsFromCache = false)
     {
@@ -78,6 +89,7 @@ public static unsafe class MahjongHandReader
                 : new MahjongHandSnapshot(handTiles, drawnTile);
 
         var uld = addon->UldManager;
+        var stripTiles = new List<MahjongTileObservation>();
         for (int i = 0; i < uld.NodeListCount; i++)
         {
             try
@@ -89,18 +101,36 @@ public static unsafe class MahjongHandReader
                 try { visible = node->IsVisible(); } catch { }
                 if (!visible) continue;
 
-                if ((int)node->Type == 1055 && node->Width == 42 && node->Height == 55)
+                var isHandSized = ((int)node->Type == 1055 && node->Width == 42 && node->Height == 55)
+                                  || (node->Width == 55 && node->Height == 42);
+                if (isHandSized)
                 {
                     if (TryFindCapturedIcon(node, capture, out var iconId) && iconId > 0)
                     {
-                        handTiles.Add(new MahjongTileObservation(
+                        float rotation = 0;
+                        uint parentId = 0;
+                        try { rotation = node->Rotation; } catch { }
+                        try
+                        {
+                            if (node->ParentNode != null)
+                                parentId = node->ParentNode->NodeId;
+                        }
+                        catch { }
+                        var observation = new MahjongTileObservation(
                             i,
                             node->NodeId,
                             (ushort)node->Type,
                             node->X,
                             node->Y,
                             iconId,
-                            iconMap?.Resolve(iconId)));
+                            iconMap?.Resolve(iconId),
+                            rotation,
+                            node->Width,
+                            node->Height,
+                            parentId);
+                        stripTiles.Add(observation);
+                        if (node->Width == 42 && node->Height == 55)
+                            handTiles.Add(observation);
                     }
                 }
 
@@ -125,6 +155,25 @@ public static unsafe class MahjongHandReader
         }
 
         handTiles.Sort((left, right) => left.X.CompareTo(right.X));
+        var stripForSplit = stripTiles
+            .Where(t => t.NodeIndex is < 55 or > 58)
+            .ToList();
+        if (stripForSplit.Count > 0)
+        {
+            var classified = HandStripClassifier.Split(stripForSplit
+                .Select((t, index) => new HandStripClassifier.Tile(
+                    index, t.X, t.Y, t.Width, t.Height, t.Rotation, t.ParentNodeId, t.TileCode))
+                .ToList());
+            var closed = classified.ClosedIds
+                .Where(id => id >= 0 && id < stripForSplit.Count)
+                .Select(id => stripForSplit[id])
+                .Where(t => t.Width == 42 && t.Height == 55)
+                .OrderBy(t => t.X)
+                .ThenBy(t => t.NodeIndex)
+                .ToList();
+            if (closed.Count > 0)
+                handTiles = closed;
+        }
 
         if (handTiles.Count > 0)
         {

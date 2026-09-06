@@ -255,9 +255,11 @@ public static unsafe class EmjUiReader
         }
 
         var visibleCandidates = new List<UiSlot>();
+        var extraStrip = new List<UiSlot>();
 
         // Scan all nodes for visible tile components.
         // 34x45 nodes are discard pool / dora tiles; 42x55 nodes are player hand tiles.
+        // 55x42 is a called tile in the player strip (42x55 rotated).
         // We also track 34x45 tiles separately for discard/dora classification.
         var smallTiles = new List<UiSlot>();
 
@@ -282,6 +284,7 @@ public static unsafe class EmjUiReader
             {
                 uint iconId = 0;
                 TryFindIcon(node, iconCapture, out iconId);
+                var extras = ReadNodeExtras(node);
 
                 var candidate = new UiSlot(
                     SlotKind.VisibleTileCandidate,
@@ -295,10 +298,38 @@ public static unsafe class EmjUiReader
                     node->Width,
                     node->Height,
                     iconId,
-                    iconId > 0 ? iconMap?.Resolve(iconId) : null);
+                    iconId > 0 ? iconMap?.Resolve(iconId) : null,
+                    extras.Rotation,
+                    extras.ParentNodeId);
 
                 visibleCandidates.Add(candidate);
                 slots.Add(candidate);
+            }
+
+            // 55x42 = called tile in the local hand strip (42x55 rotated 90°).
+            if (type >= 1000 && node->Width == 55 && node->Height == 42)
+            {
+                uint rotatedIcon = 0;
+                TryFindIcon(node, iconCapture, out rotatedIcon);
+                if (rotatedIcon > 0)
+                {
+                    var extras = ReadNodeExtras(node);
+                    extraStrip.Add(new UiSlot(
+                        SlotKind.PlayerMeld,
+                        extraStrip.Count,
+                        i,
+                        node->NodeId,
+                        (ushort)node->Type,
+                        visible,
+                        node->X,
+                        node->Y,
+                        node->Width,
+                        node->Height,
+                        rotatedIcon,
+                        iconMap?.Resolve(rotatedIcon),
+                        extras.Rotation,
+                        extras.ParentNodeId));
+                }
             }
 
             // 34x45 = discard / meld candidates. 45x34 is the same tile rotated (tsumogiri).
@@ -382,6 +413,10 @@ public static unsafe class EmjUiReader
 
             slots.Add(canonicalDraw with { Kind = SlotKind.CanonicalPlayerDraw, SlotIndex = 0 });
         }
+
+        // Called sets sit on the same 42×55 Y=0 strip as the closed hand. Peel them out
+        // so they become PlayerMeld instead of CanonicalPlayerHand.
+        ApplyHandStripMeldSplit(slots, rawHand, extraStrip);
 
         var gameInfo = ReadGameInfo(addon, iconCapture, iconMap);
 
@@ -1557,6 +1592,84 @@ public static unsafe class EmjUiReader
         // if (availableCalls != CallOptions.None && availableCalls != CallOptions.Skip)
         //     return GamePhase.CallDecisionPrompt;
     }
+
+    /// <summary>
+    /// Reclassifies 42×55 / 55×42 tiles on the local hand strip so open calls
+    /// become <see cref="SlotKind.PlayerMeld"/> and drop out of the closed hand.
+    /// </summary>
+    private static void ApplyHandStripMeldSplit(List<UiSlot> slots, List<UiSlot> rawHand, List<UiSlot> extraStrip)
+    {
+        var byNode = new Dictionary<int, UiSlot>();
+
+        void Consider(UiSlot slot)
+        {
+            if (!slot.Visible || slot.IconId == 0 || slot.X <= 0)
+                return;
+            if (slot.NodeIndex is >= 55 and <= 58)
+                return;
+
+            if (byNode.TryGetValue(slot.NodeIndex, out var existing))
+            {
+                if (HandStripClassifier.IsRotated(ToStripTile(0, slot))
+                    && !HandStripClassifier.IsRotated(ToStripTile(0, existing)))
+                    byNode[slot.NodeIndex] = slot;
+                return;
+            }
+
+            byNode[slot.NodeIndex] = slot;
+        }
+
+        foreach (var slot in rawHand)
+        {
+            if (slot.NodeIndex == 54 || slot.NodeIndex is >= 59 and <= 71)
+                Consider(slot);
+        }
+
+        foreach (var slot in extraStrip)
+            Consider(slot);
+
+        foreach (var slot in slots.Where(s => s.Kind == SlotKind.VisibleTileCandidate))
+        {
+            if (slot.NodeIndex is < 54 or > 71)
+                Consider(slot);
+        }
+
+        if (byNode.Count == 0)
+            return;
+
+        var list = byNode.Values.OrderBy(s => s.X).ThenBy(s => s.NodeIndex).ToList();
+        var tiles = list.Select((s, i) => ToStripTile(i, s)).ToList();
+        var split = HandStripClassifier.Split(tiles);
+        if (split.ClosedIds.Count == 0 && split.MeldGroups.Count == 0 && split.DrawId == null)
+            return;
+
+        slots.RemoveAll(s => s.Kind is SlotKind.CanonicalPlayerHand or SlotKind.CanonicalPlayerDraw);
+
+        for (var i = 0; i < split.ClosedIds.Count; i++)
+        {
+            var id = split.ClosedIds[i];
+            if (id < 0 || id >= list.Count)
+                continue;
+            slots.Add(list[id] with { Kind = SlotKind.CanonicalPlayerHand, SlotIndex = i });
+        }
+
+        if (split.DrawId is int drawId && drawId >= 0 && drawId < list.Count)
+            slots.Add(list[drawId] with { Kind = SlotKind.CanonicalPlayerDraw, SlotIndex = 0 });
+
+        var meldIndex = slots.Count(s => s.Kind == SlotKind.PlayerMeld);
+        foreach (var group in split.MeldGroups)
+        {
+            foreach (var id in group)
+            {
+                if (id < 0 || id >= list.Count)
+                    continue;
+                slots.Add(list[id] with { Kind = SlotKind.PlayerMeld, SlotIndex = meldIndex++ });
+            }
+        }
+    }
+
+    private static HandStripClassifier.Tile ToStripTile(int id, UiSlot slot)
+        => new(id, slot.X, slot.Y, slot.Width, slot.Height, slot.Rotation, slot.ParentNodeId, slot.TileCode);
 
     private static List<UiSlot> BuildCanonicalHand(List<UiSlot> rawHand)
     {
