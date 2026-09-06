@@ -142,6 +142,91 @@ public class HandStripClassifierTests
     }
 
     [Fact]
+    public void Live_upright_42px_strip_peels_fuuro_right_of_draw()
+    {
+        // snap-20260906-071141803: all type 1055, Y=0, 42×55, no rotation, no ≥50px gap.
+        // Closed 42–294, draw M5 at 304 (node 54), WEST 336/378/420, GREEN 462/504.
+        var tiles = LiveUprightStrip(node54: true);
+
+        var split = HandStripClassifier.Split(tiles);
+
+        Assert.Equal(["M5", "P6", "P6", "S5", "S6", "S7", "S7"], Codes(tiles, split.ClosedIds));
+        Assert.Equal(7, split.DrawId);
+        Assert.Equal(2, split.MeldGroups.Count);
+        Assert.Equal(["WEST", "WEST", "WEST"], Codes(tiles, split.MeldGroups[0]));
+        Assert.Equal(["GREEN", "GREEN"], Codes(tiles, split.MeldGroups[1]));
+        Assert.DoesNotContain("WEST", split.ClosedIds.Select(id => tiles[id].TileCode));
+        Assert.DoesNotContain("GREEN", split.ClosedIds.Select(id => tiles[id].TileCode));
+
+        var inferred = MeldClassifier.SplitIntoMelds(
+            split.MeldGroups.SelectMany(g => Codes(tiles, g)).ToList(), acceptPairRemainder: true);
+        Assert.Equal(2, inferred.Count);
+        Assert.All(inferred, m => Assert.Equal("PON", m.Type));
+        Assert.Equal("WEST", inferred[0].Tiles[0]);
+        Assert.Equal("GREEN", inferred[1].Tiles[0]);
+    }
+
+    [Fact]
+    public void Live_upright_42px_strip_peels_via_pitch_break_without_node_54()
+    {
+        var tiles = LiveUprightStrip(node54: false);
+
+        var split = HandStripClassifier.Split(tiles);
+
+        Assert.Equal(7, split.ClosedIds.Count);
+        Assert.Equal(7, split.DrawId);
+        Assert.Equal(["WEST", "WEST", "WEST"], Codes(tiles, split.MeldGroups[0]));
+        Assert.Equal(["GREEN", "GREEN"], Codes(tiles, split.MeldGroups[1]));
+    }
+
+    [Fact]
+    public void Leftmost_tile_at_x_zero_stays_in_closed_hand()
+    {
+        var tiles = new List<HandStripClassifier.Tile>
+        {
+            T(0, 0, "M1"),
+            T(1, 42, "M2"),
+            T(2, 84, "M3"),
+            T(3, 126, "P1"),
+            T(4, 168, "P2"),
+            T(5, 210, "P3"),
+            T(6, 252, "S1"),
+            T(7, 294, "S2"),
+            T(8, 336, "S3"),
+            T(9, 378, "S4"),
+            T(10, 420, "S6"),
+            T(11, 462, "S7"),
+            T(12, 504, "S8"),
+            T(13, 556, "S9"),
+        };
+
+        var split = HandStripClassifier.Split(tiles);
+
+        Assert.Contains(0, split.ClosedIds);
+        Assert.Equal(13, split.DrawId);
+        Assert.Empty(split.MeldGroups);
+    }
+
+    [Fact]
+    public void Chi_to_the_right_of_draw_is_a_meld()
+    {
+        var tiles = Enumerable.Range(0, 10)
+            .Select(i => T(i, 42 + i * 42, $"M{(i % 9) + 1}"))
+            .ToList();
+        tiles.Add(T(10, 42 + 10 * 42 + 10, "S5", nodeIndex: 54));
+        tiles.Add(T(11, 42 + 11 * 42, "P2"));
+        tiles.Add(T(12, 42 + 12 * 42, "P3"));
+        tiles.Add(T(13, 42 + 13 * 42, "P4"));
+
+        var split = HandStripClassifier.Split(tiles);
+
+        Assert.Equal(10, split.ClosedIds.Count);
+        Assert.Equal(10, split.DrawId);
+        var chi = Assert.Single(split.MeldGroups);
+        Assert.Equal(["P2", "P3", "P4"], Codes(tiles, chi));
+    }
+
+    [Fact]
     public void Overlapping_suited_tiles_at_same_x_are_not_a_meld_cue()
     {
         // dump/uistate: P2 and P3 both at X=168 (placeholder + live).
@@ -170,9 +255,27 @@ public class HandStripClassifierTests
         Assert.DoesNotContain(13, split.ClosedIds);
     }
 
+    private static List<HandStripClassifier.Tile> LiveUprightStrip(bool node54)
+        =>
+        [
+            T(0, 42, "M5"),
+            T(1, 84, "P6"),
+            T(2, 126, "P6"),
+            T(3, 168, "S5"),
+            T(4, 210, "S6"),
+            T(5, 252, "S7"),
+            T(6, 294, "S7"),
+            T(7, 304, "M5", nodeIndex: node54 ? 54 : 0),
+            T(8, 336, "WEST"),
+            T(9, 378, "WEST"),
+            T(10, 420, "WEST"),
+            T(11, 462, "GREEN"),
+            T(12, 504, "GREEN"),
+        ];
+
     private static HandStripClassifier.Tile T(
-        int id, float x, string code, float rotation = 0, uint parent = 1)
-        => new(id, x, 0, 42, 55, rotation, parent, code);
+        int id, float x, string code, float rotation = 0, uint parent = 1, int nodeIndex = 0)
+        => new(id, x, 0, 42, 55, rotation, parent, code, nodeIndex);
 
     private static List<string> Codes(List<HandStripClassifier.Tile> tiles, IReadOnlyList<int> ids)
     {

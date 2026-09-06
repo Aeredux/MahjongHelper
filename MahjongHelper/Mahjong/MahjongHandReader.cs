@@ -43,7 +43,11 @@ public static unsafe class MahjongHandReader
         int Height = 55,
         uint ParentNodeId = 0);
 
-    public sealed record MahjongHandSnapshot(IReadOnlyList<MahjongTileObservation> HandTiles, MahjongTileObservation? DrawnTile, bool IsFromCache = false)
+    public sealed record MahjongHandSnapshot(
+        IReadOnlyList<MahjongTileObservation> HandTiles,
+        MahjongTileObservation? DrawnTile,
+        bool IsFromCache = false,
+        IReadOnlyList<IReadOnlyList<MahjongTileObservation>>? Melds = null)
     {
         public string ToDisplayText()
         {
@@ -158,11 +162,12 @@ public static unsafe class MahjongHandReader
         var stripForSplit = stripTiles
             .Where(t => t.NodeIndex is < 55 or > 58)
             .ToList();
+        List<List<MahjongTileObservation>> stripMelds = [];
         if (stripForSplit.Count > 0)
         {
             var classified = HandStripClassifier.Split(stripForSplit
                 .Select((t, index) => new HandStripClassifier.Tile(
-                    index, t.X, t.Y, t.Width, t.Height, t.Rotation, t.ParentNodeId, t.TileCode))
+                    index, t.X, t.Y, t.Width, t.Height, t.Rotation, t.ParentNodeId, t.TileCode, t.NodeIndex))
                 .ToList());
             var closed = classified.ClosedIds
                 .Where(id => id >= 0 && id < stripForSplit.Count)
@@ -173,11 +178,20 @@ public static unsafe class MahjongHandReader
                 .ToList();
             if (closed.Count > 0)
                 handTiles = closed;
+            if (classified.DrawId is int drawId && drawId >= 0 && drawId < stripForSplit.Count)
+                drawnTile = stripForSplit[drawId];
+            stripMelds = classified.MeldGroups
+                .Select(group => group
+                    .Where(id => id >= 0 && id < stripForSplit.Count)
+                    .Select(id => stripForSplit[id])
+                    .ToList())
+                .Where(group => group.Count > 0)
+                .ToList();
         }
 
         if (handTiles.Count > 0)
         {
-            var liveSnapshot = new MahjongHandSnapshot(handTiles, drawnTile, IsFromCache: false);
+            var liveSnapshot = new MahjongHandSnapshot(handTiles, drawnTile, IsFromCache: false, Melds: stripMelds);
             SaveSnapshot(liveSnapshot);
             return liveSnapshot;
         }

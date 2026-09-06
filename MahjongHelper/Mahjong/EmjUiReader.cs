@@ -1603,7 +1603,7 @@ public static unsafe class EmjUiReader
 
         void Consider(UiSlot slot)
         {
-            if (!slot.Visible || slot.IconId == 0 || slot.X <= 0)
+            if (!slot.Visible || slot.IconId == 0 || slot.X < 0)
                 return;
             if (slot.NodeIndex is >= 55 and <= 58)
                 return;
@@ -1669,7 +1669,7 @@ public static unsafe class EmjUiReader
     }
 
     private static HandStripClassifier.Tile ToStripTile(int id, UiSlot slot)
-        => new(id, slot.X, slot.Y, slot.Width, slot.Height, slot.Rotation, slot.ParentNodeId, slot.TileCode);
+        => new(id, slot.X, slot.Y, slot.Width, slot.Height, slot.Rotation, slot.ParentNodeId, slot.TileCode, slot.NodeIndex);
 
     private static List<UiSlot> BuildCanonicalHand(List<UiSlot> rawHand)
     {

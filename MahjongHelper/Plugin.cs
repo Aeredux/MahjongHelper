@@ -1267,6 +1267,7 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
             int[] atkValues = Array.Empty<int>();
             object[] closedHand = Array.Empty<object>();
             object? drawnTile = null;
+            object[] handStripMelds = Array.Empty<object>();
 
             unsafe
             {
@@ -1286,31 +1287,13 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
                     var hand = MahjongHandReader.Read(addon, _iconCapture, _iconMap);
                     closedHand = hand.HandTiles
                         .OrderBy(t => t.X)
-                        .Select(t => (object)new
-                        {
-                            t.NodeIndex,
-                            t.NodeId,
-                            t.NodeType,
-                            t.X,
-                            t.Y,
-                            t.IconId,
-                            t.TileCode,
-                        })
+                        .Select(DumpStripTile)
                         .ToArray();
                     if (hand.DrawnTile != null)
-                    {
-                        var d = hand.DrawnTile;
-                        drawnTile = new
-                        {
-                            d.NodeIndex,
-                            d.NodeId,
-                            d.NodeType,
-                            d.X,
-                            d.Y,
-                            d.IconId,
-                            d.TileCode,
-                        };
-                    }
+                        drawnTile = DumpStripTile(hand.DrawnTile);
+                    handStripMelds = (hand.Melds ?? Array.Empty<IReadOnlyList<MahjongHandReader.MahjongTileObservation>>())
+                        .Select(group => (object)group.Select(DumpStripTile).ToArray())
+                        .ToArray();
                 }
             }
 
@@ -1358,6 +1341,7 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
                 },
                 closedHand,
                 drawnTile,
+                handStripMelds,
             };
 
             var path = SnapCapture.WriteJson(payload);
@@ -1374,6 +1358,21 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
         // KAN-54: also write the current solver POST body for AZPC field verify.
         WriteSolverSnap();
     }
+
+    private static object DumpStripTile(MahjongHandReader.MahjongTileObservation t) => new
+    {
+        t.NodeIndex,
+        t.NodeId,
+        t.NodeType,
+        t.X,
+        t.Y,
+        t.Width,
+        t.Height,
+        t.Rotation,
+        t.ParentNodeId,
+        t.IconId,
+        t.TileCode,
+    };
 
     private void LeaveStuckMatch()
     {
