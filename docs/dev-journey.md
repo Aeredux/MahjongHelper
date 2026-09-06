@@ -1,5 +1,68 @@
 # Dev Journey
 
+## 2026-09-06: KAN-55 `/mj screenshot` prefers CaptureFallback (no 5s wait)
+
+**What:** AZPC confirmed the game writer is dead and the ~5s `ScheduleScreenShot` wait made every `/mj screenshot` slow.
+
+**Changes:**
+- Default `/mj screenshot` / `/mj printscreen` goes straight to CaptureFallback. No ScheduleScreenShot wait, no key-inject wait.
+- `/mj screenshot game` keeps the old Square-writer path (stuck recovery + FORCE-CLEAR, then CaptureFallback).
+- Chat still names the method (`CaptureFallback/DalamudViewport`, etc.). README one-liner updated.
+
+**Result:** Cloud VM cannot time a live client. AZPC: reload; `/mj screenshot` should finish well under 1s and still write a real PNG.
+
+## 2026-09-06: KAN-55 CaptureFallback when game screenshot writer is dead
+
+**What:** AZPC after ReShade disabled (`dxgi.dll` → `dxgi.dll.off`) and a full relaunch: `/mj screenshot` still got `ScheduleScreenShot=true`, Location set to a new `ffxiv_…png` under `FF14Modding\Screenshots`, **file never appears**, `ScreenShotRequested` sticks until FORCE-CLEARED. Manual PrintScreen fails the same way. Game API screenshot is broken independent of ReShade.
+
+**Changes:**
+- After schedule fail / timeout / phantom Success (including after force-clear + retry), do not stop at “Not injecting PrintScreen while pending”. Force-clear Requested if needed, then **CaptureFallback**.
+- CaptureFallback first tries Dalamud `CreateFromImGuiViewportAsync` (`TakeBeforeImGuiRender` so it is the game scene + native UI, not ImGui-only) and WIC/`GetRawImageAsync` PNG save.
+- If that is unavailable, GDI `PrintWindow` (PW_RENDERFULLCONTENT) then `BitBlt` of the FFXIV HWND (`FFXIVGAME` / `MainWindowHandle`).
+- Writes `%APPDATA%\MahjongHelper\screenshots\mj-yyyyMMdd-HHmmssfff.png` and copies into cfg `ScreenShotDir` when writable. Chat names the method. `/mj screenshot status` adds `lastMethod` / `lastPath`.
+- BoundKey / VK_SNAPSHOT kept only as a last resort after CaptureFallback. `/mj snap` still JSON-only. No UI hide. No DXGI Desktop Duplication. Path-naming unit tests only (no HWND tests).
+
+**Result:** Cloud VM cannot press a live client. AZPC: reload, `/mj screenshot` on a machine with phantom ScheduleScreenShot should still produce a real PNG and log `CaptureFallback` plus the path.
+
+## 2026-09-06: KAN-55 stuck ScreenShotRequested + phantom Location
+
+**What:** AZPC after `29aea08`: `/mj screenshot status` showed `CanTake=True Requested=True Result=Success Location=…/ffxiv_09052026_170302_038.png` but that file is not on disk. `/mj screenshot` correctly refused PrintScreen while pending. User would otherwise need a relog to clear the bit.
+
+**Changes:**
+- If Requested stays true after the wait and Location is empty/missing (or the request is stale ~8s with no new file), force-clear `ScreenShotRequested` (unsafe write) and retry `ScheduleScreenShot` once. Log the force-clear loudly.
+- `Result=Success` + Location set but file missing is treated as failure: “Result=Success but file missing at Location=… (ReShade/DXGI often causes this)”, then clear Requested and retry once.
+- PrintScreen inject still only after Requested is false and a fresh schedule fails.
+- `/mj screenshot status` now includes `LocationOnDisk`.
+
+**Result:** Cloud VM cannot prove the unsafe write against a live client. AZPC: reload, `/mj screenshot` should FORCE-CLEAR the stuck bit, retry schedule, and either write a real PNG or report phantom Success instead of staying wedged.
+
+## 2026-09-06: KAN-55 screenshot follow-up — ScreenShotDir + async ScheduleScreenShot
+
+**What:** AZPC showed `/mj screenshot` watching the default `My Games\...\screenshots` folder while live `FFXIV.cfg` had `ScreenShotDir` = `Documents\FF14Modding\Screenshots`. First `ScheduleScreenShot` logged as fired with no file; later calls fell through to `KEY_SCREENSHOT` (`SNAPSHOT+None`) because `ScreenShotRequested` stayed true. PrintScreen is dead on that machine (ReShade/Snipping Tool).
+
+**Changes:**
+- Parse `ScreenShotDir` from OneDrive + non-OneDrive `FFXIV.cfg`; prefer that path (create if missing); scan every candidate for newest file.
+- Treat `ScheduleScreenShot` as async: log CanTake/Requested/prior Result, wait+retry once if already requested, poll until Requested clears (~5s), then report Result + Location (FileAccessPath @ 0x78) or a stuck reason. Successful schedule does not inject a key.
+- BoundKey/PrintScreen fallback no longer claims success from SendInput alone; SNAPSHOT binds get the F12 rebind hint.
+- `/mj screenshot status` dumps API flags + resolved dirs. Pure cfg parser is unit-tested (no game).
+
+**Result:** Cloud VM still cannot press a live client. AZPC: Release rebuild + reload, `/mj screenshot status` should show the FF14Modding folder, then `/mj screenshot` should print Result/Location or stuck — not a false “fired via game API”.
+
+## 2026-09-05: KAN-55 `/mj screenshot` via game API / PrintScreen
+
+**What:** Added `/mj screenshot` (alias `/mj printscreen`) on master after KAN-12 NativeAddon. `/mj snap` stays JSON-only.
+
+**Why:** Telesto `ExecuteCommand` can run slash commands but cannot press PrintScreen. The game already writes PNGs to the usual screenshots folder.
+
+**Approach (in plugin, Telesto not required):**
+1. `FFXIVClientStructs` `ScreenShot.Instance()->ScheduleScreenShot` on the next framework tick.
+2. Else look up `InputId.KEY_SCREENSHOT` and `SendInput` that virtual key (+ modifiers).
+3. Else emulate `VK_SNAPSHOT` / PrintScreen (`SendInput`, then `keybd_event` if SendInput returns 0) so the game’s normal screenshot handler runs.
+4. Chat line with folder hint; ~2s later print the newest PNG/JPG if one appeared. Hide UI / Scroll Lock is not toggled (not reliable enough to flip blindly).
+
+**Result:** Cloud VM cannot press a live client. AZPC: rebuild Release, reload plugin, `/mj screenshot` during EmjL with overlay on; expect a new file under `Documents\My Games\FINAL FANTASY XIV - A Realm Reborn\screenshots`. Chat may appear in the shot.
+
+
 ## 2026-09-03: Same-tick FireCallback 7 after Riichi ListItemClick passes riichi
 
 **What:** Live AZPC 10:56:08Z. Provider accepted Riichi (savedTile=M7). ListItemClick index=0, then **same tick** FireCallback 7 handPos=8 for M7. ATK unchanged on the discard; 40ms later RiichiDecisionPrompt → OpponentTurn, pending `riichi-discard` cleared as stale. Heartbeat still `calls=Riichi, Skip`. M7 went out as a normal discard; later `discard:WEST` — they were not in riichi. Contrast 11:20:55Z S5: same same-tick callback 7 but it targeted the **wrong** tile (S0 vs S5); ListItemClick itself completed riichi+discard of S5.

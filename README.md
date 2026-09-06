@@ -41,7 +41,8 @@ Main command: `/mj`
 - `/mj auto` toggles auto-play.
 - `/mj pause` pauses/resumes pending auto-play actions.
 - `/mj leave` withdraws and closes a stuck NPC mahjong match (FireCallback 16 then 19). Overlay **Leave** asks for confirmation first.
-- `/mj snap` writes overlay/suggestion sidecar JSON under `%APPDATA%/MahjongHelper/captures/` (plus a `request_snap` file-watch fallback). `scripts/mj-snap.ps1` POSTs Telesto ExecuteCommand to `http://localhost:45678/` (Host **localhost**, not `127.0.0.1`). The plugin keeps the last 10 capture files.
+- `/mj snap` writes overlay/suggestion sidecar JSON under `%APPDATA%/MahjongHelper/captures/` (plus a `request_snap` file-watch fallback). JSON-only — it does **not** take a PNG. `scripts/mj-snap.ps1` POSTs Telesto ExecuteCommand to `http://localhost:45678/` (Host **localhost**, not `127.0.0.1`). The plugin keeps the last 10 capture files.
+- `/mj screenshot` (alias `/mj printscreen`) writes a PNG we control via **CaptureFallback** first (Dalamud viewport/backbuffer of the game scene, then GDI `PrintWindow`/`BitBlt` of the FFXIV HWND) — it does **not** wait ~5s on `ScheduleScreenShot`. Files land in `%APPDATA%/MahjongHelper/screenshots/mj-*.png` and are copied into cfg `ScreenShotDir` when writable. Chat names the method (`CaptureFallback/DalamudViewport`, `CaptureFallback/PrintWindow`, …). `/mj screenshot game` is the optional Square-writer path (async `ScheduleScreenShot`, FORCE-CLEAR / stuck recovery, then CaptureFallback). `/mj screenshot status` dumps CanTake / Requested / Result / LocationOnDisk / lastMethod / lastPath. `/mj snap` stays JSON-only. Telesto is not required. Hide UI / Scroll Lock is **not** toggled.
 - `/mj mark discard` records a manual discard marker in diagnostics.
 - `/mj mark call` records a manual call marker in diagnostics.
 
@@ -60,7 +61,7 @@ The settings window is a native FFXIV addon (plugin installer config button, or 
 ## Prerequisites
 
 - XIVLauncher, FFXIV, and Dalamud installed and working.
-- .NET 8 SDK (Dalamud 15 / plugin build may require a newer SDK matching the current Dalamud.NET.Sdk).
+- .NET 10 SDK (Dalamud 15 / `Dalamud.NET.Sdk` currently targets `net10.0`).
 - Optional but recommended for server mode: local Mahjong solver server on `localhost:8080` implementing the endpoints above.
 
 This repo includes KamiToolKit as a git submodule (VanillaPlus-style NativeAddon windows). Clone with submodules:
@@ -106,6 +107,7 @@ Common files include:
 - `server_log.txt` (HTTP request/response logs)
 - `autoplay.log` (auto-play action traces)
 - `captures/` (`/mj snap` sidecar JSON; last 10 files kept)
+- `screenshots/` (`/mj screenshot` CaptureFallback PNGs)
 - `mahjong_ui_state_history.log` (deduped UI state history)
 - `normalized_state_history.log` (deduped normalized state history)
 - `probe_history.log`, `probe_signals.log`, `tile_candidates.log` (reverse-engineering logs)
@@ -116,4 +118,4 @@ Common files include:
 - This plugin automates in-game decisions and click actions when auto-play is enabled.
 - Server suggestions are only used when server mode is selected and the local server is reachable.
 - If the overlay is enabled but EmjL is not open, the overlay will remain hidden until a readable Mahjong state is available.
-- Native overlay and settings windows appear in vanilla screenshots. The ImGui debug dump (`/mj`) does not.
+- Native overlay and settings windows appear in vanilla screenshots (`/mj screenshot` / Print Screen). The ImGui debug dump (`/mj`) does not.

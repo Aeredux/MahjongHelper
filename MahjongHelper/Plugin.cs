@@ -37,11 +37,13 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
 
     [PluginService] internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
     [PluginService] internal static ITextureProvider TextureProvider { get; private set; } = null!;
+    [PluginService] internal static ITextureReadbackProvider TextureReadback { get; private set; } = null!;
     [PluginService] internal static ICommandManager CommandManager { get; private set; } = null!;
     [PluginService] internal static IClientState ClientState { get; private set; } = null!;
     [PluginService] internal static IPlayerState PlayerState { get; private set; } = null!;
     [PluginService] internal static IDataManager DataManager { get; private set; } = null!;
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
+    [PluginService] internal static IChatGui ChatGui { get; private set; } = null!;
 
     [PluginService]
     private static IGameInteropProvider GameInterop { get; set; } = null!;
@@ -101,6 +103,9 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
     private string _lastActionProbeSignature = string.Empty;
     private DateTime _nextAutoplayHeartbeatUtc = DateTime.MinValue;
     private bool _snapRequested;
+    private bool _screenshotRequested;
+    private bool _screenshotPreferGameApi;
+    private bool _screenshotInFlight;
 
     public Task LoadAsync(CancellationToken cancellationToken)
     {
@@ -139,7 +144,7 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "/mj — toggle debug window | /mj overlay | /mj compact | /mj auto | /mj pause | /mj leave | /mj snap | /mj mark discard|call | /mj probecallback <a> <b> [run] | /mj clicktile <nodeIndex> [run]"
+            HelpMessage = "/mj — toggle debug window | /mj overlay | /mj compact | /mj auto | /mj pause | /mj leave | /mj snap | /mj screenshot [status|game] | /mj mark discard|call | /mj probecallback <a> <b> [run] | /mj clicktile <nodeIndex> [run]"
         });
 
         // Tell the UI system that we want our windows to be drawn through the window system
@@ -181,6 +186,12 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
         {
             _snapRequested = false;
             WriteSnapCapture("framework");
+        }
+
+        if (_screenshotRequested)
+        {
+            _screenshotRequested = false;
+            StartGameScreenshot();
         }
 
         var readerStatus = _emjReader.Status;
@@ -850,6 +861,19 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
         {
             _snapRequested = true;
             Log.Information("/mj snap queued — writing sidecar JSON on the next framework tick");
+        }
+        else if (lower is "screenshot status" or "printscreen status")
+        {
+            PrintScreenshotStatus();
+        }
+        else if (lower is "screenshot game" or "printscreen game")
+        {
+            QueueScreenshot(preferGameApi: true);
+        }
+        else if (lower is "screenshot" or "printscreen")
+        {
+            // KAN-55: CaptureFallback first (no ~5s ScheduleScreenShot wait). Snap stays JSON-only.
+            QueueScreenshot(preferGameApi: false);
         }
         else if (lower == "mark discard")
         {
