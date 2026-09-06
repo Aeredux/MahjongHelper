@@ -17,6 +17,26 @@ public static class IconNodeScan
     public const int MinTilePx = 16;
     public const int MaxTilePx = 80;
     public const float LeafSnapPx = 8f;
+
+    public readonly record struct HandStripSlotKey(
+        uint NodeId, int NodeIndex, int SnapX, int SnapY, uint Icon);
+
+    public static (int X, int Y) SnapLeaf(float absX, float absY)
+        => ((int)MathF.Round(absX / LeafSnapPx), (int)MathF.Round(absY / LeafSnapPx));
+
+    /// <summary>
+    /// Dedupe key for <c>ApplyHandStripMeldSplit</c>. Nested type-2 faces
+    /// reuse the same child NodeId (live NORTH PON all NodeId=4) with
+    /// distinct Abs/NodeIndex. NodeId alone must not collapse those faces.
+    /// Snap + icon stay in the key; NodeId/NodeIndex still distinguish a
+    /// stacked cue on the same snap.
+    /// </summary>
+    public static HandStripSlotKey HandStripSlotKeyOf(
+        uint nodeId, int nodeIndex, float absX, float absY, uint iconId)
+    {
+        var snap = SnapLeaf(absX, absY);
+        return new HandStripSlotKey(nodeId, nodeIndex, snap.X, snap.Y, iconId);
+    }
     public const ushort ImageNodeType = 2;
     public const ushort CallCueNodeType = 1056;
     public const ushort FuuroTrayNodeType = 1060;

@@ -126,6 +126,37 @@ public class IconNodeScanTests
     }
 
     [Fact]
+    public void Shared_child_nodeid_does_not_collapse_distinct_north_faces()
+    {
+        // snap-20260906-100051365: three type-2 NORTH leaves all NodeId=4.
+        const uint IconNorth = 76071;
+        var faces = new (int NodeIndex, float AbsX, float AbsY)[]
+        {
+            (1002866, 1526, 972),
+            (1002813, 1572, 984),
+            (1002839, 1623, 972),
+        };
+
+        var keys = faces
+            .Select(f => IconNodeScan.HandStripSlotKeyOf(4, f.NodeIndex, f.AbsX, f.AbsY, IconNorth))
+            .ToList();
+        Assert.Equal(3, keys.Distinct().Count());
+        Assert.Equal(1, keys.Select(k => k.NodeId).Distinct().Count());
+
+        var byNode = new Dictionary<IconNodeScan.HandStripSlotKey, (int NodeIndex, float AbsX, float AbsY)>();
+        foreach (var face in faces)
+            byNode[IconNodeScan.HandStripSlotKeyOf(4, face.NodeIndex, face.AbsX, face.AbsY, IconNorth)] = face;
+        // type-1056 cue Abs (1568,984) shares LeafSnap with the middle type-2
+        // (1572,984). NodeIndex must keep the cue as a fourth byNode entry.
+        byNode[IconNodeScan.HandStripSlotKeyOf(4, 190, 1568, 984, IconNorth)] = (190, 1568, 984);
+        Assert.Equal(4, byNode.Count);
+
+        // Same node scanned twice still dedupes.
+        var again = IconNodeScan.HandStripSlotKeyOf(4, 1002866, 1526, 972, IconNorth);
+        Assert.Equal(keys[0], again);
+    }
+
+    [Fact]
     public void Upright_type2_dora_band_is_not_plausible_opposite_fuuro()
     {
         var dora = new (ushort Type, float X, float Y, int W, int H, float Rot)[]

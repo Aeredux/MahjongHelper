@@ -420,6 +420,55 @@ public class HandStripClassifierTests
     }
 
     [Fact]
+    public void Shared_nodeid_type2_north_leaves_survive_slotkey_then_split()
+    {
+        // EmjUiReader used to key by NodeId only; live leaves all NodeId=4.
+        const uint IconNorth = 76071;
+        var raw = new (int NodeIndex, float AbsX, float AbsY)[]
+        {
+            (1002866, 1526, 972),
+            (1002813, 1572, 984),
+            (1002839, 1623, 972),
+        };
+        var byNode = new Dictionary<IconNodeScan.HandStripSlotKey, (int NodeIndex, float AbsX, float AbsY)>();
+        foreach (var face in raw)
+            byNode[IconNodeScan.HandStripSlotKeyOf(4, face.NodeIndex, face.AbsX, face.AbsY, IconNorth)] = face;
+        Assert.Equal(3, byNode.Count);
+
+        var tiles = new List<HandStripClassifier.Tile>();
+        var closed = new[]
+        {
+            "M4", "M6", "M7", "M8", "M8", "M9", "S1", "S1", "S8", "S8", "M4", "P2", "NORTH",
+        };
+        for (var i = 0; i < closed.Length; i++)
+        {
+            var x = 1368 - (closed.Length - 1 - i) * 42;
+            tiles.Add(T(i, x, closed[i], nodeIndex: 59 + i, nodeType: 1055, width: 42, height: 55,
+                absX: x, absY: 972, parent: 133));
+        }
+
+        var id = 13;
+        foreach (var face in byNode.Values.OrderBy(f => f.AbsX))
+        {
+            tiles.Add(T(id++, 0, "NORTH", parent: 3, nodeIndex: face.NodeIndex, width: 40, height: 52,
+                nodeType: 2, absX: face.AbsX, absY: face.AbsY));
+        }
+
+        tiles.Add(T(id, 0, "NORTH", 4.712f, parent: 3, nodeIndex: 190, width: 42, height: 55,
+            nodeType: 1056, absX: 1568, absY: 984));
+        var trays = new[] { new IconNodeScan.Tray(1526, 972, 140, 55) };
+
+        var split = HandStripClassifier.Split(tiles, trays);
+        var pon = Assert.Single(split.MeldGroups);
+        var ponCodes = Codes(tiles, pon);
+        Assert.Equal(3, ponCodes.Count);
+        Assert.All(ponCodes, c => Assert.Equal("NORTH", c));
+        Assert.Equal("PON", MeldClassifier.InferMeld(ponCodes)!.Type);
+        Assert.Contains(12, split.ClosedIds);
+        Assert.DoesNotContain(12, pon);
+    }
+
+    [Fact]
     public void Type2_pon_with_sideways_call_tile_is_kept()
     {
         var tiles = new List<HandStripClassifier.Tile>();
