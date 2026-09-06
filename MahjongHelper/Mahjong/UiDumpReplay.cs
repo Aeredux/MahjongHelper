@@ -220,7 +220,7 @@ public static class UiDumpReplay
             var meld = MeldClassifier.InferMeld(codes);
             if (meld == null)
                 continue;
-            dest.Add(new MeldInfo { Type = meld.Type, Tiles = meld.Tiles.ToList() });
+            dest.Add(new MeldInfo { Type = meld.Type, Tiles = SnapTiles(meld) });
         }
     }
 
@@ -237,7 +237,7 @@ public static class UiDumpReplay
         {
             var meld = MeldClassifier.InferMeld(window);
             if (meld != null)
-                dest.Add(new MeldInfo { Type = meld.Type, Tiles = meld.Tiles.ToList() });
+                dest.Add(new MeldInfo { Type = meld.Type, Tiles = SnapTiles(meld) });
         }
     }
 
@@ -255,8 +255,22 @@ public static class UiDumpReplay
                 .ToList();
             var meld = MeldClassifier.InferMeld(codes);
             if (meld != null)
-                dest.Add(new MeldInfo { Type = meld.Type, Tiles = meld.Tiles.ToList() });
+                dest.Add(new MeldInfo { Type = meld.Type, Tiles = SnapTiles(meld) });
         }
+    }
+
+    /// <summary>
+    /// Live <c>/mj snap</c> prints CHI in rank order (S7-S8-S9). Leftover
+    /// clusters are AbsX-sorted (S9-S7-S8). Replay only.
+    /// </summary>
+    private static List<string> SnapTiles(ObservedMeld meld)
+    {
+        var tiles = meld.Tiles.ToList();
+        if (!meld.Type.Equals("CHI", StringComparison.Ordinal) || tiles.Count != 3)
+            return tiles;
+        return tiles
+            .OrderBy(MeldClassifier.CanonicalKey, StringComparer.Ordinal)
+            .ToList();
     }
 
     private static List<string> ClosedHand(
