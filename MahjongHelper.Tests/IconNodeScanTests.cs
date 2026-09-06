@@ -141,7 +141,7 @@ public class IconNodeScanTests
             .Select(f => IconNodeScan.HandStripSlotKeyOf(4, f.NodeIndex, f.AbsX, f.AbsY, IconNorth))
             .ToList();
         Assert.Equal(3, keys.Distinct().Count());
-        Assert.Equal(1, keys.Select(k => k.NodeId).Distinct().Count());
+        Assert.Single(keys.Select(k => k.NodeId).Distinct());
 
         var byNode = new Dictionary<IconNodeScan.HandStripSlotKey, (int NodeIndex, float AbsX, float AbsY)>();
         foreach (var face in faces)
