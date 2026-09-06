@@ -176,21 +176,51 @@ public static class OpponentAreaClassifier
             cluster.OrderBy(t => HasAbs(t) ? t.AbsX : t.X).ToList(),
             t => HasAbs(t) ? t.AbsX : t.X,
             t => t.TileCode);
-        if (faces.Count is >= 2 and <= 4
-            && SmallTileClassifier.LooksLikeOpenMeld(faces.Select(ToSmall).ToList()))
-            return [cluster.Count is >= 2 and <= 4 ? cluster : faces.ToList()];
+        if (faces.Count is >= 3 and <= 4
+            && MeldClassifier.InferMeld(faces.Select(t => t.TileCode!).ToList()) != null)
+            return [cluster.Count is >= 3 and <= 4 ? cluster : faces.ToList()];
 
-        if (cluster.Count is >= 2 and <= 4
-            && SmallTileClassifier.LooksLikeOpenMeld(cluster.Select(ToSmall).ToList()))
+        if (cluster.Count is >= 3 and <= 4
+            && MeldClassifier.InferMeld(cluster.Select(t => t.TileCode!).ToList()) != null)
             return [cluster];
 
-        if (!allowSplit || cluster.Count < 3)
+        // 2-tile same-key only on the player strip (called-tile remainder).
+        // Opponent leftover pairs are pond / dora ghosts (live East P7×2).
+        if (allowSplit && faces.Count == 2
+            && SmallTileClassifier.LooksLikeOpenMeld(faces.Select(ToSmall).ToList()))
+            return [cluster.Count == 2 ? cluster : faces.ToList()];
+
+        if (cluster.Count < 5)
             return [];
 
-        var ordered = cluster
-            .OrderBy(t => HasAbs(t) ? t.AbsX : t.X)
-            .ThenBy(t => t.Id)
+        // Adjacent opponent fuuro (live East SOUTH PON S9 + CHI S4-S6) sits
+        // in one 70px cluster. Peel InferMeld windows even off the hand strip.
+        return PeelInferMeldGroups(cluster);
+    }
+
+    /// <summary>
+    /// Peels consecutive InferMeld windows. Tries X-major (two side columns)
+    /// and Y-major (one vertical stack of two sets) and keeps the richer peel.
+    /// </summary>
+    internal static List<List<Tile>> PeelInferMeldGroups(List<Tile> cluster)
+    {
+        var byParent = cluster
+            .Where(t => t.ParentNodeId != 0)
+            .GroupBy(t => t.ParentNodeId)
+            .Select(g => g.OrderBy(AbsXOf).ThenBy(AbsYOf).ThenBy(t => t.Id).ToList())
+            .Where(g => g.Count is >= 3 and <= 4
+                        && MeldClassifier.InferMeld(g.Select(t => t.TileCode!).ToList()) != null)
             .ToList();
+        if (byParent.Count >= 2)
+            return byParent;
+
+        var byX = PeelOrdered(cluster.OrderBy(AbsXOf).ThenBy(AbsYOf).ThenBy(t => t.Id).ToList());
+        var byY = PeelOrdered(cluster.OrderBy(AbsYOf).ThenBy(AbsXOf).ThenBy(t => t.Id).ToList());
+        return byX.Count >= byY.Count ? byX : byY;
+    }
+
+    private static List<List<Tile>> PeelOrdered(List<Tile> ordered)
+    {
         var groups = new List<List<Tile>>();
         var i = 0;
         while (i < ordered.Count)
@@ -233,7 +263,23 @@ public static class OpponentAreaClassifier
     {
         var gx = group.Average(t => HasAbs(t) ? t.AbsX : t.X);
         var gy = group.Average(t => HasAbs(t) ? t.AbsY : t.Y);
-        return SeatLeftoverFuuro(gx, gy, pondHints, playerStripAbsY, tableCenterX, tableCenterY);
+        var kind = SeatLeftoverFuuro(gx, gy, pondHints, playerStripAbsY, tableCenterX, tableCenterY);
+        if (kind != SmallTileClassifier.Kind.OppositeMeld)
+            return kind;
+
+        // Vertical leftover on a side is kamicha/shimocha. Master treated
+        // anything above table-center Y as toimen, so East-seat SOUTH PON S9
+        // landed on WEST; PR #4 then dropped it as uncued opposite type-2.
+        var xSpan = group.Max(t => HasAbs(t) ? t.AbsX : t.X) - group.Min(t => HasAbs(t) ? t.AbsX : t.X);
+        var ySpan = group.Max(t => HasAbs(t) ? t.AbsY : t.Y) - group.Min(t => HasAbs(t) ? t.AbsY : t.Y);
+        if (ySpan > xSpan && Math.Abs(gx - tableCenterX) > RegionMarginPx)
+        {
+            return gx < tableCenterX
+                ? SmallTileClassifier.Kind.LeftMeld
+                : SmallTileClassifier.Kind.RightMeld;
+        }
+
+        return kind;
     }
 
     /// <summary>
@@ -273,8 +319,10 @@ public static class OpponentAreaClassifier
             }
 
             // A side pond must not steal a clearly-top toimen row.
+            // Require a real top advantage — mid-right shimocha is often
+            // slightly above table center but still a side stack.
             if (nearest is SmallTileClassifier.Kind.LeftMeld or SmallTileClassifier.Kind.RightMeld
-                && topStrength > sideStrength
+                && topStrength > sideStrength + RegionMarginPx
                 && topStrength > RegionMarginPx)
             {
                 return SmallTileClassifier.Kind.OppositeMeld;

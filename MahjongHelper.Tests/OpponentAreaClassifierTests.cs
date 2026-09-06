@@ -613,6 +613,99 @@ public class OpponentAreaClassifierTests
         Assert.DoesNotContain(assignments, a => a.Kind == SmallTileClassifier.Kind.OppositeMeld);
     }
 
+    [Fact]
+    public void Live_azpc_east_south_pon_s9_and_chi_s4_are_right_not_west()
+    {
+        // Frozen East hand: only shimocha/SOUTH has fuuro (PON S9 + CHI S4-S6).
+        // The two sets share a parent and sit in one 70px cluster on the right.
+        // A leftover P7 pair must not become a 2-tile South PON. Dora-band
+        // M5/M0 stays out of Opposite (same filter as the SOUTH-seat snap).
+        var leftovers = new List<OpponentAreaClassifier.Tile>
+        {
+            Area(0, 0, 0, 1525, 420, 55, 42, parent: 90, "S4", nodeType: 2),
+            Area(1, 0, 45, 1525, 460, 42, 55, parent: 90, "S5", nodeType: 2),
+            Area(2, 0, 90, 1525, 500, 42, 55, parent: 90, "S6", nodeType: 2),
+            Area(3, 0, 0, 1580, 420, 52, 40, parent: 90, "S9", nodeType: 2),
+            Area(4, 0, 40, 1580, 460, 52, 40, parent: 90, "S9", nodeType: 2),
+            Area(5, 0, 80, 1580, 500, 52, 40, parent: 90, "S9", nodeType: 2),
+            Area(6, 0, 0, 1480, 390, 40, 52, parent: 91, "P7", nodeType: 2),
+            Area(7, 30, 0, 1510, 390, 40, 52, parent: 91, "P7", nodeType: 2),
+            Area(8, 0, 0, 1043, 396, 40, 52, parent: 200, "M5", nodeType: 2),
+            Area(9, 26, 0, 1069, 396, 40, 52, parent: 200, "M5", nodeType: 2),
+            Area(10, 49, 34, 1092, 430, 40, 52, parent: 200, "M0", nodeType: 2),
+        };
+        var ponds = LiveSouthPonds();
+
+        var assignments = OpponentAreaClassifier.Classify(leftovers, ponds, playerStripAbsY: 972);
+
+        Assert.DoesNotContain(assignments, a => a.Kind == SmallTileClassifier.Kind.LeftMeld);
+        Assert.DoesNotContain(assignments, a => a.Kind == SmallTileClassifier.Kind.OppositeMeld);
+        Assert.DoesNotContain(assignments, a => a.Kind == SmallTileClassifier.Kind.PlayerMeld);
+        Assert.DoesNotContain(assignments, a => a.TileIds.Any(id => leftovers[id].TileCode is "P7" or "M5" or "M0"));
+
+        var right = assignments.Where(a => a.Kind == SmallTileClassifier.Kind.RightMeld).ToList();
+        Assert.Equal(2, right.Count);
+        var codes = right
+            .Select(a => a.TileIds.Select(id => leftovers[id].TileCode!).ToList())
+            .ToList();
+        Assert.Contains(codes, c => MeldClassifier.InferMeld(c)?.Type == "PON" && c.All(t => t == "S9"));
+        Assert.Contains(codes, c => MeldClassifier.InferMeld(c)?.Type == "CHI"
+                                    && c.OrderBy(t => t).SequenceEqual(["S4", "S5", "S6"]));
+
+        var summary = SolverJson.BuildSnapSummary(new SuggestMoveRequest
+        {
+            Hand = ["M2", "M2", "M0", "M6", "M7", "P6", "P8", "P8", "S1", "S1", "S2", "SOUTH", "SOUTH"],
+            DrawnTile = "P6",
+            Dora = ["M1"],
+            SeatWind = "EAST",
+            RoundWind = "EAST",
+            Opponents =
+            [
+                new OpponentInfo
+                {
+                    Wind = "SOUTH",
+                    Melds =
+                    [
+                        new MeldInfo { Type = "PON", Tiles = ["S9", "S9", "S9"] },
+                        new MeldInfo { Type = "CHI", Tiles = ["S4", "S5", "S6"] },
+                    ],
+                },
+                new OpponentInfo { Wind = "WEST" },
+                new OpponentInfo { Wind = "NORTH" },
+            ],
+        });
+        Assert.Contains("seat=EAST", summary);
+        Assert.Contains("ownMelds=0", summary);
+        Assert.Contains("oppMelds=2", summary);
+    }
+
+    [Fact]
+    public void Split_peels_adjacent_right_pon_and_chi_without_pair_remainder()
+    {
+        var cluster = new List<OpponentAreaClassifier.Tile>
+        {
+            Area(0, 0, 0, 1525, 420, 55, 42, parent: 90, "S4", nodeType: 2),
+            Area(1, 0, 45, 1525, 460, 42, 55, parent: 90, "S5", nodeType: 2),
+            Area(2, 0, 90, 1525, 500, 42, 55, parent: 90, "S6", nodeType: 2),
+            Area(3, 0, 0, 1580, 420, 52, 40, parent: 90, "S9", nodeType: 2),
+            Area(4, 0, 40, 1580, 460, 52, 40, parent: 90, "S9", nodeType: 2),
+            Area(5, 0, 80, 1580, 500, 52, 40, parent: 90, "S9", nodeType: 2),
+        };
+
+        var groups = OpponentAreaClassifier.SplitFuuroGroups(cluster, allowSplit: false);
+        Assert.Equal(2, groups.Count);
+        var codes = groups.Select(g => g.Select(t => t.TileCode!).ToList()).ToList();
+        Assert.Contains(codes, c => MeldClassifier.InferMeld(c)?.Type == "PON");
+        Assert.Contains(codes, c => MeldClassifier.InferMeld(c)?.Type == "CHI");
+
+        var pair = new List<OpponentAreaClassifier.Tile>
+        {
+            Area(6, 0, 0, 1480, 390, 40, 52, parent: 91, "P7", nodeType: 2),
+            Area(7, 30, 0, 1510, 390, 40, 52, parent: 91, "P7", nodeType: 2),
+        };
+        Assert.Empty(OpponentAreaClassifier.SplitFuuroGroups(pair, allowSplit: false));
+    }
+
     private static OpponentAreaClassifier.PondHint[] LiveSouthPonds() =>
     [
         new(SmallTileClassifier.Kind.PlayerDiscard, 1200, 1100),

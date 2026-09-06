@@ -103,31 +103,42 @@ public static class SmallTileClassifier
         var leftovers = withIcons
             .Where(t => t.NodeType is not (1021 or 1022 or 1023 or 1024 or 1009 or 1006 or 1045 or 1055))
             .GroupBy(t => t.ParentNodeId)
-            .Where(g => g.Count() is >= 2 and <= 4);
+            .Where(g => g.Count() is >= 3 and <= 8);
 
         foreach (var group in leftovers)
         {
-            var ordered = group.OrderBy(t => t.X).ThenBy(t => t.Y).ToList();
-            if (!LooksLikeOpenMeld(ordered))
-                continue;
-            var owner = GuessMeldOwner(ordered[0], pondParents, pondTilesByKind);
-            if (owner == null)
-                continue;
-            if (owner == Kind.OppositeMeld
-                && !IconNodeScan.IsPlausibleOppositeLeftoverFuuro(
-                    ordered,
-                    trays: null,
-                    t => t.NodeType,
-                    t => t.Width,
-                    t => t.Height,
-                    t => t.Rotation,
-                    t => t.AbsX != 0 || t.AbsY != 0 ? t.AbsX : t.X,
-                    t => t.AbsX != 0 || t.AbsY != 0 ? t.AbsY : t.Y))
-                continue;
+            var area = group
+                .Select(t => new OpponentAreaClassifier.Tile(
+                    t.Id, t.X, t.Y, t.AbsX, t.AbsY, t.Width, t.Height,
+                    t.Rotation, t.ParentNodeId, t.TileCode, t.NodeType))
+                .ToList();
+            var parts = OpponentAreaClassifier.SplitFuuroGroups(area, allowSplit: false);
+            foreach (var part in parts)
+            {
+                if (part.Count < 3)
+                    continue;
+                var owner = GuessMeldOwner(part, pondParents, pondTilesByKind);
+                if (owner == null)
+                    continue;
+                if (owner == Kind.OppositeMeld
+                    && !IconNodeScan.IsPlausibleOppositeLeftoverFuuro(
+                        part,
+                        trays: null,
+                        t => t.NodeType,
+                        t => t.Width,
+                        t => t.Height,
+                        t => t.Rotation,
+                        t => t.AbsX != 0 || t.AbsY != 0 ? t.AbsX : t.X,
+                        t => t.AbsX != 0 || t.AbsY != 0 ? t.AbsY : t.Y))
+                    continue;
 
-            var existing = result.Count(s => s.Kind == owner);
-            foreach (var tile in ordered)
-                result.Add(new ClassifiedTile(owner.Value, existing++, tile));
+                var existing = result.Count(s => s.Kind == owner);
+                foreach (var tile in part)
+                {
+                    var source = group.First(t => t.Id == tile.Id);
+                    result.Add(new ClassifiedTile(owner.Value, existing++, source));
+                }
+            }
         }
 
         return result;
@@ -275,34 +286,35 @@ public static class SmallTileClassifier
     }
 
     private static Kind? GuessMeldOwner(
-        Tile tile,
+        IReadOnlyList<OpponentAreaClassifier.Tile> group,
         Dictionary<Kind, uint> pondParents,
         Dictionary<Kind, List<Tile>> pondTiles)
     {
+        if (group.Count == 0)
+            return null;
+
         foreach (var (pondKind, parentId) in pondParents)
         {
-            if (parentId != 0 && parentId == tile.ParentNodeId)
+            if (parentId != 0 && parentId == group[0].ParentNodeId)
                 return MeldKindForPond(pondKind);
         }
 
         var hints = new List<OpponentAreaClassifier.PondHint>();
-        foreach (var (pondKind, group) in pondTiles)
+        foreach (var (pondKind, pond) in pondTiles)
         {
-            if (group.Count == 0)
+            if (pond.Count == 0)
                 continue;
-            var useAbs = UseAbs(group);
+            var useAbs = UseAbs(pond);
             hints.Add(new OpponentAreaClassifier.PondHint(
                 pondKind,
-                group.Average(useAbs ? t => t.AbsX : t => t.X),
-                group.Average(useAbs ? t => t.AbsY : t => t.Y)));
+                pond.Average(useAbs ? t => t.AbsX : t => t.X),
+                pond.Average(useAbs ? t => t.AbsY : t => t.Y)));
         }
 
         if (hints.Count == 0)
             return null;
 
-        var tx = tile.AbsX != 0 || tile.AbsY != 0 ? tile.AbsX : tile.X;
-        var ty = tile.AbsX != 0 || tile.AbsY != 0 ? tile.AbsY : tile.Y;
-        return OpponentAreaClassifier.SeatLeftoverFuuro(tx, ty, hints, playerStripAbsY: null);
+        return OpponentAreaClassifier.GuessOwner(group, hints, playerStripAbsY: null);
     }
 
     private static bool UseAbs(List<Tile> tiles)

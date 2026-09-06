@@ -252,6 +252,37 @@ public class SmallTileClassifierTests
     }
 
     [Fact]
+    public void Type2_east_south_fuuro_is_right_and_p7_pair_is_not_a_meld()
+    {
+        var tiles = new List<SmallTileClassifier.Tile>
+        {
+            Pond(0, 1021, 10, 0, 0, "M2", absX: 1200, absY: 1100),
+            Pond(1, 1024, 50, 0, 0, "P3", absX: 1100, absY: 400),
+            Pond(2, 1023, 20, 0, 0, "P8", absX: 1600, absY: 550),
+            Pond(3, 1022, 11, 0, 0, "S8", absX: 900, absY: 850),
+            Pond(4, 2, 90, 0, 0, "S4", absX: 1525, absY: 420, width: 55, height: 42),
+            Pond(5, 2, 90, 0, 45, "S5", absX: 1525, absY: 460, width: 42, height: 55),
+            Pond(6, 2, 90, 0, 90, "S6", absX: 1525, absY: 500, width: 42, height: 55),
+            Pond(7, 2, 90, 55, 0, "S9", absX: 1580, absY: 420, width: 52, height: 40),
+            Pond(8, 2, 90, 55, 40, "S9", absX: 1580, absY: 460, width: 52, height: 40),
+            Pond(9, 2, 90, 55, 80, "S9", absX: 1580, absY: 500, width: 52, height: 40),
+            Pond(10, 2, 91, 0, 0, "P7", absX: 1480, absY: 390, width: 40, height: 52),
+            Pond(11, 2, 91, 30, 0, "P7", absX: 1510, absY: 390, width: 40, height: 52),
+        };
+
+        var classified = SmallTileClassifier.Classify(tiles);
+        Assert.DoesNotContain(classified, c => c.Tile.TileCode == "P7" && c.Kind.ToString().EndsWith("Meld"));
+        Assert.DoesNotContain(classified, c => c.Kind == SmallTileClassifier.Kind.OppositeMeld);
+        Assert.DoesNotContain(classified, c => c.Kind == SmallTileClassifier.Kind.LeftMeld);
+        var right = classified.Where(c => c.Kind == SmallTileClassifier.Kind.RightMeld).ToList();
+        Assert.Equal(6, right.Count);
+        Assert.Equal(3, right.Count(c => c.Tile.TileCode == "S9"));
+        Assert.Contains(right, c => c.Tile.TileCode == "S4");
+        Assert.Contains(right, c => c.Tile.TileCode == "S5");
+        Assert.Contains(right, c => c.Tile.TileCode == "S6");
+    }
+
+    [Fact]
     public void Type2_upright_m5_m0_dora_band_is_not_opposite_meld()
     {
         var tiles = new List<SmallTileClassifier.Tile>
