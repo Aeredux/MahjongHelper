@@ -45,8 +45,10 @@ public static class IconNodeScan
     }
 
     /// <summary>
-    /// Live AZPC after 7ad3d5d: own and across fuuro faces are AtkImageNode
-    /// type 2 at 40×52 (or 52×40 when the called tile is sideways).
+    /// Live AZPC: fuuro faces are AtkImageNode type 2 at 40×52 when upright.
+    /// A Doman CHI is one sideways called tile plus two upright in-hand
+    /// leaves (M1/M3 stay 40×52). 52×40 is only the called tile when that
+    /// face itself is rotated — do not require every CHI leaf to be 52×40.
     /// </summary>
     public static bool IsFaceLeaf(ushort nodeType, int width, int height)
         => nodeType == ImageNodeType
@@ -54,9 +56,9 @@ public static class IconNodeScan
                || (width == FaceLeafLongPx && height == FaceLeafShortPx));
 
     /// <summary>
-    /// Open fuuro always has a sideways called tile. Doman often puts that
-    /// flag on a type-1056 sibling (Rotation≈4.712 / 270°) instead of a
-    /// type-2 52×40 leaf.
+    /// The called tile is sideways (from a discard). Doman CHI puts that
+    /// flag on a type-1056 sibling (Rotation≈4.712 / 270°) over the called
+    /// face; the other two CHI tiles stay upright type-2 40×52.
     /// </summary>
     public static bool HasCallCue(int width, int height, float rotation = 0)
         => SmallTileClassifier.IsSideways(rotation, width, height);

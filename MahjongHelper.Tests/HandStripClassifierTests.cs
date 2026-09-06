@@ -306,7 +306,9 @@ public class HandStripClassifierTests
     public void Live_e8c605e_1056_m2_pair_expands_to_chi_without_west_pon()
     {
         // After e8c605e the cued group was only 1056+type-2 M2 @1524–1528
-        // (two UniqueX buckets). M1 @1580 and M3 @1622 must join that cue.
+        // (two UniqueX buckets). Sideways M2 is the called discard; upright
+        // type-2 M1 @1580 and M3 @1622 were already in hand — normal Doman
+        // CHI, not three sideways tiles. Pull those neighbors into the cue.
         const float Rot270 = 4.712f;
         var tiles = new List<HandStripClassifier.Tile>();
         var closed = new[] { "M4", "M6", "M7", "M8", "M8", "M9", "S1", "S1", "S8", "S8", "M4" };
@@ -343,6 +345,12 @@ public class HandStripClassifierTests
         Assert.Contains("M2", chiCodes);
         Assert.Contains("M3", chiCodes);
         Assert.Equal("CHI", MeldClassifier.InferMeld(chiCodes)!.Type);
+        Assert.False(HandStripClassifier.IsRotated(tiles[17]));
+        Assert.False(HandStripClassifier.IsRotated(tiles[18]));
+        Assert.Equal(40, tiles[17].Width);
+        Assert.Equal(52, tiles[17].Height);
+        Assert.Equal(40, tiles[18].Width);
+        Assert.Equal(52, tiles[18].Height);
         Assert.DoesNotContain(split.MeldGroups, g => Codes(tiles, g).Contains("WEST"));
 
         var noTray = HandStripClassifier.Split(tiles, trays: null);

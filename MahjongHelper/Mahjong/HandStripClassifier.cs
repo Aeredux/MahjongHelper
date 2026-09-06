@@ -257,6 +257,8 @@ public static class HandStripClassifier
         if (sameUnique.Count >= 3 || (sameUnique.Count >= 2 && sameSpan >= IconNodeScan.SameFaceSpanPx))
             return same;
 
+        // Neighbors may be upright in-hand tiles (Doman CHI: only the called
+        // tile is sideways). Do not require M1/M3 to be rotated.
         var chi = FindChiIncludingCue(cue, reach);
         return chi.Count >= 3 ? chi : [];
     }

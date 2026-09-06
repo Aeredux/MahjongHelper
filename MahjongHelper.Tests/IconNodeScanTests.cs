@@ -119,6 +119,10 @@ public class IconNodeScanTests
         Assert.True(IconNodeScan.ClusterHasCallCue(with1056, t => t.W, t => t.H, t => t.Rot));
         Assert.True(IconNodeScan.IsCallCueNode(1056, 42, 55, 4.712f));
         Assert.True(IconNodeScan.IsFuuroTray(1060, 140, 55));
+        // Doman CHI: only the called tile is sideways. Two upright 40×52
+        // in-hand leaves plus the 1056 cue are enough — M1/M3 must not be 52×40.
+        Assert.True(IconNodeScan.IsFaceLeaf(2, 40, 52));
+        Assert.False(IconNodeScan.HasCallCue(40, 52, 0));
     }
 
     [Fact]
