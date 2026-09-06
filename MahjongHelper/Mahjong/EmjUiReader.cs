@@ -1743,7 +1743,13 @@ public static unsafe class EmjUiReader
         float? stripAbsY = stripAnchors.Count > 0
             ? stripAnchors.Average(s => s.AbsY != 0 || s.AbsX != 0 ? s.AbsY : s.Y)
             : null;
-        var packPos = stripAnchors.Select(SnapPos).ToHashSet();
+        // Only callback-7 1055s are the closed pack. Fuuro-row 1055
+        // neighbors (live NORTH PON @1526/1623) must not occupy packPos
+        // or overlapping type-2 leaves never enter Split.
+        var packPos = stripAnchors
+            .Where(s => s.NodeIndex is >= 59 and <= 71)
+            .Select(SnapPos)
+            .ToHashSet();
 
         bool OnPlayerStrip(UiSlot slot)
         {
@@ -1786,8 +1792,16 @@ public static unsafe class EmjUiReader
                 .ToList();
             foreach (var face in faces)
             {
-                if (byNode.Values.Any(s => SnapPos(s) == SnapPos(face)))
-                    continue;
+                var faceSnap = SnapPos(face);
+                var clash = byNode.FirstOrDefault(kv => SnapPos(kv.Value) == faceSnap);
+                if (clash.Value != null)
+                {
+                    // Prefer the type-2 leaf over a 1055 wrapper at the same snap.
+                    if (clash.Value.Width * clash.Value.Height <= face.Width * face.Height)
+                        continue;
+                    byNode.Remove(clash.Key);
+                }
+
                 Consider(face);
             }
 
