@@ -4,6 +4,11 @@ using System.Linq;
 
 namespace MahjongHelper.Mahjong;
 
+public sealed record ObservedMeld(string Type, IReadOnlyList<string> Tiles)
+{
+    public override string ToString() => Tiles.Count == 0 ? Type : $"{Type}:{string.Join(" ", Tiles)}";
+}
+
 /// <summary>
 /// Groups face-up called tiles into solver meld objects (CHI / PON / KAN_*).
 /// Aka tiles stay as M0/P0/S0 in the output; equality treats them as 5s.

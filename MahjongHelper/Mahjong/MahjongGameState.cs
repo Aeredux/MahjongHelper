@@ -22,11 +22,6 @@ public sealed record StateField<T>(
     public static StateField<T> Missing() => new(default, MahjongStateSource.Unknown, false, false);
 }
 
-public sealed record ObservedMeld(string Type, IReadOnlyList<string> Tiles)
-{
-    public override string ToString() => Tiles.Count == 0 ? Type : $"{Type}:{string.Join(" ", Tiles)}";
-}
-
 public sealed record MahjongGameState(
     DateTime UtcCapturedAt,
     StateField<int> AgentState,

@@ -750,7 +750,7 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
             }
 
             File.WriteAllText(SolverSnapPath, json);
-            var summary = BuildSolverSnapSummary(_lastSuggestRequest);
+            var summary = SolverJson.BuildSnapSummary(_lastSuggestRequest);
             File.AppendAllText(
                 Path.Combine(CacheDirectory, "solver_snap.log"),
                 $"[{DateTime.UtcNow:O}] {summary}{Environment.NewLine}{json}{Environment.NewLine}{Environment.NewLine}");
@@ -767,25 +767,6 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
             RecordFailure($"/mj snap failed: {ex.Message}");
             AppendRecentTransition($"{DateTime.UtcNow:O} /mj snap failed: {ex.Message}");
         }
-    }
-
-    private static string BuildSolverSnapSummary(SuggestMoveRequest? request)
-    {
-        if (request == null)
-            return "no payload";
-
-        var dora = request.Dora == null ? "null" : string.Join(" ", request.Dora);
-        var pond = request.DiscardTiles == null ? "null" : string.Join(" ", request.DiscardTiles);
-        var ownMelds = request.Melds == null ? 0 : request.Melds.Count;
-        var oppMelds = request.Opponents?.Sum(o => o.Melds?.Count ?? 0) ?? 0;
-        var tsumogiri = 0;
-        if (request.Opponents != null)
-            tsumogiri += request.Opponents.SelectMany(o => o.Discards).Count(d => d.Tsumogiri);
-        if (request.Player != null)
-            tsumogiri += request.Player.Discards.Count(d => d.Tsumogiri);
-        var aka = request.Hand.Concat(request.DrawnTile != null ? [request.DrawnTile] : Array.Empty<string>())
-            .Count(t => t is "M0" or "P0" or "S0");
-        return $"hand={request.Hand.Count} draw={request.DrawnTile ?? "-"} dora=[{dora}] pond=[{pond}] aka={aka} tsumogiri={tsumogiri} ownMelds={ownMelds} oppMelds={oppMelds} seat={request.SeatWind ?? "-"} round={request.RoundWind ?? "-"}";
     }
 
     private static string BuildNormalizedStateSignature(MahjongGameState state)
