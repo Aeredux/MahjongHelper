@@ -14,7 +14,7 @@ Offline goldens for leftover / hand-strip classify. Live captures stay under
 
 Goldens: `south-seat-west-chi-m4-m6`, `west-seat-empty-table`,
 `west-seat-north-pon-s2-p1`, `south-seat-east-pon-east-chi-s7-s9`,
-`east-seat-own-red-west-pon-s2`.
+`east-seat-own-red-west-pon-s2`, `east-seat-west-kan-p8-pon-s5-aka`.
 
 `/mj snap` still writes `captures/snap-*.json`. A dump-ui file is the same
 node fields plus seat/round and an optional expected sidecar.

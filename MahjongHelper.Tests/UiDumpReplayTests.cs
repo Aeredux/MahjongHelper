@@ -80,6 +80,27 @@ public class UiDumpReplayTests
     }
 
     [Fact]
+    public void East_seat_west_kan_p8_pon_s5_aka_fixture_snaps_opposite_kan_and_aka_pon()
+    {
+        var dump = Load("east-seat-west-kan-p8-pon-s5-aka.json");
+        var result = UiDumpReplay.Classify(dump);
+
+        Assert.Contains("ownMelds=0", result.SnapLines[0]);
+        Assert.Contains("oppMelds=2", result.SnapLines[0]);
+        Assert.Contains("seat=EAST", result.SnapLines[0]);
+        Assert.Equal(
+            "own=none | SOUTH=none | WEST=KAN_OPEN P8×4, PON S5-S0-S5 | NORTH=none",
+            result.SnapLines[1]);
+        Assert.Equal(dump.Expected?.SnapLine, result.SnapLines[1]);
+        var west = Assert.Single(result.Request.Opponents!, o => o.Wind == "WEST");
+        Assert.Equal(2, west.Melds?.Count);
+        Assert.Contains(west.Melds!, m => m.Type == "KAN_OPEN" && m.Tiles.Count == 4
+            && m.Tiles.TrueForAll(t => t == "P8"));
+        Assert.Contains(west.Melds!, m => m.Type == "PON"
+            && string.Join("-", m.Tiles) == "S5-S0-S5");
+    }
+
+    [Fact]
     public void West_seat_empty_table_fixture_is_all_none()
     {
         var dump = Load("west-seat-empty-table.json");

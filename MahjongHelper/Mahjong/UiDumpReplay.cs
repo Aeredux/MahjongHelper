@@ -281,12 +281,28 @@ public static class UiDumpReplay
             .Select(c => c!)
             .ToList();
 
+    /// <summary>
+    /// Same window order as leftover <c>PeelOrdered</c>: open KAN before PON
+    /// so four P8 faces do not become a ghost <c>PON P8×3</c>.
+    /// </summary>
     private static List<List<string>> PeelCodes(IReadOnlyList<string> codes)
     {
         var groups = new List<List<string>>();
         var i = 0;
         while (i < codes.Count)
         {
+            if (codes.Count - i >= 4)
+            {
+                var four = codes.Skip(i).Take(4).ToList();
+                var meld4 = MeldClassifier.InferMeld(four);
+                if (meld4 != null && meld4.Type.StartsWith("KAN", StringComparison.Ordinal))
+                {
+                    groups.Add(four);
+                    i += 4;
+                    continue;
+                }
+            }
+
             if (codes.Count - i >= 3 && MeldClassifier.InferMeld(codes.Skip(i).Take(3).ToList()) != null)
             {
                 groups.Add(codes.Skip(i).Take(3).ToList());
