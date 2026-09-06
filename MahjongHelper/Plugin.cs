@@ -750,17 +750,23 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
             }
 
             File.WriteAllText(SolverSnapPath, json);
-            var summary = SolverJson.BuildSnapSummary(_lastSuggestRequest);
+            var lines = SolverJson.BuildSnapSummaryLines(_lastSuggestRequest);
+            var summary = string.Join(" ", lines);
             File.AppendAllText(
                 Path.Combine(CacheDirectory, "solver_snap.log"),
                 $"[{DateTime.UtcNow:O}] {summary}{Environment.NewLine}{json}{Environment.NewLine}{Environment.NewLine}");
 
-            var msg = $"/mj snap wrote {SolverSnapPath} — {summary}";
-            Log.Information(msg);
-            try { ChatGui.Print(msg); } catch { }
-            AppendRecentTransition($"{DateTime.UtcNow:O} {msg}");
-            if (MainWindow.IsOpen)
-                MainWindow.serverSuggestionText = (MainWindow.serverSuggestionText ?? string.Empty) + Environment.NewLine + msg;
+            for (var i = 0; i < lines.Count; i++)
+            {
+                var msg = i == 0
+                    ? $"/mj snap wrote {SolverSnapPath} — {lines[i]}"
+                    : lines[i];
+                Log.Information(msg);
+                try { ChatGui.Print(msg); } catch { }
+                AppendRecentTransition($"{DateTime.UtcNow:O} {msg}");
+                if (MainWindow.IsOpen)
+                    MainWindow.serverSuggestionText = (MainWindow.serverSuggestionText ?? string.Empty) + Environment.NewLine + msg;
+            }
         }
         catch (Exception ex)
         {
