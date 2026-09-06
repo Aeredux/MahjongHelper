@@ -24,6 +24,11 @@ public static class IconNodeScan
     public const int FaceLeafLongPx = 52;
     public const int ClosedTileWidthPx = 42;
     public const float OwnFuuroPackGapPx = 40f;
+    /// <summary>
+    /// Live type-1056 M2 @1524 and type-2 M2 @1528 are one face. Two UniqueX
+    /// buckets closer than this are not a PON.
+    /// </summary>
+    public const float SameFaceSpanPx = 36f;
 
     public static bool IsMahjongTileIcon(uint iconId)
         => iconId >= MinMahjongIcon && iconId <= MaxMahjongIcon;
@@ -63,6 +68,42 @@ public static class IconNodeScan
         => nodeType == FuuroTrayNodeType && width >= 100 && height >= 45 && height <= 80;
 
     public readonly record struct Tray(float AbsX, float AbsY, int Width, int Height);
+
+    public static bool CenterInTray(float absX, float absY, int width, int height, Tray tray)
+    {
+        var cx = absX + width * 0.5f;
+        var cy = absY + height * 0.5f;
+        return cx >= tray.AbsX && cx <= tray.AbsX + tray.Width
+               && cy >= tray.AbsY && cy <= tray.AbsY + tray.Height;
+    }
+
+    /// <summary>
+    /// Keep one representative per visual face: same tile key within
+    /// <see cref="SameFaceSpanPx"/> is the 1056 cue sitting on its type-2 leaf.
+    /// </summary>
+    public static IReadOnlyList<T> CollapseStackedDuplicates<T>(
+        IEnumerable<T> tiles,
+        Func<T, float> x,
+        Func<T, string?> tileCode)
+    {
+        var ordered = tiles.OrderBy(x).ToList();
+        var kept = new List<T>();
+        foreach (var tile in ordered)
+        {
+            if (kept.Count > 0
+                && MeldClassifier.IsUsableTile(tileCode(kept[^1]))
+                && MeldClassifier.IsUsableTile(tileCode(tile))
+                && string.Equals(
+                    MeldClassifier.CanonicalKey(tileCode(kept[^1])!),
+                    MeldClassifier.CanonicalKey(tileCode(tile)!),
+                    StringComparison.Ordinal)
+                && x(tile) - x(kept[^1]) < SameFaceSpanPx)
+                continue;
+            kept.Add(tile);
+        }
+
+        return kept;
+    }
 
     public static bool ClusterHasCallCue<T>(
         IEnumerable<T> tiles,

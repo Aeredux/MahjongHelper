@@ -1693,13 +1693,22 @@ public static unsafe class EmjUiReader
     private static void ApplyHandStripMeldSplit(
         List<UiSlot> slots, List<UiSlot> rawHand, List<UiSlot> extraStrip, List<UiSlot>? allIconNodes)
     {
-        var byNode = new Dictionary<int, UiSlot>();
+        var byNode = new Dictionary<(uint NodeId, int NodeIndex, int SnapX, int SnapY, uint Icon), UiSlot>();
 
         static float AbsOfX(UiSlot s) => s.AbsX != 0 || s.AbsY != 0 ? s.AbsX : s.X;
         static float AbsOfY(UiSlot s) => s.AbsX != 0 || s.AbsY != 0 ? s.AbsY : s.Y;
         static (int X, int Y) SnapPos(UiSlot s)
             => ((int)MathF.Round(AbsOfX(s) / IconNodeScan.LeafSnapPx),
                 (int)MathF.Round(AbsOfY(s) / IconNodeScan.LeafSnapPx));
+        static (uint NodeId, int NodeIndex, int SnapX, int SnapY, uint Icon) SlotKey(UiSlot s)
+        {
+            var snap = SnapPos(s);
+            // Nested type-2 leaves often share child NodeIndex 0. Keep distinct
+            // faces by NodeId when present, otherwise by snap + icon.
+            if (s.NodeId != 0)
+                return (s.NodeId, 0, 0, 0, 0);
+            return (0, s.NodeIndex, snap.X, snap.Y, s.IconId);
+        }
 
         void Consider(UiSlot slot)
         {
@@ -1710,15 +1719,16 @@ public static unsafe class EmjUiReader
             if (slot.X < 0 && !IconNodeScan.IsFaceLeaf(slot.NodeType, slot.Width, slot.Height))
                 return;
 
-            if (byNode.TryGetValue(slot.NodeIndex, out var existing))
+            var key = SlotKey(slot);
+            if (byNode.TryGetValue(key, out var existing))
             {
                 if (HandStripClassifier.IsRotated(ToStripTile(0, slot))
                     && !HandStripClassifier.IsRotated(ToStripTile(0, existing)))
-                    byNode[slot.NodeIndex] = slot;
+                    byNode[key] = slot;
                 return;
             }
 
-            byNode[slot.NodeIndex] = slot;
+            byNode[key] = slot;
         }
 
         foreach (var slot in rawHand)

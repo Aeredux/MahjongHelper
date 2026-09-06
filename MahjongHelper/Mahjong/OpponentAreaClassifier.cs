@@ -70,7 +70,11 @@ public static class OpponentAreaClassifier
             if (!onPlayerStrip && cluster.Any(t => denseY.Contains(BandY(t))))
                 continue;
 
-            foreach (var group in SplitFuuroGroups(cluster, allowSplit: onPlayerStrip))
+            var working = onPlayerStrip
+                ? ExpandPlayerStripCuedCluster(cluster, usable, trays)
+                : cluster;
+
+            foreach (var group in SplitFuuroGroups(working, allowSplit: onPlayerStrip))
             {
                 var kind = GuessOwner(group, pondHints, playerStripAbsY, tableCenterX, tableCenterY);
                 if (!onPlayerStrip && kind == SmallTileClassifier.Kind.LeftMeld && group.Count >= 5)
@@ -115,8 +119,63 @@ public static class OpponentAreaClassifier
         return dense;
     }
 
+    /// <summary>
+    /// Live CHI: type-1056 cue + type-2 M2 sit at AbsX≈1524–1528. M1 @~1580
+    /// and M3 @~1622 are the same 1060 tray / nearby AbsX — pull them in so
+    /// InferMeld sees three faces, not a 2-tile M2 pair.
+    /// </summary>
+    internal static List<Tile> ExpandPlayerStripCuedCluster(
+        List<Tile> cluster,
+        List<Tile> all,
+        IReadOnlyList<IconNodeScan.Tray>? trays)
+    {
+        var cues = cluster
+            .Where(t => IconNodeScan.IsCallCueNode(t.NodeType, t.Width, t.Height, t.Rotation)
+                        || SmallTileClassifier.IsSideways(t.Rotation, t.Width, t.Height))
+            .ToList();
+        if (cues.Count == 0)
+            return cluster;
+
+        var expanded = cluster.ToList();
+        foreach (var cue in cues)
+        {
+            foreach (var tile in all)
+            {
+                if (expanded.Any(t => t.Id == tile.Id))
+                    continue;
+                if (!IconNodeScan.IsFaceLeaf(tile.NodeType, tile.Width, tile.Height)
+                    && tile.NodeType != IconNodeScan.CallCueNodeType)
+                    continue;
+
+                var dx = Math.Abs(AbsXOf(tile) - AbsXOf(cue));
+                var dy = Math.Abs(AbsYOf(tile) - AbsYOf(cue));
+                if (dy > PlayerStripBandPx)
+                    continue;
+
+                var sameTray = trays != null && trays.Any(tray =>
+                    IconNodeScan.CenterInTray(AbsXOf(tile), AbsYOf(tile), tile.Width, tile.Height, tray)
+                    && IconNodeScan.CenterInTray(AbsXOf(cue), AbsYOf(cue), cue.Width, cue.Height, tray));
+                if (sameTray || dx <= HandStripClassifier.SameMeldReachPx)
+                    expanded.Add(tile);
+            }
+        }
+
+        return expanded
+            .OrderBy(t => HasAbs(t) ? t.AbsX : t.X)
+            .ThenBy(t => t.Id)
+            .ToList();
+    }
+
     internal static List<List<Tile>> SplitFuuroGroups(List<Tile> cluster, bool allowSplit)
     {
+        var faces = IconNodeScan.CollapseStackedDuplicates(
+            cluster.OrderBy(t => HasAbs(t) ? t.AbsX : t.X).ToList(),
+            t => HasAbs(t) ? t.AbsX : t.X,
+            t => t.TileCode);
+        if (faces.Count is >= 2 and <= 4
+            && SmallTileClassifier.LooksLikeOpenMeld(faces.Select(ToSmall).ToList()))
+            return [cluster.Count is >= 2 and <= 4 ? cluster : faces.ToList()];
+
         if (cluster.Count is >= 2 and <= 4
             && SmallTileClassifier.LooksLikeOpenMeld(cluster.Select(ToSmall).ToList()))
             return [cluster];
@@ -270,6 +329,8 @@ public static class OpponentAreaClassifier
     }
 
     private static bool HasAbs(Tile tile) => tile.AbsX != 0 || tile.AbsY != 0;
+
+    private static float AbsXOf(Tile tile) => HasAbs(tile) ? tile.AbsX : tile.X;
 
     private static float AbsYOf(Tile tile) => HasAbs(tile) ? tile.AbsY : tile.Y;
 

@@ -54,6 +54,34 @@ public class IconNodeScanTests
     }
 
     [Fact]
+    public void Live_1060_tray_covers_m2_m1_m3_not_ghost_west()
+    {
+        var tray = new IconNodeScan.Tray(1525, 972, 140, 55);
+        Assert.True(IconNodeScan.CenterInTray(1524, 980, 42, 55, tray));
+        Assert.True(IconNodeScan.CenterInTray(1528, 980, 40, 52, tray));
+        Assert.True(IconNodeScan.CenterInTray(1580, 980, 40, 52, tray));
+        Assert.True(IconNodeScan.CenterInTray(1622, 980, 40, 52, tray));
+        Assert.False(IconNodeScan.CenterInTray(1385, 980, 42, 55, tray));
+        Assert.False(IconNodeScan.CenterInTray(1484, 980, 40, 52, tray));
+    }
+
+    [Fact]
+    public void CollapseStackedDuplicates_merges_1524_1528_m2_pair()
+    {
+        var tiles = new (float X, string Code)[]
+        {
+            (1524, "M2"),
+            (1528, "M2"),
+            (1580, "M1"),
+            (1622, "M3"),
+        };
+        var faces = IconNodeScan.CollapseStackedDuplicates(tiles, t => t.X, t => t.Code);
+        Assert.Equal(3, faces.Count);
+        Assert.Equal(["M2", "M1", "M3"], faces.Select(t => t.Code).ToList());
+        Assert.Equal("CHI", MeldClassifier.InferMeld(faces.Select(t => t.Code).ToList())!.Type);
+    }
+
+    [Fact]
     public void FaceLeaf_is_type2_40x52_or_52x40()
     {
         Assert.True(IconNodeScan.IsFaceLeaf(2, 40, 52));
@@ -105,12 +133,12 @@ public class IconNodeScanTests
         };
         var chi = new (float X, float Y, int W, int H, float Rot)[]
         {
-            (1525, 980, 42, 55, 4.712f),
-            (1531, 980, 40, 52, 0),
-            (1582, 980, 40, 52, 0),
-            (1624, 980, 40, 52, 0),
+            (1524, 980, 42, 55, 4.712f),
+            (1528, 980, 40, 52, 0),
+            (1580, 980, 40, 52, 0),
+            (1622, 980, 40, 52, 0),
         };
-        var trays = new[] { new IconNodeScan.Tray(1520, 972, 140, 55) };
+        var trays = new[] { new IconNodeScan.Tray(1525, 972, 140, 55) };
 
         Assert.False(IconNodeScan.IsPlausibleOwnLeftoverFuuro(
             west, 1327, trays, t => t.W, t => t.H, t => t.Rot, t => t.X, t => t.Y));

@@ -438,10 +438,10 @@ public class OpponentAreaClassifierTests
             Area(17, 0, 0, 1391, 980, 40, 52, parent: 80, "WEST", nodeType: 2),
             Area(18, 0, 0, 1442, 980, 40, 52, parent: 80, "WEST", nodeType: 2),
             Area(19, 0, 0, 1484, 980, 40, 52, parent: 80, "WEST", nodeType: 2),
-            Area(20, 0, 0, 1525, 980, 42, 55, parent: 81, "M2", nodeType: 1056, rotation: 4.712f),
-            Area(21, 0, 0, 1531, 980, 40, 52, parent: 81, "M2", nodeType: 2),
-            Area(22, 0, 0, 1582, 980, 40, 52, parent: 81, "M1", nodeType: 2),
-            Area(23, 0, 0, 1624, 980, 40, 52, parent: 81, "M3", nodeType: 2),
+            Area(20, 0, 0, 1524, 980, 42, 55, parent: 81, "M2", nodeType: 1056, rotation: 4.712f),
+            Area(21, 0, 0, 1528, 980, 40, 52, parent: 81, "M2", nodeType: 2),
+            Area(22, 0, 0, 1580, 980, 40, 52, parent: 81, "M1", nodeType: 2),
+            Area(23, 0, 0, 1622, 980, 40, 52, parent: 81, "M3", nodeType: 2),
             Area(24, 0, 0, 1400, 1139, 40, 52, parent: 90, "WEST", nodeType: 2),
             Area(25, 0, 0, 1440, 1139, 40, 52, parent: 90, "WEST", nodeType: 2),
             Area(26, 0, 0, 1480, 1139, 40, 52, parent: 90, "M9", nodeType: 2),
@@ -454,7 +454,7 @@ public class OpponentAreaClassifierTests
             new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.RightDiscard, 820, 400),
             new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.LeftDiscard, 90, 380),
         };
-        var trays = new[] { new IconNodeScan.Tray(1520, 972, 140, 55) };
+        var trays = new[] { new IconNodeScan.Tray(1525, 972, 140, 55) };
 
         var assignments = OpponentAreaClassifier.Classify(
             leftovers, ponds, playerStripAbsY: 972, closedPackMaxAbsX: 1327, trays: trays);
@@ -500,6 +500,37 @@ public class OpponentAreaClassifierTests
         });
         Assert.Contains("ownMelds=1", summary);
         Assert.Contains("oppMelds=1", summary);
+    }
+
+    [Fact]
+    public void Player_strip_1056_m2_pair_absorbs_tray_m1_m3()
+    {
+        var leftovers = new List<OpponentAreaClassifier.Tile>
+        {
+            Area(0, 0, 0, 1524, 980, 42, 55, parent: 81, "M2", nodeType: 1056, rotation: 4.712f),
+            Area(1, 0, 0, 1528, 980, 40, 52, parent: 81, "M2", nodeType: 2),
+            Area(2, 0, 0, 1580, 980, 40, 52, parent: 81, "M1", nodeType: 2),
+            Area(3, 0, 0, 1622, 980, 40, 52, parent: 81, "M3", nodeType: 2),
+        };
+        var trays = new[] { new IconNodeScan.Tray(1525, 972, 140, 55) };
+        var pairOnly = leftovers.Take(2).ToList();
+        var expanded = OpponentAreaClassifier.ExpandPlayerStripCuedCluster(pairOnly, leftovers, trays);
+        Assert.Contains(expanded, t => t.TileCode == "M1");
+        Assert.Contains(expanded, t => t.TileCode == "M3");
+
+        var assignments = OpponentAreaClassifier.Classify(
+            leftovers, pondHints: null, playerStripAbsY: 972, closedPackMaxAbsX: 1327, trays: trays);
+        var own = Assert.Single(assignments);
+        Assert.Equal(SmallTileClassifier.Kind.PlayerMeld, own.Kind);
+        var codes = own.TileIds.Select(id => leftovers[id].TileCode!).ToList();
+        Assert.Contains("M1", codes);
+        Assert.Contains("M2", codes);
+        Assert.Contains("M3", codes);
+        var faces = IconNodeScan.CollapseStackedDuplicates(
+            own.TileIds.Select(id => leftovers[id]).ToList(),
+            t => t.AbsX,
+            t => t.TileCode);
+        Assert.Equal("CHI", MeldClassifier.InferMeld(faces.Select(t => t.TileCode!).ToList())!.Type);
     }
 
     private static OpponentAreaClassifier.Tile Area(

@@ -281,15 +281,15 @@ public class HandStripClassifierTests
         tiles.Add(T(14, 0, "WEST", parent: 80, nodeIndex: 202, width: 40, height: 52,
             nodeType: 2, absX: 1484, absY: 980));
         tiles.Add(T(15, 0, "M2", Rot270, parent: 81, nodeIndex: 191, width: 42, height: 55,
-            nodeType: 1056, absX: 1525, absY: 980));
+            nodeType: 1056, absX: 1524, absY: 980));
         tiles.Add(T(16, 0, "M2", parent: 81, nodeIndex: 203, width: 40, height: 52,
-            nodeType: 2, absX: 1531, absY: 980));
+            nodeType: 2, absX: 1528, absY: 980));
         tiles.Add(T(17, 0, "M1", parent: 81, nodeIndex: 204, width: 40, height: 52,
-            nodeType: 2, absX: 1582, absY: 980));
+            nodeType: 2, absX: 1580, absY: 980));
         tiles.Add(T(18, 0, "M3", parent: 81, nodeIndex: 205, width: 40, height: 52,
-            nodeType: 2, absX: 1624, absY: 980));
+            nodeType: 2, absX: 1622, absY: 980));
 
-        var trays = new[] { new IconNodeScan.Tray(1520, 972, 140, 55) };
+        var trays = new[] { new IconNodeScan.Tray(1525, 972, 140, 55) };
         var split = HandStripClassifier.Split(tiles, trays);
 
         Assert.Equal(11, split.ClosedIds.Count);
@@ -300,6 +300,58 @@ public class HandStripClassifierTests
         Assert.Contains("M2", chiCodes);
         Assert.Contains("M3", chiCodes);
         Assert.DoesNotContain(split.MeldGroups, g => Codes(tiles, g).All(c => c == "WEST"));
+    }
+
+    [Fact]
+    public void Live_e8c605e_1056_m2_pair_expands_to_chi_without_west_pon()
+    {
+        // After e8c605e the cued group was only 1056+type-2 M2 @1524–1528
+        // (two UniqueX buckets). M1 @1580 and M3 @1622 must join that cue.
+        const float Rot270 = 4.712f;
+        var tiles = new List<HandStripClassifier.Tile>();
+        var closed = new[] { "M4", "M6", "M7", "M8", "M8", "M9", "S1", "S1", "S8", "S8", "M4" };
+        for (var i = 0; i < closed.Length; i++)
+        {
+            var x = 907 + i * 42;
+            tiles.Add(T(i, x, closed[i], nodeIndex: 59 + i, nodeType: 1055, width: 42, height: 55,
+                absX: x, absY: 972, parent: 10));
+        }
+
+        tiles.Add(T(11, 0, "WEST", Rot270, parent: 80, nodeIndex: 190, width: 42, height: 55,
+            nodeType: 1056, absX: 1385, absY: 980));
+        tiles.Add(T(12, 0, "WEST", parent: 80, nodeIndex: 200, width: 40, height: 52,
+            nodeType: 2, absX: 1391, absY: 980));
+        tiles.Add(T(13, 0, "WEST", parent: 80, nodeIndex: 201, width: 40, height: 52,
+            nodeType: 2, absX: 1442, absY: 980));
+        tiles.Add(T(14, 0, "WEST", parent: 80, nodeIndex: 202, width: 40, height: 52,
+            nodeType: 2, absX: 1484, absY: 980));
+        tiles.Add(T(15, 0, "M2", Rot270, parent: 81, nodeIndex: 191, width: 42, height: 55,
+            nodeType: 1056, absX: 1524, absY: 980));
+        tiles.Add(T(16, 0, "M2", parent: 81, nodeIndex: 203, width: 40, height: 52,
+            nodeType: 2, absX: 1528, absY: 980));
+        tiles.Add(T(17, 0, "M1", parent: 81, nodeIndex: 204, width: 40, height: 52,
+            nodeType: 2, absX: 1580, absY: 980));
+        tiles.Add(T(18, 0, "M3", parent: 81, nodeIndex: 205, width: 40, height: 52,
+            nodeType: 2, absX: 1622, absY: 980));
+
+        var trays = new[] { new IconNodeScan.Tray(1525, 972, 140, 55) };
+        var split = HandStripClassifier.Split(tiles, trays);
+        var chi = Assert.Single(split.MeldGroups);
+        var chiCodes = Codes(tiles, chi);
+        Assert.Equal(3, chiCodes.Count);
+        Assert.Contains("M1", chiCodes);
+        Assert.Contains("M2", chiCodes);
+        Assert.Contains("M3", chiCodes);
+        Assert.Equal("CHI", MeldClassifier.InferMeld(chiCodes)!.Type);
+        Assert.DoesNotContain(split.MeldGroups, g => Codes(tiles, g).Contains("WEST"));
+
+        var noTray = HandStripClassifier.Split(tiles, trays: null);
+        var nearby = Assert.Single(noTray.MeldGroups);
+        var nearbyCodes = Codes(tiles, nearby);
+        Assert.Contains("M1", nearbyCodes);
+        Assert.Contains("M2", nearbyCodes);
+        Assert.Contains("M3", nearbyCodes);
+        Assert.DoesNotContain(noTray.MeldGroups, g => Codes(tiles, g).All(c => c == "WEST"));
     }
 
     [Fact]

@@ -73,19 +73,26 @@ public static class HandStripClassifier
             foreach (var tile in members)
                 melded.Add(tile.Id);
 
-            var unique = UniqueX(members).Select(t => t.Id).Distinct().ToList();
-            if (unique.Count >= 2)
-                meldGroups.Add(unique);
+            var unique = UniqueFaces(members);
+            if (unique.Count < 2 || !LeftoverInferMeldOk(unique))
+                return;
+            var ids = unique.Select(t => t.Id).Distinct().ToList();
+            var key = ids.OrderBy(id => id).ToList();
+            if (meldGroups.Any(g => g.OrderBy(id => id).SequenceEqual(key)))
+                return;
+            meldGroups.Add(ids);
         }
 
         ExtractParentMelds(row, AddMeld);
+        ExtractTrayMelds(row, trays, AddMeld);
 
         var remaining = row.Where(t => !melded.Contains(t.Id)).ToList();
         foreach (var cue in FindCuedTiles(remaining))
         {
             if (melded.Contains(cue.Id))
                 continue;
-            var expanded = ExpandMeldFromCue(cue, remaining.Where(t => !melded.Contains(t.Id)).ToList());
+            var expanded = ExpandMeldFromCue(
+                cue, remaining.Where(t => !melded.Contains(t.Id)).ToList(), trays);
             if (expanded.Count >= 2)
                 AddMeld(expanded);
         }
@@ -197,17 +204,57 @@ public static class HandStripClassifier
             .ToList();
     }
 
-    private static List<Tile> ExpandMeldFromCue(Tile cue, List<Tile> remaining)
+    private static void ExtractTrayMelds(
+        List<Tile> row, IReadOnlyList<IconNodeScan.Tray>? trays, Action<IEnumerable<Tile>> addMeld)
+    {
+        if (trays == null || trays.Count == 0)
+            return;
+
+        foreach (var tray in trays)
+        {
+            var inside = row
+                .Where(t => !IsClosedPackTile(t) && TileCenterInTray(t, tray))
+                .ToList();
+            if (inside.Count < 2)
+                continue;
+            if (!inside.Any(IsRotated)
+                && !inside.Any(t => IconNodeScan.IsCallCueNode(t.NodeType, t.Width, t.Height, t.Rotation)))
+                continue;
+
+            var unique = UniqueFaces(inside);
+            if (MeldClassifier.InferMeld(unique.Select(t => t.TileCode!).ToList()) != null)
+                addMeld(inside);
+        }
+    }
+
+    private static List<Tile> ExpandMeldFromCue(
+        Tile cue, List<Tile> remaining, IReadOnlyList<IconNodeScan.Tray>? trays)
     {
         var reach = remaining
             .Where(t => Math.Abs(LayoutX(t) - LayoutX(cue)) <= SameMeldReachPx
                         && Math.Abs(LayoutY(t) - LayoutY(cue)) <= HandRowBandPx)
             .ToList();
+        foreach (var tray in trays ?? [])
+        {
+            if (!TileCenterInTray(cue, tray))
+                continue;
+            foreach (var tile in remaining.Where(t => TileCenterInTray(t, tray)))
+            {
+                if (reach.All(r => r.Id != tile.Id))
+                    reach.Add(tile);
+            }
+        }
+
         if (reach.All(t => t.Id != cue.Id))
             reach.Add(cue);
 
         var same = reach.Where(t => SameKey(t, cue)).ToList();
-        if (UniqueX(same).Count() >= 2)
+        var sameUnique = UniqueFaces(same);
+        var sameSpan = sameUnique.Count >= 2
+            ? LayoutX(sameUnique[^1]) - LayoutX(sameUnique[0])
+            : 0f;
+        // Live: type-1056 M2 @1524 and type-2 M2 @1528 are one face, not a PON.
+        if (sameUnique.Count >= 3 || (sameUnique.Count >= 2 && sameSpan >= IconNodeScan.SameFaceSpanPx))
             return same;
 
         var chi = FindChiIncludingCue(cue, reach);
@@ -216,7 +263,7 @@ public static class HandStripClassifier
 
     private static List<Tile> FindChiIncludingCue(Tile cue, List<Tile> nearby)
     {
-        var unique = UniqueX(nearby).OrderBy(LayoutX).ToList();
+        var unique = UniqueFaces(nearby);
         for (var i = 0; i + 2 < unique.Count; i++)
         {
             var window = unique.GetRange(i, 3);
@@ -382,6 +429,9 @@ public static class HandStripClassifier
                 .ThenBy(t => t.Id)
                 .First());
 
+    private static List<Tile> UniqueFaces(IEnumerable<Tile> tiles)
+        => IconNodeScan.CollapseStackedDuplicates(UniqueX(tiles), LayoutX, t => t.TileCode).ToList();
+
     private static float ChooseHandRowY(List<Tile> tiles)
     {
         var anchors = tiles.Where(t => t.NodeType == 1055 && t.Width == 42 && t.Height == 55).ToList();
@@ -431,6 +481,21 @@ public static class HandStripClassifier
                MeldClassifier.CanonicalKey(a.TileCode!),
                MeldClassifier.CanonicalKey(b.TileCode!),
                StringComparison.Ordinal);
+
+    private static bool TileCenterInTray(Tile tile, IconNodeScan.Tray tray)
+        => IconNodeScan.CenterInTray(LayoutX(tile), LayoutY(tile), tile.Width, tile.Height, tray);
+
+    private static bool LeftoverInferMeldOk(IReadOnlyList<Tile> unique)
+    {
+        var leftover = unique
+            .Where(t => IconNodeScan.IsFaceLeaf(t.NodeType, t.Width, t.Height)
+                        || t.NodeType == IconNodeScan.CallCueNodeType)
+            .ToList();
+        if (leftover.Count == 0)
+            return true;
+        var faces = UniqueFaces(unique);
+        return MeldClassifier.InferMeld(faces.Select(t => t.TileCode!).ToList()) != null;
+    }
 
     private static bool OwnLeftoverFuuroAllowed(
         IReadOnlyList<Tile> group, float? packMaxAbsX, IReadOnlyList<IconNodeScan.Tray>? trays)
