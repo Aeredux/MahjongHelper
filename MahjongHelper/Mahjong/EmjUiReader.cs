@@ -501,7 +501,7 @@ public static unsafe class EmjUiReader
                 return;
             if (claimed.Contains(slot.NodeIndex))
                 return;
-            if (slot.NodeType is 1009 or 1006)
+            if (slot.NodeType is 1009 or 1006 or 1021 or 1022 or 1023 or 1024)
                 return;
             var handSized = (slot.Width == 42 && slot.Height == 55) || (slot.Width == 55 && slot.Height == 42);
             var pondSized = (slot.Width == 34 && slot.Height == 45) || (slot.Width == 45 && slot.Height == 34);
@@ -1663,12 +1663,32 @@ public static unsafe class EmjUiReader
                 Consider(slot);
         }
 
+        var stripAnchors = byNode.Values
+            .Where(s => s.NodeType == 1055 && s.Width == 42 && s.Height == 55)
+            .ToList();
+        float? stripAbsY = stripAnchors.Count > 0
+            ? stripAnchors.Average(s => s.AbsY != 0 || s.AbsX != 0 ? s.AbsY : s.Y)
+            : null;
+
+        bool OnPlayerStrip(UiSlot slot)
+        {
+            if (stripAbsY is not float band)
+                return true;
+            var y = slot.AbsY != 0 || slot.AbsX != 0 ? slot.AbsY : slot.Y;
+            return Math.Abs(y - band) <= OpponentAreaClassifier.PlayerStripBandPx;
+        }
+
         foreach (var slot in extraStrip)
-            Consider(slot);
+        {
+            if (OnPlayerStrip(slot))
+                Consider(slot);
+        }
 
         foreach (var slot in slots.Where(s => s.Kind == SlotKind.VisibleTileCandidate))
         {
-            if (slot.NodeIndex is < 54 or > 71)
+            if (slot.NodeIndex is >= 54 and <= 71)
+                continue;
+            if (OnPlayerStrip(slot))
                 Consider(slot);
         }
 
@@ -1707,7 +1727,8 @@ public static unsafe class EmjUiReader
     }
 
     private static HandStripClassifier.Tile ToStripTile(int id, UiSlot slot)
-        => new(id, slot.X, slot.Y, slot.Width, slot.Height, slot.Rotation, slot.ParentNodeId, slot.TileCode, slot.NodeIndex);
+        => new(id, slot.X, slot.Y, slot.Width, slot.Height, slot.Rotation, slot.ParentNodeId,
+            slot.TileCode, slot.NodeIndex, slot.AbsX, slot.AbsY, slot.NodeType);
 
     private static List<UiSlot> BuildCanonicalHand(List<UiSlot> rawHand)
     {

@@ -98,6 +98,8 @@ public static class SmallTileClassifier
             }
         }
 
+        // 1045 34×45 leftovers stay out of this pond path; 42×55 type 1045
+        // fuuro is handled by OpponentAreaClassifier / HandStripClassifier.
         var leftovers = withIcons
             .Where(t => t.NodeType is not (1021 or 1022 or 1023 or 1024 or 1009 or 1006 or 1045 or 1055))
             .GroupBy(t => t.ParentNodeId)

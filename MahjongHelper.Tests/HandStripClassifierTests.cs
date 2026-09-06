@@ -227,6 +227,36 @@ public class HandStripClassifierTests
     }
 
     [Fact]
+    public void Mid_row_node_54_does_not_block_separated_chi_peel()
+    {
+        // snap after 2e9952b: 13 type-1055 closed tiles, draw node 54 at X=430
+        // (mid-row overlay), own CHI type 1045 physically separated on the right.
+        var tiles = new List<HandStripClassifier.Tile>();
+        var closed = new[] { "M4", "M6", "M7", "M8", "M8", "M9", "S6", "S7", "S8", "S9", "P1", "P3", "P4" };
+        for (var i = 0; i < closed.Length; i++)
+        {
+            var x = 42 + i * 42;
+            tiles.Add(T(i, x, closed[i], nodeIndex: 59 + i, nodeType: 1055, absX: 200 + x, absY: 640, parent: 10));
+        }
+
+        tiles.Add(T(13, 430, "M4", nodeIndex: 54, nodeType: 1055, absX: 630, absY: 640, parent: 10));
+        tiles.Add(T(14, 0, "S2", (float)(Math.PI / 2), parent: 80, nodeIndex: 90, width: 55, height: 42,
+            nodeType: 1045, absX: 820, absY: 640));
+        tiles.Add(T(15, 42, "S3", parent: 80, nodeIndex: 91, nodeType: 1045, absX: 862, absY: 640));
+        tiles.Add(T(16, 84, "S4", parent: 80, nodeIndex: 92, nodeType: 1045, absX: 904, absY: 640));
+
+        var split = HandStripClassifier.Split(tiles);
+
+        Assert.Equal(13, split.ClosedIds.Count);
+        Assert.Equal(13, split.DrawId);
+        Assert.DoesNotContain("S2", Codes(tiles, split.ClosedIds));
+        Assert.DoesNotContain("S3", Codes(tiles, split.ClosedIds));
+        Assert.DoesNotContain("S4", Codes(tiles, split.ClosedIds));
+        var chi = Assert.Single(split.MeldGroups);
+        Assert.Equal(["S2", "S3", "S4"], Codes(tiles, chi));
+    }
+
+    [Fact]
     public void Overlapping_suited_tiles_at_same_x_are_not_a_meld_cue()
     {
         // dump/uistate: P2 and P3 both at X=168 (placeholder + live).
@@ -274,8 +304,9 @@ public class HandStripClassifierTests
         ];
 
     private static HandStripClassifier.Tile T(
-        int id, float x, string code, float rotation = 0, uint parent = 1, int nodeIndex = 0)
-        => new(id, x, 0, 42, 55, rotation, parent, code, nodeIndex);
+        int id, float x, string code, float rotation = 0, uint parent = 1, int nodeIndex = 0,
+        int width = 42, int height = 55, ushort nodeType = 0, float absX = 0, float absY = 0)
+        => new(id, x, 0, width, height, rotation, parent, code, nodeIndex, absX, absY, nodeType);
 
     private static List<string> Codes(List<HandStripClassifier.Tile> tiles, IReadOnlyList<int> ids)
     {

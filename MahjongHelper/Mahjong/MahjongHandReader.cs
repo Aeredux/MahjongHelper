@@ -41,7 +41,9 @@ public static unsafe class MahjongHandReader
         float Rotation = 0,
         int Width = 42,
         int Height = 55,
-        uint ParentNodeId = 0);
+        uint ParentNodeId = 0,
+        float AbsX = 0,
+        float AbsY = 0);
 
     public sealed record MahjongHandSnapshot(
         IReadOnlyList<MahjongTileObservation> HandTiles,
@@ -105,7 +107,7 @@ public static unsafe class MahjongHandReader
                 try { visible = node->IsVisible(); } catch { }
                 if (!visible) continue;
 
-                var isHandSized = ((int)node->Type == 1055 && node->Width == 42 && node->Height == 55)
+                var isHandSized = (node->Width == 42 && node->Height == 55)
                                   || (node->Width == 55 && node->Height == 42);
                 if (isHandSized)
                 {
@@ -113,11 +115,21 @@ public static unsafe class MahjongHandReader
                     {
                         float rotation = 0;
                         uint parentId = 0;
+                        float absX = 0;
+                        float absY = 0;
                         try { rotation = node->Rotation; } catch { }
                         try
                         {
-                            if (node->ParentNode != null)
-                                parentId = node->ParentNode->NodeId;
+                            var walk = node;
+                            var steps = 0;
+                            while (walk != null && steps++ < 32)
+                            {
+                                absX += walk->X;
+                                absY += walk->Y;
+                                if (steps == 1 && walk->ParentNode != null)
+                                    parentId = walk->ParentNode->NodeId;
+                                walk = walk->ParentNode;
+                            }
                         }
                         catch { }
                         var observation = new MahjongTileObservation(
@@ -131,7 +143,9 @@ public static unsafe class MahjongHandReader
                             rotation,
                             node->Width,
                             node->Height,
-                            parentId);
+                            parentId,
+                            absX,
+                            absY);
                         stripTiles.Add(observation);
                         if (node->Width == 42 && node->Height == 55)
                             handTiles.Add(observation);
@@ -159,15 +173,30 @@ public static unsafe class MahjongHandReader
         }
 
         handTiles.Sort((left, right) => left.X.CompareTo(right.X));
+        var anchors = stripTiles
+            .Where(t => t.NodeType == 1055 && t.Width == 42 && t.Height == 55
+                        && (t.NodeIndex == 54 || t.NodeIndex is >= 59 and <= 71))
+            .ToList();
+        float? stripAbsY = anchors.Count > 0
+            ? anchors.Average(t => t.AbsY != 0 || t.AbsX != 0 ? t.AbsY : t.Y)
+            : null;
         var stripForSplit = stripTiles
             .Where(t => t.NodeIndex is < 55 or > 58)
+            .Where(t =>
+            {
+                if (stripAbsY is not float band)
+                    return true;
+                var y = t.AbsY != 0 || t.AbsX != 0 ? t.AbsY : t.Y;
+                return Math.Abs(y - band) <= OpponentAreaClassifier.PlayerStripBandPx;
+            })
             .ToList();
         List<List<MahjongTileObservation>> stripMelds = [];
         if (stripForSplit.Count > 0)
         {
             var classified = HandStripClassifier.Split(stripForSplit
                 .Select((t, index) => new HandStripClassifier.Tile(
-                    index, t.X, t.Y, t.Width, t.Height, t.Rotation, t.ParentNodeId, t.TileCode, t.NodeIndex))
+                    index, t.X, t.Y, t.Width, t.Height, t.Rotation, t.ParentNodeId, t.TileCode,
+                    t.NodeIndex, t.AbsX, t.AbsY, t.NodeType))
                 .ToList());
             var closed = classified.ClosedIds
                 .Where(id => id >= 0 && id < stripForSplit.Count)

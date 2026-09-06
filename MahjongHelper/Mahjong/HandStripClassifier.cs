@@ -26,7 +26,10 @@ public static class HandStripClassifier
         float Rotation,
         uint ParentNodeId,
         string? TileCode,
-        int NodeIndex = 0);
+        int NodeIndex = 0,
+        float AbsX = 0,
+        float AbsY = 0,
+        ushort NodeType = 0);
 
     public sealed record Result(
         IReadOnlyList<int> ClosedIds,
@@ -39,19 +42,19 @@ public static class HandStripClassifier
             return new Result([], null, []);
 
         var usable = tiles
-            .Where(t => t.X >= 0 && MeldClassifier.IsUsableTile(t.TileCode))
+            .Where(t => LayoutX(t) >= 0 && MeldClassifier.IsUsableTile(t.TileCode))
             .ToList();
         if (usable.Count == 0)
             return new Result([], null, []);
 
         var rowY = ChooseHandRowY(usable);
         var row = usable
-            .Where(t => Math.Abs(t.Y - rowY) <= HandRowBandPx)
-            .OrderBy(t => t.X)
+            .Where(t => Math.Abs(LayoutY(t) - rowY) <= HandRowBandPx)
+            .OrderBy(LayoutX)
             .ThenBy(t => t.Id)
             .ToList();
         if (row.Count == 0)
-            row = usable.OrderBy(t => t.X).ThenBy(t => t.Id).ToList();
+            row = usable.OrderBy(LayoutX).ThenBy(t => t.Id).ToList();
 
         var melded = new HashSet<int>();
         var meldGroups = new List<List<int>>();
@@ -82,24 +85,42 @@ public static class HandStripClassifier
                 AddMeld(expanded);
         }
 
-        remaining = row.Where(t => !melded.Contains(t.Id)).OrderBy(t => t.X).ToList();
-        var draw = FindDrawTile(remaining);
-        if (draw != null)
-            GroupConsecutiveMelds(remaining.Where(t => t.Id != draw.Value.Id && t.X > draw.Value.X), AddMeld);
+        remaining = row.Where(t => !melded.Contains(t.Id)).OrderBy(LayoutX).ToList();
+        var reserved = ReservedClosedPack(remaining);
+        Tile? peelDraw = null;
+        if (reserved.Count >= 7)
+        {
+            var reservedIds = reserved.Select(t => t.Id).ToHashSet();
+            var packDraw = remaining.Where(t => t.NodeIndex == DrawNodeIndex).ToList();
+            peelDraw = packDraw.Count > 0 ? packDraw[^1] : null;
+            GroupConsecutiveMelds(
+                remaining.Where(t => !reservedIds.Contains(t.Id) && t.Id != peelDraw?.Id),
+                AddMeld);
+        }
+        else
+        {
+            peelDraw = FindDrawTile(remaining);
+            if (peelDraw != null && !IsMidRowDraw(peelDraw.Value, remaining))
+                GroupConsecutiveMelds(
+                    remaining.Where(t => t.Id != peelDraw.Value.Id && LayoutX(t) > LayoutX(peelDraw.Value)),
+                    AddMeld);
+        }
 
-        remaining = row.Where(t => !melded.Contains(t.Id)).OrderBy(t => t.X).ToList();
+        remaining = row.Where(t => !melded.Contains(t.Id)).OrderBy(LayoutX).ToList();
         var clusters = ClusterByGap(remaining, ClusterGapPx);
         if (clusters.Count > 1)
         {
             for (var i = 1; i < clusters.Count; i++)
             {
-                if (clusters[i].Count >= 2 && (draw == null || clusters[i].All(t => t.Id != draw.Value.Id)))
+                if (clusters[i].Count >= 2 && (peelDraw == null || clusters[i].All(t => t.Id != peelDraw.Value.Id)))
                     AddMeld(clusters[i]);
             }
         }
 
-        remaining = row.Where(t => !melded.Contains(t.Id)).OrderBy(t => t.X).ToList();
-        var drawId = draw?.Id ?? FindDrawId(remaining);
+        remaining = row.Where(t => !melded.Contains(t.Id)).OrderBy(LayoutX).ToList();
+        int? drawId = remaining.Any(t => t.NodeIndex == DrawNodeIndex)
+            ? remaining.Where(t => t.NodeIndex == DrawNodeIndex).OrderBy(LayoutX).Last().Id
+            : FindDrawTile(remaining)?.Id;
 
         var closed = remaining
             .Where(t => t.Id != drawId)
@@ -130,7 +151,10 @@ public static class HandStripClassifier
         if (byParent.Count <= 1 || byParent.All(g => g.Key == 0))
             return;
 
-        var primary = row.OrderBy(t => t.X).First().ParentNodeId;
+        var pack = ReservedClosedPack(row);
+        var primary = pack.Count >= 7
+            ? pack.GroupBy(t => t.ParentNodeId).OrderByDescending(g => g.Count()).First().Key
+            : row.OrderBy(LayoutX).First().ParentNodeId;
         foreach (var group in byParent)
         {
             if (group.Key == 0 || group.Key == primary)
@@ -154,7 +178,7 @@ public static class HandStripClassifier
             if (tiles.Any(other =>
                     other.Id != tile.Id &&
                     SameKey(other, tile) &&
-                    Math.Abs(other.X - tile.X) < StackedXPx))
+                    Math.Abs(LayoutX(other) - LayoutX(tile)) < StackedXPx))
             {
                 cues.Add(tile);
             }
@@ -163,14 +187,15 @@ public static class HandStripClassifier
         return cues
             .GroupBy(t => t.Id)
             .Select(g => g.First())
-            .OrderByDescending(t => t.X)
+            .OrderByDescending(LayoutX)
             .ToList();
     }
 
     private static List<Tile> ExpandMeldFromCue(Tile cue, List<Tile> remaining)
     {
         var reach = remaining
-            .Where(t => Math.Abs(t.X - cue.X) <= SameMeldReachPx && Math.Abs(t.Y - cue.Y) <= HandRowBandPx)
+            .Where(t => Math.Abs(LayoutX(t) - LayoutX(cue)) <= SameMeldReachPx
+                        && Math.Abs(LayoutY(t) - LayoutY(cue)) <= HandRowBandPx)
             .ToList();
         if (reach.All(t => t.Id != cue.Id))
             reach.Add(cue);
@@ -185,13 +210,13 @@ public static class HandStripClassifier
 
     private static List<Tile> FindChiIncludingCue(Tile cue, List<Tile> nearby)
     {
-        var unique = UniqueX(nearby).OrderBy(t => t.X).ToList();
+        var unique = UniqueX(nearby).OrderBy(LayoutX).ToList();
         for (var i = 0; i + 2 < unique.Count; i++)
         {
             var window = unique.GetRange(i, 3);
-            if (window.All(t => Math.Abs(t.X - cue.X) > SameMeldReachPx) && window.All(t => t.Id != cue.Id))
+            if (window.All(t => Math.Abs(LayoutX(t) - LayoutX(cue)) > SameMeldReachPx) && window.All(t => t.Id != cue.Id))
                 continue;
-            if (!window.Any(t => t.Id == cue.Id || Math.Abs(t.X - cue.X) < StackedXPx))
+            if (!window.Any(t => t.Id == cue.Id || Math.Abs(LayoutX(t) - LayoutX(cue)) < StackedXPx))
                 continue;
 
             var codes = window.Select(t => t.TileCode!).ToList();
@@ -199,8 +224,8 @@ public static class HandStripClassifier
             if (meld?.Type != "CHI")
                 continue;
 
-            var xs = window.Select(t => t.X).ToList();
-            return nearby.Where(t => xs.Any(x => Math.Abs(t.X - x) < StackedXPx)).ToList();
+            var xs = window.Select(LayoutX).ToList();
+            return nearby.Where(t => xs.Any(x => Math.Abs(LayoutX(t) - x) < StackedXPx)).ToList();
         }
 
         return [];
@@ -219,7 +244,7 @@ public static class HandStripClassifier
         if (remaining.Count == 0)
             return null;
 
-        var node54 = remaining.Where(t => t.NodeIndex == DrawNodeIndex).OrderBy(t => t.X).ToList();
+        var node54 = remaining.Where(t => t.NodeIndex == DrawNodeIndex).OrderBy(LayoutX).ToList();
         if (node54.Count > 0)
             return node54[^1];
 
@@ -236,14 +261,14 @@ public static class HandStripClassifier
 
     private static Tile? FindPitchBreakDraw(List<Tile> remaining)
     {
-        var unique = UniqueX(remaining).OrderBy(t => t.X).ToList();
+        var unique = UniqueX(remaining).OrderBy(LayoutX).ToList();
         if (unique.Count < 3)
             return null;
 
         var deltas = new List<float>();
         for (var i = 1; i < unique.Count; i++)
         {
-            var delta = unique[i].X - unique[i - 1].X;
+            var delta = LayoutX(unique[i]) - LayoutX(unique[i - 1]);
             if (delta >= StackedXPx)
                 deltas.Add(delta);
         }
@@ -257,7 +282,7 @@ public static class HandStripClassifier
 
         for (var i = 1; i < unique.Count; i++)
         {
-            var delta = unique[i].X - unique[i - 1].X;
+            var delta = LayoutX(unique[i]) - LayoutX(unique[i - 1]);
             // Live snap-20260906-071141803: last closed at 294, draw at 304 (10px).
             if (delta >= 1f && delta < pitch * 0.55f)
                 return unique[i];
@@ -268,7 +293,7 @@ public static class HandStripClassifier
 
     private static void GroupConsecutiveMelds(IEnumerable<Tile> tiles, Action<IEnumerable<Tile>> addMeld)
     {
-        var ordered = tiles.OrderBy(t => t.X).ThenBy(t => t.Id).ToList();
+        var ordered = tiles.OrderBy(LayoutX).ThenBy(t => t.Id).ToList();
         var i = 0;
         while (i < ordered.Count)
         {
@@ -327,7 +352,7 @@ public static class HandStripClassifier
         for (var i = 1; i < ordered.Count; i++)
         {
             var prev = current[^1];
-            if (ordered[i].X - prev.X >= gapPx)
+            if (LayoutX(ordered[i]) - LayoutX(prev) >= gapPx)
             {
                 clusters.Add(current);
                 current = [ordered[i]];
@@ -344,7 +369,7 @@ public static class HandStripClassifier
 
     private static IEnumerable<Tile> UniqueX(IEnumerable<Tile> tiles)
         => tiles
-            .GroupBy(t => (int)Math.Round(t.X / 2f) * 2)
+            .GroupBy(t => (int)Math.Round(LayoutX(t) / 2f) * 2)
             .Select(g => g
                 .OrderByDescending(IsRotated)
                 .ThenBy(t => t.Id)
@@ -352,15 +377,45 @@ public static class HandStripClassifier
 
     private static float ChooseHandRowY(List<Tile> tiles)
     {
-        var preferred = tiles.Where(t => t.Width == 42 && t.Height == 55).ToList();
+        var anchors = tiles.Where(t => t.NodeType == 1055 && t.Width == 42 && t.Height == 55).ToList();
+        var preferred = anchors.Count > 0
+            ? anchors
+            : tiles.Where(t => t.Width == 42 && t.Height == 55).ToList();
         var source = preferred.Count > 0 ? preferred : tiles;
         return source
-            .GroupBy(t => (int)Math.Round(t.Y))
+            .GroupBy(t => (int)Math.Round(LayoutY(t)))
             .OrderByDescending(g => g.Count())
             .ThenBy(g => Math.Abs(g.Key))
             .First()
-            .Average(t => t.Y);
+            .Average(LayoutY);
     }
+
+    internal static bool IsClosedPackTile(Tile tile)
+        => tile.NodeIndex != DrawNodeIndex
+           && tile.Width == 42
+           && tile.Height == 55
+           && (tile.NodeType == 1055 || tile.NodeIndex is >= 59 and <= 71);
+
+    private static List<Tile> ReservedClosedPack(IEnumerable<Tile> tiles)
+        => tiles.Where(IsClosedPackTile).OrderBy(LayoutX).ThenBy(t => t.Id).ToList();
+
+    internal static bool IsMidRowDraw(Tile draw, IReadOnlyList<Tile> remaining)
+    {
+        var pack = ReservedClosedPack(remaining);
+        if (pack.Count < 7)
+            return false;
+
+        var min = LayoutX(pack[0]);
+        var max = LayoutX(pack[^1]);
+        var x = LayoutX(draw);
+        return x > min + 8f && x < max - 8f;
+    }
+
+    private static float LayoutX(Tile tile) => HasAbs(tile) ? tile.AbsX : tile.X;
+
+    private static float LayoutY(Tile tile) => HasAbs(tile) ? tile.AbsY : tile.Y;
+
+    private static bool HasAbs(Tile tile) => tile.AbsX != 0 || tile.AbsY != 0;
 
     private static bool SameKey(Tile a, Tile b)
         => MeldClassifier.IsUsableTile(a.TileCode)

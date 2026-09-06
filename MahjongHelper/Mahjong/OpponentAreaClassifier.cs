@@ -10,7 +10,9 @@ namespace MahjongHelper.Mahjong;
 ///
 /// Live Doman: toimen CHI is upright beside that player's face-down hand.
 /// Shimocha/kamicha CHI is a sideways stack (often one 55×42 called tile).
-/// Type 1045 strips and pond leftovers (1021–1024) must not become fuuro.
+/// Pond leftovers (1021–1024) stay with <see cref="SmallTileClassifier"/>.
+/// Type 1045 is allowed when a 2–4 tile group InferMelds; a 5+ tile 1045
+/// hand-echo strip is rejected by the cluster size check.
 /// </summary>
 public static class OpponentAreaClassifier
 {
@@ -47,7 +49,7 @@ public static class OpponentAreaClassifier
 
         var usable = leftovers
             .Where(t => MeldClassifier.IsUsableTile(t.TileCode))
-            .Where(t => t.NodeType is not (1009 or 1006 or 1045))
+            .Where(t => t.NodeType is not (1009 or 1006 or 1021 or 1022 or 1023 or 1024))
             .ToList();
         if (usable.Count == 0)
             return result;

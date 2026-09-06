@@ -1394,6 +1394,8 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
         t.Height,
         t.Rotation,
         t.ParentNodeId,
+        t.AbsX,
+        t.AbsY,
         t.IconId,
         t.TileCode,
     };
