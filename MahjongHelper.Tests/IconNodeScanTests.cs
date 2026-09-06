@@ -119,6 +119,19 @@ public class IconNodeScanTests
         Assert.True(IconNodeScan.ClusterHasCallCue(with1056, t => t.W, t => t.H, t => t.Rot));
         Assert.True(IconNodeScan.IsCallCueNode(1056, 42, 55, 4.712f));
         Assert.True(IconNodeScan.IsFuuroTray(1060, 140, 55));
+        Assert.True(IconNodeScan.IsFuuroSlot(1061, 86, 35));
+        Assert.True(IconNodeScan.IsFuuroSlot(1062, 86, 35));
+        Assert.True(IconNodeScan.IsFuuroSlot(1063, 86, 35));
+        Assert.False(IconNodeScan.IsFuuroSlot(1055, 42, 55));
+        Assert.Equal(SmallTileClassifier.Kind.PlayerMeld, IconNodeScan.FuuroSlotOwner(1060));
+        Assert.Equal(SmallTileClassifier.Kind.LeftMeld, IconNodeScan.FuuroSlotOwner(1061));
+        Assert.Equal(SmallTileClassifier.Kind.RightMeld, IconNodeScan.FuuroSlotOwner(1062));
+        Assert.Equal(SmallTileClassifier.Kind.OppositeMeld, IconNodeScan.FuuroSlotOwner(1063));
+        Assert.True(IconNodeScan.SeatHasLiveFuuroSlot(
+            SmallTileClassifier.Kind.RightMeld, [new IconNodeScan.Tray(850, 300, 86, 35, 1062)]));
+        Assert.False(IconNodeScan.SeatHasLiveFuuroSlot(
+            SmallTileClassifier.Kind.RightMeld, [new IconNodeScan.Tray(1525, 972, 140, 55)]));
+        Assert.False(IconNodeScan.SeatHasLiveFuuroSlot(SmallTileClassifier.Kind.LeftMeld, []));
         // Doman CHI: only the called tile is sideways. Two upright 40×52
         // in-hand leaves plus the 1056 cue are enough — M1/M3 must not be 52×40.
         Assert.True(IconNodeScan.IsFaceLeaf(2, 40, 52));
@@ -232,7 +245,7 @@ public class IconNodeScanTests
             west, 1327, trays, t => t.W, t => t.H, t => t.Rot, t => t.X, t => t.Y));
         Assert.True(IconNodeScan.IsPlausibleOwnLeftoverFuuro(
             chi, 1327, trays, t => t.W, t => t.H, t => t.Rot, t => t.X, t => t.Y));
-        Assert.True(IconNodeScan.IsPlausibleOwnLeftoverFuuro(
+        Assert.False(IconNodeScan.IsPlausibleOwnLeftoverFuuro(
             chi, 1327, trays: null, t => t.W, t => t.H, t => t.Rot, t => t.X, t => t.Y));
     }
 

@@ -401,7 +401,13 @@ public class OpponentAreaClassifierTests
             new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.LeftDiscard, 90, 380),
         };
 
-        var assignments = OpponentAreaClassifier.Classify(leftovers, ponds, playerStripAbsY: 972);
+        var trays = new[]
+        {
+            new IconNodeScan.Tray(820, 972, 140, 55, 1060),
+            new IconNodeScan.Tray(520, 48, 86, 35, 1063),
+        };
+        var assignments = OpponentAreaClassifier.Classify(
+            leftovers, ponds, playerStripAbsY: 972, trays: trays);
         Assert.DoesNotContain(assignments, a => a.Kind == SmallTileClassifier.Kind.LeftMeld);
         Assert.DoesNotContain(assignments, a => a.TileIds.Any(id => id <= 6));
         var own = Assert.Single(assignments, a => a.Kind == SmallTileClassifier.Kind.PlayerMeld);
@@ -456,7 +462,11 @@ public class OpponentAreaClassifierTests
             new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.RightDiscard, 1600, 550),
             new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.LeftDiscard, 900, 850),
         };
-        var trays = new[] { new IconNodeScan.Tray(1525, 972, 140, 55) };
+        var trays = new[]
+        {
+            new IconNodeScan.Tray(1525, 972, 140, 55, 1060),
+            new IconNodeScan.Tray(1041, 396, 86, 35, 1063),
+        };
 
         var assignments = OpponentAreaClassifier.Classify(
             leftovers, ponds, playerStripAbsY: 972, closedPackMaxAbsX: 1327, trays: trays);
@@ -551,8 +561,9 @@ public class OpponentAreaClassifierTests
             Area(5, 0, 0, 1092, 430, 40, 52, parent: 200, "M0", nodeType: 2),
         };
         var ponds = LiveSouthPonds();
+        var trays = new[] { new IconNodeScan.Tray(960, 850, 86, 50, 1061) };
 
-        var assignments = OpponentAreaClassifier.Classify(leftovers, ponds, playerStripAbsY: 972);
+        var assignments = OpponentAreaClassifier.Classify(leftovers, ponds, playerStripAbsY: 972, trays: trays);
 
         var left = Assert.Single(assignments, a => a.Kind == SmallTileClassifier.Kind.LeftMeld);
         Assert.Equal([0, 1, 2], left.TileIds);
@@ -605,7 +616,12 @@ public class OpponentAreaClassifierTests
             new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.OppositeDiscard, 1100, 400),
         };
 
-        var assignments = OpponentAreaClassifier.Classify(leftovers, ponds, playerStripAbsY: 972);
+        var trays = new[]
+        {
+            new IconNodeScan.Tray(960, 850, 86, 50, 1061),
+            new IconNodeScan.Tray(1555, 520, 86, 50, 1062),
+        };
+        var assignments = OpponentAreaClassifier.Classify(leftovers, ponds, playerStripAbsY: 972, trays: trays);
         var left = Assert.Single(assignments, a => a.Kind == SmallTileClassifier.Kind.LeftMeld);
         Assert.Equal([0, 1, 2], left.TileIds);
         var right = Assert.Single(assignments, a => a.Kind == SmallTileClassifier.Kind.RightMeld);
@@ -635,8 +651,9 @@ public class OpponentAreaClassifierTests
             Area(10, 49, 34, 1092, 430, 40, 52, parent: 200, "M0", nodeType: 2),
         };
         var ponds = LiveSouthPonds();
+        var trays = new[] { new IconNodeScan.Tray(1520, 400, 86, 120, 1062) };
 
-        var assignments = OpponentAreaClassifier.Classify(leftovers, ponds, playerStripAbsY: 972);
+        var assignments = OpponentAreaClassifier.Classify(leftovers, ponds, playerStripAbsY: 972, trays: trays);
 
         Assert.DoesNotContain(assignments, a => a.Kind == SmallTileClassifier.Kind.LeftMeld);
         Assert.DoesNotContain(assignments, a => a.Kind == SmallTileClassifier.Kind.OppositeMeld);
@@ -719,8 +736,9 @@ public class OpponentAreaClassifierTests
             Area(2, 0, 0, 1114, 430, 40, 52, parent: 300, "EAST", nodeType: 2),
         };
         var ponds = LiveSouthPonds();
+        var trays = new[] { new IconNodeScan.Tray(1040, 390, 86, 50, 1063) };
 
-        var assignments = OpponentAreaClassifier.Classify(leftovers, ponds, playerStripAbsY: 972);
+        var assignments = OpponentAreaClassifier.Classify(leftovers, ponds, playerStripAbsY: 972, trays: trays);
 
         var opposite = Assert.Single(assignments);
         Assert.Equal(SmallTileClassifier.Kind.OppositeMeld, opposite.Kind);
@@ -753,6 +771,47 @@ public class OpponentAreaClassifierTests
         Assert.Equal(
             "own=CHI M1-M2-M3, CHI M4-M5-M6 | EAST=none | SOUTH=PON EAST×3 | WEST=none",
             lines[1]);
+    }
+
+    [Fact]
+    public void Empty_table_type2_leftovers_without_slots_are_none()
+    {
+        // West-seat empty fuuro: previous North-seat own CHIs and Right
+        // WHITE/S6 leftovers stay in the tree. No visible 1060–1063 slots.
+        var leftovers = new List<OpponentAreaClassifier.Tile>
+        {
+            Area(0, 0, 0, 1524, 980, 40, 52, parent: 10, "M1", nodeType: 2),
+            Area(1, 0, 0, 1568, 980, 40, 52, parent: 10, "M2", nodeType: 2),
+            Area(2, 0, 0, 1612, 980, 40, 52, parent: 10, "M3", nodeType: 2),
+            Area(3, 0, 0, 1660, 980, 40, 52, parent: 11, "M4", nodeType: 2),
+            Area(4, 0, 0, 1704, 980, 40, 52, parent: 11, "M5", nodeType: 2),
+            Area(5, 0, 0, 1748, 980, 40, 52, parent: 11, "M6", nodeType: 2),
+            Area(6, 0, 0, 1580, 420, 40, 52, parent: 90, "WHITE", nodeType: 2),
+            Area(7, 0, 40, 1580, 460, 40, 52, parent: 90, "WHITE", nodeType: 2),
+            Area(8, 0, 80, 1580, 500, 40, 52, parent: 90, "WHITE", nodeType: 2),
+            Area(9, 0, 0, 1525, 420, 40, 52, parent: 91, "S6", nodeType: 2),
+            Area(10, 0, 40, 1525, 460, 40, 52, parent: 91, "S0", nodeType: 2),
+            Area(11, 0, 80, 1525, 500, 40, 52, parent: 91, "S4", nodeType: 2),
+        };
+
+        Assert.Empty(OpponentAreaClassifier.Classify(
+            leftovers, LiveSouthPonds(), playerStripAbsY: 972, trays: []));
+
+        var lines = SolverJson.BuildSnapSummaryLines(new SuggestMoveRequest
+        {
+            Hand = ["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "S9", "P1", "P2", "P3", "P4"],
+            DrawnTile = "S8",
+            SeatWind = "WEST",
+            RoundWind = "EAST",
+            Melds = [],
+            Opponents =
+            [
+                new OpponentInfo { Wind = "NORTH" },
+                new OpponentInfo { Wind = "EAST" },
+                new OpponentInfo { Wind = "SOUTH" },
+            ],
+        });
+        Assert.Equal("own=none | NORTH=none | EAST=none | SOUTH=none", lines[1]);
     }
 
     private static OpponentAreaClassifier.PondHint[] LiveSouthPonds() =>

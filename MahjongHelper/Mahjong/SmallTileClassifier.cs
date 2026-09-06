@@ -50,7 +50,8 @@ public static class SmallTileClassifier
         [1024] = Kind.OppositeDiscard,
     };
 
-    public static IReadOnlyList<ClassifiedTile> Classify(IReadOnlyList<Tile> tiles)
+    public static IReadOnlyList<ClassifiedTile> Classify(
+        IReadOnlyList<Tile> tiles, IReadOnlyList<IconNodeScan.Tray>? trays = null)
     {
         var result = new List<ClassifiedTile>();
         if (tiles == null || tiles.Count == 0)
@@ -120,10 +121,13 @@ public static class SmallTileClassifier
                 var owner = GuessMeldOwner(part, pondParents, pondTilesByKind);
                 if (owner == null)
                     continue;
+                if (part.Count(t => t.NodeType == IconNodeScan.ImageNodeType) >= 2
+                    && !IconNodeScan.SeatHasLiveFuuroSlot(owner.Value, trays))
+                    continue;
                 if (owner == Kind.OppositeMeld
                     && !IconNodeScan.IsPlausibleOppositeLeftoverFuuro(
                         part,
-                        trays: null,
+                        trays,
                         t => t.NodeType,
                         t => t.Width,
                         t => t.Height,

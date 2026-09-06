@@ -586,7 +586,7 @@ public static unsafe class EmjUiReader
             : null;
         var trays = (allIconNodes ?? [])
             .Where(s => s.Visible && IconNodeScan.IsFuuroTray(s.NodeType, s.Width, s.Height))
-            .Select(s => new IconNodeScan.Tray(AbsOfX(s), AbsOfY(s), s.Width, s.Height))
+            .Select(s => new IconNodeScan.Tray(AbsOfX(s), AbsOfY(s), s.Width, s.Height, s.NodeType))
             .ToList();
 
         var classified = OpponentAreaClassifier.Classify(
@@ -1838,7 +1838,7 @@ public static unsafe class EmjUiReader
                     continue;
                 if (!IconNodeScan.IsFuuroTray(slot.NodeType, slot.Width, slot.Height))
                     continue;
-                trays.Add(new IconNodeScan.Tray(AbsOfX(slot), AbsOfY(slot), slot.Width, slot.Height));
+                trays.Add(new IconNodeScan.Tray(AbsOfX(slot), AbsOfY(slot), slot.Width, slot.Height, slot.NodeType));
             }
         }
 
@@ -1999,12 +1999,12 @@ public static unsafe class EmjUiReader
     /// <summary>
     /// Deep-walk every addon NodeList, nested component UldManager, RootNode
     /// sibling chain, and ChildNode list. Records:
-    ///   IconNodes — any node whose texture resolves to a mahjong tile icon
-    ///               (no type/size filter). <see cref="UiSlot.Visible"/> is
-    ///               ancestor-AND so leftover type-2 / 1056 under a hidden
-    ///               fuuro container is not scavenged as this-round meld.
+    ///   IconNodes — mahjong tile icons, plus type 1060–1063 fuuro slots
+    ///               (no icon required). Slot <see cref="UiSlot.Visible"/> is
+    ///               the live presence: empty-table dumps show all four
+    ///               arrays hidden. Leftover type-2 / 1056 siblings can stay
+    ///               self-visible after deal reset.
     ///   TileSizedNodes — on-screen 16–80px nodes, even when icon id is 0
-    /// so /mj snap can show where live fuuro actually lives.
     /// </summary>
     public static AddonNodeScan ScanAddonNodes(AtkUnitBase* addon, IconIdCapture? iconCapture, MahjongIconMap? iconMap)
     {
@@ -2111,7 +2111,8 @@ public static unsafe class EmjUiReader
             extras.AbsY,
             depth);
 
-        if (IconNodeScan.IsMahjongTileIcon(iconId))
+        if (IconNodeScan.IsMahjongTileIcon(iconId)
+            || IconNodeScan.IsFuuroSlot((ushort)node->Type, node->Width, node->Height))
             icons.Add(slot);
         if (visible && IconNodeScan.IsTileSized(node->Width, node->Height))
             tileSized.Add(slot);

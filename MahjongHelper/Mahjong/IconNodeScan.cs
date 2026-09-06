@@ -40,6 +40,9 @@ public static class IconNodeScan
     public const ushort ImageNodeType = 2;
     public const ushort CallCueNodeType = 1056;
     public const ushort FuuroTrayNodeType = 1060;
+    public const ushort LeftFuuroSlotType = 1061;
+    public const ushort RightFuuroSlotType = 1062;
+    public const ushort OppositeFuuroSlotType = 1063;
     public const int FaceLeafShortPx = 40;
     public const int FaceLeafLongPx = 52;
     public const int ClosedTileWidthPx = 42;
@@ -86,10 +89,56 @@ public static class IconNodeScan
     public static bool IsCallCueNode(ushort nodeType, int width, int height, float rotation)
         => nodeType == CallCueNodeType && HasCallCue(width, height, rotation);
 
+    /// <summary>
+    /// Dedicated per-seat fuuro slot arrays. Dump of an empty table has four
+    /// of each, all <c>Visible=N</c>. Leftover type-2 / 1056 icons are
+    /// siblings — they stay self-visible after deal reset — so ancestor
+    /// <c>IsVisible</c> is not enough. A seat's leftover is live only when
+    /// that seat's slot type is on-screen.
+    /// 1060 140×55 = own (bottom). 1061 86×35 = left. 1062 = right. 1063 = opposite.
+    /// </summary>
     public static bool IsFuuroTray(ushort nodeType, int width, int height)
-        => nodeType == FuuroTrayNodeType && width >= 100 && height >= 45 && height <= 80;
+        => IsFuuroSlot(nodeType, width, height);
 
-    public readonly record struct Tray(float AbsX, float AbsY, int Width, int Height);
+    public static bool IsFuuroSlot(ushort nodeType, int width, int height)
+    {
+        var min = Math.Min(width, height);
+        var max = Math.Max(width, height);
+        return nodeType switch
+        {
+            FuuroTrayNodeType => width >= 100 && height >= 45 && height <= 80,
+            LeftFuuroSlotType or RightFuuroSlotType or OppositeFuuroSlotType
+                => min >= 24 && max <= 200,
+            _ => false,
+        };
+    }
+
+    public static SmallTileClassifier.Kind? FuuroSlotOwner(ushort nodeType)
+        => nodeType switch
+        {
+            FuuroTrayNodeType => SmallTileClassifier.Kind.PlayerMeld,
+            LeftFuuroSlotType => SmallTileClassifier.Kind.LeftMeld,
+            RightFuuroSlotType => SmallTileClassifier.Kind.RightMeld,
+            OppositeFuuroSlotType => SmallTileClassifier.Kind.OppositeMeld,
+            _ => null,
+        };
+
+    public static bool SeatHasLiveFuuroSlot(
+        SmallTileClassifier.Kind kind, IReadOnlyList<Tray>? trays)
+    {
+        if (trays == null || trays.Count == 0)
+            return false;
+        for (var i = 0; i < trays.Count; i++)
+        {
+            if (FuuroSlotOwner(trays[i].NodeType) == kind)
+                return true;
+        }
+
+        return false;
+    }
+
+    public readonly record struct Tray(
+        float AbsX, float AbsY, int Width, int Height, ushort NodeType = FuuroTrayNodeType);
 
     public static bool CenterInTray(float absX, float absY, int width, int height, Tray tray)
     {
@@ -180,10 +229,9 @@ public static class IconNodeScan
     }
 
     /// <summary>
-    /// Own leftover type-2 / 1056 groups are real fuuro only when they have a
-    /// call cue and either sit in a type-1060 tray or start past the closed
-    /// 1055 pack. Ghost WEST 1056+type-2 at AbsX≈1385–1484 fails both.
-    /// Pond WEST on types 1021–1024 stay discards — those are real river tiles.
+    /// Own leftover type-2 / 1056 is live only when a type-1060 slot is
+    /// on-screen. Right-of-pack without a tray is how previous-hand CHIs
+    /// survive deal reset. Ghost WEST 1056+type-2 at AbsX≈1385–1484 fails.
     /// </summary>
     public static bool IsPlausibleOwnLeftoverFuuro<T>(
         IReadOnlyList<T> tiles,
@@ -195,6 +243,8 @@ public static class IconNodeScan
         Func<T, float> absX,
         Func<T, float> absY)
     {
+        if (!SeatHasLiveFuuroSlot(SmallTileClassifier.Kind.PlayerMeld, trays))
+            return false;
         if (!ClusterHasCallCue(tiles, width, height, rotation))
             return false;
         return ClusterCoveredByTray(tiles, trays, absX, absY, width, height)

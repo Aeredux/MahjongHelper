@@ -354,12 +354,7 @@ public class HandStripClassifierTests
         Assert.DoesNotContain(split.MeldGroups, g => Codes(tiles, g).Contains("WEST"));
 
         var noTray = HandStripClassifier.Split(tiles, trays: null);
-        var nearby = Assert.Single(noTray.MeldGroups);
-        var nearbyCodes = Codes(tiles, nearby);
-        Assert.Contains("M1", nearbyCodes);
-        Assert.Contains("M2", nearbyCodes);
-        Assert.Contains("M3", nearbyCodes);
-        Assert.DoesNotContain(noTray.MeldGroups, g => Codes(tiles, g).All(c => c == "WEST"));
+        Assert.Empty(noTray.MeldGroups);
     }
 
     [Fact]
@@ -413,9 +408,7 @@ public class HandStripClassifierTests
         Assert.DoesNotContain(12, pon);
 
         var noTray = HandStripClassifier.Split(tiles, trays: null);
-        var noTrayPon = Assert.Single(noTray.MeldGroups);
-        Assert.Equal(3, Codes(tiles, noTrayPon).Count);
-        Assert.All(Codes(tiles, noTrayPon), c => Assert.Equal("NORTH", c));
+        Assert.Empty(noTray.MeldGroups);
         Assert.Contains(12, noTray.ClosedIds);
     }
 
@@ -485,9 +478,11 @@ public class HandStripClassifierTests
         tiles.Add(T(13, 0, "WEST", parent: 80, nodeIndex: 202, width: 40, height: 52,
             nodeType: 2, absX: 1572, absY: 980));
 
-        var split = HandStripClassifier.Split(tiles);
+        var trays = new[] { new IconNodeScan.Tray(1480, 972, 140, 55, 1060) };
+        var split = HandStripClassifier.Split(tiles, trays);
         var pon = Assert.Single(split.MeldGroups);
         Assert.Equal(["WEST", "WEST", "WEST"], Codes(tiles, pon));
+        Assert.Empty(HandStripClassifier.Split(tiles, trays: null).MeldGroups);
     }
 
     [Fact]

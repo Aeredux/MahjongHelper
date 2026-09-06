@@ -257,7 +257,11 @@ public static class MahjongGameStateBuilder
             PondTsumogiriTracker.Left, nodeState, EmjUiReader.SlotKind.LeftDiscard,
             mergedLeftDiscards, null, previous?.LeftTsumogiri);
 
-        var mergedPlayerMelds = MergeMeldField(nodeState, EmjUiReader.SlotKind.PlayerMeld, previous?.PlayerMelds, allowCache: true);
+        var ownSlotLive = (nodeState.AllIconNodes ?? [])
+            .Any(s => s.Visible && s.NodeType == IconNodeScan.FuuroTrayNodeType
+                      && IconNodeScan.IsFuuroSlot(s.NodeType, s.Width, s.Height));
+        var mergedPlayerMelds = MergeMeldField(
+            nodeState, EmjUiReader.SlotKind.PlayerMeld, previous?.PlayerMelds, allowCache: ownSlotLive);
         var mergedRightMelds = MergeMeldField(nodeState, EmjUiReader.SlotKind.RightMeld, previous?.RightMelds, allowCache: false);
         var mergedOppositeMelds = MergeMeldField(nodeState, EmjUiReader.SlotKind.OppositeMeld, previous?.OppositeMelds, allowCache: false);
         var mergedLeftMelds = MergeMeldField(nodeState, EmjUiReader.SlotKind.LeftMeld, previous?.LeftMelds, allowCache: false);

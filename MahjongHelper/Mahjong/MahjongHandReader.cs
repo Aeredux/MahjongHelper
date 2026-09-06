@@ -414,7 +414,8 @@ public static unsafe class MahjongHandReader
                     slot.AbsX != 0 || slot.AbsY != 0 ? slot.AbsX : slot.X,
                     slot.AbsX != 0 || slot.AbsY != 0 ? slot.AbsY : slot.Y,
                     slot.Width,
-                    slot.Height));
+                    slot.Height,
+                    slot.NodeType));
             }
         }
         catch

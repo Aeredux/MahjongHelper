@@ -5,12 +5,13 @@ namespace MahjongHelper.Mahjong;
 
 /// <summary>
 /// Live ATK display presence for solver melds.
-/// AgentEmj has no decoded per-seat fuuro list in this repo; AtkValues do not
-/// enumerate opponent calls. The presence-correct source is nodes that are
-/// on-screen this frame: <c>IsVisible</c> on the node <em>and</em> every
-/// ancestor (same gate as stale call-button text). Leftover type-2 / 1056
-/// scans that ignore hidden parents scavenge previous-round ghosts.
-/// Opponent snap fields are live-only — an empty read must not keep cache.
+/// AgentEmj has no decoded per-seat fuuro list; AtkValues do not enumerate
+/// opponent calls. Ancestor <c>IsVisible</c> is necessary but not sufficient:
+/// leftover type-2 / 1056 icons stay self-visible after deal reset as
+/// siblings of the hidden slot. The authoritative source is the dedicated
+/// fuuro slot arrays — type 1060 (own) / 1061 (left) / 1062 (right) /
+/// 1063 (opposite) — which are hidden or empty when that seat has no call.
+/// Own cache is only for 1060 flicker, never across a deal with no live slot.
 /// </summary>
 public static class MeldPresence
 {
