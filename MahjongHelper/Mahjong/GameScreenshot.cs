@@ -10,12 +10,19 @@ using FFXIVClientStructs.FFXIV.Client.UI;
 namespace MahjongHelper.Mahjong;
 
 /// <summary>
-/// KAN-55: fire FFXIV's built-in screenshot so PNG/JPG lands in the usual client folder.
-/// Telesto is not required — PrintScreen is a keybind, not a slash command.
+/// KAN-55: fire FFXIV's built-in screenshot so PNG/JPG lands in the client folder.
+/// Prefers <c>ScreenShot.ScheduleScreenShot</c> (async — poll Requested/Result),
+/// then bound KEY_SCREENSHOT, then VK_SNAPSHOT. Telesto is not required.
 /// </summary>
 public static class GameScreenshot
 {
     public const ushort VkSnapshot = 0x2C;
+    public const int StuckRequestWaitMs = 3000;
+    public const int CompletionWaitMs = 5000;
+    public const int PollIntervalMs = 100;
+    public const int ScreenShotLocationOffset = 0x78;
+    public const int FileAccessPathLongStringOffset = 0x208;
+    public const int FileAccessPathBufferChars = 260;
 
     public enum TriggerMethod
     {
@@ -27,33 +34,82 @@ public static class GameScreenshot
 
     public readonly record struct TriggerResult(bool Fired, TriggerMethod Method, string Detail);
 
+    public readonly record struct ApiSnapshot(
+        bool InstanceAvailable,
+        bool CanTake,
+        bool Requested,
+        string Result,
+        string? Location,
+        long Timestamp);
+
+    public readonly record struct ScheduleAttempt(
+        bool Scheduled,
+        bool CanTake,
+        bool RequestedBefore,
+        string ResultBefore,
+        string Detail);
+
     public static readonly string DefaultScreenshotsDirectory = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
         "My Games",
-        "FINAL FANTASY XIV - A Realm Reborn",
+        FfxivCfgScreenshotDir.RealmRebornFolder,
         "screenshots");
 
-    /// <summary>
-    /// Priority: game <c>ScreenShot.ScheduleScreenShot</c>, then the bound KEY_SCREENSHOT
-    /// key, then emulate VK_SNAPSHOT (PrintScreen) so the game's handler still runs.
-    /// </summary>
-    public static TriggerResult TryTrigger()
+    public static ApiSnapshot CaptureApiSnapshot()
     {
-        string? apiDetail = null;
+        unsafe
+        {
+            var shot = ScreenShot.Instance();
+            if (shot == null)
+                return new ApiSnapshot(false, false, false, "n/a", null, 0);
+
+            return new ApiSnapshot(
+                true,
+                shot->CanTakeScreenShot,
+                shot->ScreenShotRequested,
+                shot->ScreenShotResult.ToString(),
+                TryReadLocation(shot),
+                shot->ScreenShotTimestamp);
+        }
+    }
+
+    public static ScheduleAttempt TryScheduleOnce()
+    {
+        unsafe
+        {
+            var shot = ScreenShot.Instance();
+            if (shot == null)
+                return new ScheduleAttempt(false, false, false, "n/a", "ScreenShot.Instance null");
+
+            var canTake = shot->CanTakeScreenShot;
+            var requested = shot->ScreenShotRequested;
+            var resultBefore = shot->ScreenShotResult.ToString();
+
+            if (requested)
+            {
+                return new ScheduleAttempt(
+                    false,
+                    canTake,
+                    true,
+                    resultBefore,
+                    $"ScreenShotRequested=true (already pending) CanTake={canTake} priorResult={resultBefore}");
+            }
+
+            var ok = shot->ScheduleScreenShot(null, null);
+            var detail = ok
+                ? $"ScheduleScreenShot=true CanTake={canTake} RequestedNow={shot->ScreenShotRequested} priorResult={resultBefore}"
+                : $"ScheduleScreenShot=false CanTake={canTake} RequestedNow={shot->ScreenShotRequested} priorResult={resultBefore}";
+            return new ScheduleAttempt(ok, canTake, requested, resultBefore, detail);
+        }
+    }
+
+    /// <summary>
+    /// Key-only cascade (bound KEY_SCREENSHOT, then VK_SNAPSHOT). Does not call
+    /// <c>ScheduleScreenShot</c> — the caller must not mix this with a successful schedule.
+    /// </summary>
+    public static TriggerResult TryTriggerKeys()
+    {
         string? bindDetail = null;
-
-        try
-        {
-            if (TryScheduleGameScreenshot(out var scheduledDetail))
-                return new TriggerResult(true, TriggerMethod.GameApi, scheduledDetail);
-            apiDetail = scheduledDetail;
-        }
-        catch (Exception ex)
-        {
-            // Signature / CanTakeScreenShot can fail on a mismatched client; fall through.
-            apiDetail = ex.Message;
-        }
-
         try
         {
             if (TrySendBoundScreenshotKey(out var keyDetail))
@@ -72,55 +128,121 @@ public static class GameScreenshot
         }
         catch (Exception ex)
         {
-            return new TriggerResult(false, TriggerMethod.None, $"all methods failed; last={ex.Message}");
+            return new TriggerResult(false, TriggerMethod.None, $"all key methods failed; last={ex.Message}");
         }
 
-        var why = string.Join("; ", new[] { apiDetail, bindDetail }.Where(s => !string.IsNullOrEmpty(s)));
-        return new TriggerResult(false, TriggerMethod.None, string.IsNullOrEmpty(why) ? "SendInput returned 0" : why);
+        return new TriggerResult(
+            false,
+            TriggerMethod.None,
+            string.IsNullOrEmpty(bindDetail) ? "SendInput returned 0" : bindDetail);
     }
+
+    public static bool UsesPrintScreenBind(TriggerResult result)
+    {
+        if (result.Method == TriggerMethod.PrintScreenFallback)
+            return true;
+        return result.Detail.Contains("SNAPSHOT", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static string PrintScreenRebindHint
+        => "if OS steals PrintScreen, rebind Screenshot in System Config (e.g. F12)";
 
     public static string ResolveScreenshotsDirectory()
     {
+        var configured = FfxivCfgScreenshotDir.TryReadConfiguredDirectory();
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            try
+            {
+                if (!Directory.Exists(configured))
+                    Directory.CreateDirectory(configured);
+                if (Directory.Exists(configured))
+                    return configured;
+            }
+            catch
+            {
+                // Prefer the cfg path in messaging even if create failed; search still
+                // walks every candidate.
+            }
+        }
+
         foreach (var candidate in EnumerateScreenshotDirectoryCandidates())
         {
             if (Directory.Exists(candidate))
                 return candidate;
         }
 
-        return DefaultScreenshotsDirectory;
+        return configured ?? DefaultScreenshotsDirectory;
     }
 
     public static IEnumerable<string> EnumerateScreenshotDirectoryCandidates()
-    {
-        var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        => FfxivCfgScreenshotDir.EnumerateScreenshotDirectoryCandidates(
+            FfxivCfgScreenshotDir.TryReadConfiguredDirectory(),
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
 
-        yield return DefaultScreenshotsDirectory;
-        yield return Path.Combine(documents, "My Games", "FINAL FANTASY XIV", "screenshots");
-        yield return Path.Combine(userProfile, "Documents", "My Games", "FINAL FANTASY XIV - A Realm Reborn", "screenshots");
-        yield return Path.Combine(userProfile, "Documents", "My Games", "FINAL FANTASY XIV", "screenshots");
+    public static string FormatStatus()
+    {
+        var api = CaptureApiSnapshot();
+        var configured = FfxivCfgScreenshotDir.TryReadConfiguredDirectory() ?? "(unset)";
+        var cfgFiles = string.Join(", ", FfxivCfgScreenshotDir.EnumerateCfgFileCandidates().Where(File.Exists));
+        if (string.IsNullOrEmpty(cfgFiles))
+            cfgFiles = "(none found)";
+        var resolved = ResolveScreenshotsDirectory();
+        var dirs = string.Join(" | ", EnumerateScreenshotDirectoryCandidates());
+        var instance = api.InstanceAvailable ? "yes" : "null";
+        return
+            $"Instance={instance} CanTake={api.CanTake} Requested={api.Requested} Result={api.Result} " +
+            $"Location={api.Location ?? "(none)"} Timestamp={api.Timestamp} " +
+            $"cfgScreenShotDir={configured} cfgFiles=[{cfgFiles}] resolved={resolved} candidates=[{dirs}]";
     }
+
+    /// <summary>
+    /// Newest screenshot across every candidate directory, not just the first existing one.
+    /// </summary>
+    public static string? TryFindNewestScreenshot(DateTime notBeforeUtc)
+        => TryFindNewestScreenshot(EnumerateScreenshotDirectoryCandidates(), notBeforeUtc);
 
     public static string? TryFindNewestScreenshot(string? directory, DateTime notBeforeUtc)
     {
-        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
-            return null;
+        if (string.IsNullOrWhiteSpace(directory))
+            return TryFindNewestScreenshot(notBeforeUtc);
+        return TryFindNewestScreenshot([directory], notBeforeUtc);
+    }
 
-        try
+    public static string? TryFindNewestScreenshot(IEnumerable<string> directories, DateTime notBeforeUtc)
+    {
+        FileInfo? best = null;
+        foreach (var directory in directories.Where(d => !string.IsNullOrWhiteSpace(d)).Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            return Directory.EnumerateFiles(directory)
-                .Where(IsScreenshotFile)
-                .Select(p => new FileInfo(p))
-                .Where(f => f.LastWriteTimeUtc >= notBeforeUtc)
-                .OrderByDescending(f => f.LastWriteTimeUtc)
-                .ThenByDescending(f => f.Name, StringComparer.OrdinalIgnoreCase)
-                .Select(f => f.FullName)
-                .FirstOrDefault();
+            if (!Directory.Exists(directory))
+                continue;
+
+            try
+            {
+                foreach (var path in Directory.EnumerateFiles(directory))
+                {
+                    if (!IsScreenshotFile(path))
+                        continue;
+                    var info = new FileInfo(path);
+                    if (info.LastWriteTimeUtc < notBeforeUtc)
+                        continue;
+                    if (best == null
+                        || info.LastWriteTimeUtc > best.LastWriteTimeUtc
+                        || (info.LastWriteTimeUtc == best.LastWriteTimeUtc
+                            && string.Compare(info.Name, best.Name, StringComparison.OrdinalIgnoreCase) > 0))
+                    {
+                        best = info;
+                    }
+                }
+            }
+            catch
+            {
+                // skip unreadable folders
+            }
         }
-        catch
-        {
-            return null;
-        }
+
+        return best?.FullName;
     }
 
     private static bool IsScreenshotFile(string path)
@@ -132,22 +254,36 @@ public static class GameScreenshot
             || ext.Equals(".bmp", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static unsafe bool TryScheduleGameScreenshot(out string detail)
+    private static unsafe string? TryReadLocation(ScreenShot* shot)
     {
-        detail = "ScreenShot.Instance null";
-        var shot = ScreenShot.Instance();
         if (shot == null)
-            return false;
+            return null;
 
-        if (!shot->CanTakeScreenShot)
+        try
         {
-            detail = "CanTakeScreenShot=false";
-            // Still try — the flag can be stale; a false return falls through.
-        }
+            // ScreenShotLocation is private FileAccessPath @ 0x78 in current ClientStructs.
+            var basePtr = (byte*)shot + ScreenShotLocationOffset;
+            var longPtr = *(char**)(basePtr + FileAccessPathLongStringOffset);
+            if (longPtr != null)
+            {
+                var longText = new string(longPtr);
+                if (!string.IsNullOrWhiteSpace(longText) && longText.Length < 1024)
+                    return longText.Trim();
+            }
 
-        var ok = shot->ScheduleScreenShot(null, null);
-        detail = ok ? "ScheduleScreenShot" : "ScheduleScreenShot returned false";
-        return ok;
+            var chars = (char*)basePtr;
+            var len = 0;
+            while (len < FileAccessPathBufferChars && chars[len] != '\0')
+                len++;
+            if (len == 0)
+                return null;
+            var text = new string(chars, 0, len).Trim();
+            return string.IsNullOrWhiteSpace(text) ? null : text;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static unsafe bool TrySendBoundScreenshotKey(out string detail)

@@ -103,6 +103,7 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
     private DateTime _nextAutoplayHeartbeatUtc = DateTime.MinValue;
     private bool _snapRequested;
     private bool _screenshotRequested;
+    private bool _screenshotInFlight;
 
     public Task LoadAsync(CancellationToken cancellationToken)
     {
@@ -141,7 +142,7 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "/mj — toggle debug window | /mj overlay | /mj compact | /mj auto | /mj pause | /mj leave | /mj snap | /mj screenshot | /mj mark discard|call | /mj probecallback <a> <b> [run] | /mj clicktile <nodeIndex> [run]"
+            HelpMessage = "/mj — toggle debug window | /mj overlay | /mj compact | /mj auto | /mj pause | /mj leave | /mj snap | /mj screenshot [status] | /mj mark discard|call | /mj probecallback <a> <b> [run] | /mj clicktile <nodeIndex> [run]"
         });
 
         // Tell the UI system that we want our windows to be drawn through the window system
@@ -188,7 +189,7 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
         if (_screenshotRequested)
         {
             _screenshotRequested = false;
-            FireGameScreenshot();
+            StartGameScreenshot();
         }
 
         var readerStatus = _emjReader.Status;
@@ -859,11 +860,26 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
             _snapRequested = true;
             Log.Information("/mj snap queued — writing sidecar JSON on the next framework tick");
         }
+        else if (lower is "screenshot status" or "printscreen status")
+        {
+            PrintScreenshotStatus();
+        }
         else if (lower is "screenshot" or "printscreen")
         {
             // KAN-55: game PNG via ScreenShot API / bound key / VK_SNAPSHOT. Snap stays JSON-only.
-            _screenshotRequested = true;
-            Log.Information("/mj screenshot queued — firing the game screenshot on the next framework tick");
+            if (_screenshotInFlight)
+            {
+                var busy = "/mj screenshot already in progress — wait for Result/Location (or stuck) before retrying";
+                Log.Information(busy);
+                LogToFile("autoplay.log", $"[SCREENSHOT] {busy}");
+                try { ChatGui.Print(busy); } catch { }
+                AppendRecentTransition($"{DateTime.UtcNow:O} {busy}");
+            }
+            else
+            {
+                _screenshotRequested = true;
+                Log.Information("/mj screenshot queued — firing the game screenshot on the next framework tick");
+            }
         }
         else if (lower == "mark discard")
         {
@@ -1305,64 +1321,6 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
             Log.Warning(ex, "/mj snap failed");
             LogToFile("autoplay.log", $"[SNAP] failed: {ex.Message}");
         }
-    }
-
-    private void FireGameScreenshot()
-    {
-        var requestedAtUtc = DateTime.UtcNow;
-        var folder = GameScreenshot.ResolveScreenshotsDirectory();
-        GameScreenshot.TriggerResult result;
-        try
-        {
-            result = GameScreenshot.TryTrigger();
-        }
-        catch (Exception ex)
-        {
-            result = new GameScreenshot.TriggerResult(false, GameScreenshot.TriggerMethod.None, ex.Message);
-        }
-
-        var method = result.Method switch
-        {
-            GameScreenshot.TriggerMethod.GameApi => "game API (ScheduleScreenShot)",
-            GameScreenshot.TriggerMethod.BoundKey => $"bound KEY_SCREENSHOT ({result.Detail})",
-            GameScreenshot.TriggerMethod.PrintScreenFallback => "VK_SNAPSHOT / PrintScreen fallback",
-            _ => $"failed ({result.Detail})",
-        };
-
-        var msg = result.Fired
-            ? $"/mj screenshot fired via {method}. PNG should land in {folder} (hide UI / Scroll Lock is not toggled)."
-            : $"/mj screenshot did not fire ({result.Detail}). Manual PrintScreen still works; folder {folder}.";
-
-        Log.Information(msg);
-        LogToFile("autoplay.log", $"[SCREENSHOT] {msg}");
-        try { ChatGui.Print(msg); } catch { }
-        AppendRecentTransition($"{DateTime.UtcNow:O} {msg}");
-
-        if (!result.Fired)
-            return;
-
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await Task.Delay(2000).ConfigureAwait(false);
-                var newest = GameScreenshot.TryFindNewestScreenshot(folder, requestedAtUtc.AddSeconds(-2));
-                var followUp = newest != null
-                    ? $"/mj screenshot wrote {newest}"
-                    : $"/mj screenshot: no new file detected yet — check {folder}";
-                await Framework.RunOnFrameworkThread(() =>
-                {
-                    Log.Information(followUp);
-                    LogToFile("autoplay.log", $"[SCREENSHOT] {followUp}");
-                    try { ChatGui.Print(followUp); } catch { }
-                    AppendRecentTransition($"{DateTime.UtcNow:O} {followUp}");
-                }).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                Log.Warning(ex, "/mj screenshot follow-up failed");
-            }
-        });
     }
 
     private void LeaveStuckMatch()

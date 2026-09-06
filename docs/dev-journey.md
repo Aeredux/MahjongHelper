@@ -1,5 +1,17 @@
 # Dev Journey
 
+## 2026-09-06: KAN-55 screenshot follow-up — ScreenShotDir + async ScheduleScreenShot
+
+**What:** AZPC showed `/mj screenshot` watching the default `My Games\...\screenshots` folder while live `FFXIV.cfg` had `ScreenShotDir` = `Documents\FF14Modding\Screenshots`. First `ScheduleScreenShot` logged as fired with no file; later calls fell through to `KEY_SCREENSHOT` (`SNAPSHOT+None`) because `ScreenShotRequested` stayed true. PrintScreen is dead on that machine (ReShade/Snipping Tool).
+
+**Changes:**
+- Parse `ScreenShotDir` from OneDrive + non-OneDrive `FFXIV.cfg`; prefer that path (create if missing); scan every candidate for newest file.
+- Treat `ScheduleScreenShot` as async: log CanTake/Requested/prior Result, wait+retry once if already requested, poll until Requested clears (~5s), then report Result + Location (FileAccessPath @ 0x78) or a stuck reason. Successful schedule does not inject a key.
+- BoundKey/PrintScreen fallback no longer claims success from SendInput alone; SNAPSHOT binds get the F12 rebind hint.
+- `/mj screenshot status` dumps API flags + resolved dirs. Pure cfg parser is unit-tested (no game).
+
+**Result:** Cloud VM still cannot press a live client. AZPC: Release rebuild + reload, `/mj screenshot status` should show the FF14Modding folder, then `/mj screenshot` should print Result/Location or stuck — not a false “fired via game API”.
+
 ## 2026-09-05: KAN-55 `/mj screenshot` via game API / PrintScreen
 
 **What:** Added `/mj screenshot` (alias `/mj printscreen`) on master after KAN-12 NativeAddon. `/mj snap` stays JSON-only.

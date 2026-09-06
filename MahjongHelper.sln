@@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MahjongHelper", "MahjongHel
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KamiToolKit", "KamiToolKit\KamiToolKit.csproj", "{7C9A2E41-6B3F-4A1D-9C0E-2F8A4B6D1E70}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MahjongHelper.Tests", "MahjongHelper.Tests\MahjongHelper.Tests.csproj", "{B4E8C2A1-9D17-4F3A-8E6B-1C2D3E4F5A60}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -21,6 +23,10 @@ Global
 		{7C9A2E41-6B3F-4A1D-9C0E-2F8A4B6D1E70}.Debug|x64.Build.0 = Debug|x64
 		{7C9A2E41-6B3F-4A1D-9C0E-2F8A4B6D1E70}.Release|x64.ActiveCfg = Release|x64
 		{7C9A2E41-6B3F-4A1D-9C0E-2F8A4B6D1E70}.Release|x64.Build.0 = Release|x64
+		{B4E8C2A1-9D17-4F3A-8E6B-1C2D3E4F5A60}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{B4E8C2A1-9D17-4F3A-8E6B-1C2D3E4F5A60}.Debug|x64.Build.0 = Debug|Any CPU
+		{B4E8C2A1-9D17-4F3A-8E6B-1C2D3E4F5A60}.Release|x64.ActiveCfg = Release|Any CPU
+		{B4E8C2A1-9D17-4F3A-8E6B-1C2D3E4F5A60}.Release|x64.Build.0 = Release|Any CPU
 		{4FEC9558-EB25-419F-B86E-51B8CFDA32B7}.Debug|x64.ActiveCfg = Debug|x64
 		{4FEC9558-EB25-419F-B86E-51B8CFDA32B7}.Debug|x64.Build.0 = Debug|x64
 		{4FEC9558-EB25-419F-B86E-51B8CFDA32B7}.Release|x64.ActiveCfg = Release|x64

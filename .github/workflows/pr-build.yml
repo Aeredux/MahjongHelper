@@ -23,6 +23,9 @@ jobs:
       with:
         dotnet-version: 10.0.x
 
+    - name: Unit tests (cfg parser)
+      run: dotnet test MahjongHelper.Tests/MahjongHelper.Tests.csproj --configuration Release
+
     - name: Download Dalamud
       run: |
         Invoke-WebRequest -Uri https://goatcorp.github.io/dalamud-distrib/latest.zip -OutFile latest.zip
