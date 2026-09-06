@@ -413,9 +413,9 @@ public class OpponentAreaClassifierTests
     [Fact]
     public void Live_7ad3d5d_type2_faces_seat_own_and_across_without_echo_or_tray()
     {
-        // snap-20260906-081032563: type-2 40×52 leaves. Across CHI P2/P3/P4.
-        // Own PON WEST + CHI M1-M3 on the player band. AbsY≈500 echo and the
-        // 192×52 type-1038 tray must not become opposite/left melds.
+        // snap-20260906-081032563 + user/screenshot: own fuuro is only CHI
+        // M1-M2-M3. Upright WEST×3 at 1391–1484 are ghosts, not a PON.
+        // Across CHI P2/P3/P4 stays. Echo and 192×52 tray stay out.
         var leftovers = new List<OpponentAreaClassifier.Tile>
         {
             Area(0, 0, 0, 1041, 410, 40, 52, parent: 300, "P2", nodeType: 2),
@@ -464,11 +464,11 @@ public class OpponentAreaClassifierTests
         var acrossCodes = across.TileIds.Select(id => leftovers[id].TileCode!).ToList();
         Assert.Equal("CHI", MeldClassifier.InferMeld(acrossCodes)!.Type);
 
-        var own = assignments.Where(a => a.Kind == SmallTileClassifier.Kind.PlayerMeld).ToList();
-        Assert.Equal(2, own.Count);
-        var ownCodes = own.Select(a => a.TileIds.Select(id => leftovers[id].TileCode!).ToList()).ToList();
-        Assert.Contains(ownCodes, g => MeldClassifier.InferMeld(g)?.Type == "PON" && g.All(c => c == "WEST"));
-        Assert.Contains(ownCodes, g => MeldClassifier.InferMeld(g)?.Type == "CHI");
+        var own = Assert.Single(assignments, a => a.Kind == SmallTileClassifier.Kind.PlayerMeld);
+        Assert.Equal([19, 20, 21], own.TileIds);
+        Assert.DoesNotContain(assignments, a => a.TileIds.Any(id => id is >= 16 and <= 18));
+        var ownCodes = own.TileIds.Select(id => leftovers[id].TileCode!).ToList();
+        Assert.Equal("CHI", MeldClassifier.InferMeld(ownCodes)!.Type);
 
         var summary = SolverJson.BuildSnapSummary(new SuggestMoveRequest
         {
@@ -478,7 +478,6 @@ public class OpponentAreaClassifierTests
             RoundWind = "EAST",
             Melds =
             [
-                new MeldInfo { Type = "PON", Tiles = ["WEST", "WEST", "WEST"] },
                 new MeldInfo { Type = "CHI", Tiles = ["M2", "M1", "M3"] },
             ],
             Opponents =
@@ -492,7 +491,7 @@ public class OpponentAreaClassifierTests
                 new OpponentInfo { Wind = "NORTH" },
             ],
         });
-        Assert.Contains("ownMelds=2", summary);
+        Assert.Contains("ownMelds=1", summary);
         Assert.Contains("oppMelds=1", summary);
     }
 

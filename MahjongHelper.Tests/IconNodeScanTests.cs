@@ -64,6 +64,26 @@ public class IconNodeScanTests
     }
 
     [Fact]
+    public void Upright_type2_west_triple_has_no_call_cue()
+    {
+        var ghosts = new (ushort Type, int W, int H, float Rot)[]
+        {
+            (2, 40, 52, 0),
+            (2, 40, 52, 0),
+            (2, 40, 52, 0),
+        };
+        Assert.False(IconNodeScan.FaceLeafGroupHasCallCue(ghosts, t => t.Type, t => t.W, t => t.H, t => t.Rot));
+
+        var chi = new (ushort Type, int W, int H, float Rot)[]
+        {
+            (2, 40, 52, 0),
+            (2, 40, 52, 0),
+            (2, 52, 40, 0),
+        };
+        Assert.True(IconNodeScan.FaceLeafGroupHasCallCue(chi, t => t.Type, t => t.W, t => t.H, t => t.Rot));
+    }
+
+    [Fact]
     public void PreferLeafTiles_keeps_the_smaller_node_at_the_same_spot()
     {
         var nodes = new (uint Icon, float X, float Y, int W, int H)[]

@@ -112,7 +112,9 @@ public static class HandStripClassifier
         {
             for (var i = 1; i < clusters.Count; i++)
             {
-                if (clusters[i].Count >= 2 && (peelDraw == null || clusters[i].All(t => t.Id != peelDraw.Value.Id)))
+                if (clusters[i].Count >= 2
+                    && (peelDraw == null || clusters[i].All(t => t.Id != peelDraw.Value.Id))
+                    && FaceLeafGroupAllowed(clusters[i]))
                     AddMeld(clusters[i]);
             }
         }
@@ -159,7 +161,7 @@ public static class HandStripClassifier
         {
             if (group.Key == 0 || group.Key == primary)
                 continue;
-            if (group.Count() >= 2)
+            if (group.Count() >= 2 && FaceLeafGroupAllowed(group))
                 addMeld(group);
         }
     }
@@ -301,7 +303,8 @@ public static class HandStripClassifier
             {
                 var four = ordered.GetRange(i, 4);
                 var meld4 = MeldClassifier.InferMeld(four.Select(t => t.TileCode!).ToList());
-                if (meld4 != null && meld4.Type.StartsWith("KAN", StringComparison.Ordinal))
+                if (meld4 != null && meld4.Type.StartsWith("KAN", StringComparison.Ordinal)
+                    && FaceLeafGroupAllowed(four))
                 {
                     addMeld(four);
                     i += 4;
@@ -312,7 +315,8 @@ public static class HandStripClassifier
             if (ordered.Count - i >= 3)
             {
                 var three = ordered.GetRange(i, 3);
-                if (MeldClassifier.InferMeld(three.Select(t => t.TileCode!).ToList()) != null)
+                if (MeldClassifier.InferMeld(three.Select(t => t.TileCode!).ToList()) != null
+                    && FaceLeafGroupAllowed(three))
                 {
                     addMeld(three);
                     i += 3;
@@ -322,7 +326,8 @@ public static class HandStripClassifier
 
             if (ordered.Count - i >= 2
                 && SameKey(ordered[i], ordered[i + 1])
-                && (ordered.Count - i == 2 || !SameKey(ordered[i], ordered[i + 2])))
+                && (ordered.Count - i == 2 || !SameKey(ordered[i], ordered[i + 2]))
+                && FaceLeafGroupAllowed(ordered.GetRange(i, 2)))
             {
                 addMeld(ordered.GetRange(i, 2));
                 i += 2;
@@ -424,4 +429,8 @@ public static class HandStripClassifier
                MeldClassifier.CanonicalKey(a.TileCode!),
                MeldClassifier.CanonicalKey(b.TileCode!),
                StringComparison.Ordinal);
+
+    private static bool FaceLeafGroupAllowed(IEnumerable<Tile> group)
+        => IconNodeScan.FaceLeafGroupHasCallCue(
+            group, t => t.NodeType, t => t.Width, t => t.Height, t => t.Rotation);
 }

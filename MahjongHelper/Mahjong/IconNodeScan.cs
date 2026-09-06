@@ -45,6 +45,29 @@ public static class IconNodeScan
                || (width == FaceLeafLongPx && height == FaceLeafShortPx));
 
     /// <summary>
+    /// Open fuuro always has a sideways called tile. Live AZPC after 99e663f
+    /// invented PON WEST from three upright type-2 40×52 ghosts on the player
+    /// band (no 52×40 / 90° cue). Real own CHI had one 52×40 leaf.
+    /// </summary>
+    public static bool HasCallCue(int width, int height, float rotation = 0)
+        => SmallTileClassifier.IsSideways(rotation, width, height);
+
+    public static bool FaceLeafGroupHasCallCue<T>(
+        IEnumerable<T> tiles,
+        Func<T, ushort> nodeType,
+        Func<T, int> width,
+        Func<T, int> height,
+        Func<T, float> rotation)
+    {
+        var list = tiles.ToList();
+        if (list.Count == 0)
+            return false;
+        if (!list.All(t => IsFaceLeaf(nodeType(t), width(t), height(t))))
+            return true;
+        return list.Any(t => HasCallCue(width(t), height(t), rotation(t)));
+    }
+
+    /// <summary>
     /// Live parent-60 strip: seven type-1045 34×45 tiles at AbsY≈512 that
     /// shadow a previous hand. Never treat these as fuuro.
     /// </summary>

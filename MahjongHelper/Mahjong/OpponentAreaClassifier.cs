@@ -73,6 +73,8 @@ public static class OpponentAreaClassifier
                 var kind = GuessOwner(group, pondHints, playerStripAbsY, tableCenterX, tableCenterY);
                 if (!onPlayerStrip && kind == SmallTileClassifier.Kind.LeftMeld && group.Count >= 5)
                     continue;
+                if (kind == SmallTileClassifier.Kind.PlayerMeld && !FaceLeafGroupAllowed(group))
+                    continue;
                 result.Add(new Assignment(kind, group.Select(t => t.Id).ToList()));
             }
         }
@@ -104,7 +106,8 @@ public static class OpponentAreaClassifier
     internal static List<List<Tile>> SplitFuuroGroups(List<Tile> cluster, bool allowSplit)
     {
         if (cluster.Count is >= 2 and <= 4
-            && SmallTileClassifier.LooksLikeOpenMeld(cluster.Select(ToSmall).ToList()))
+            && SmallTileClassifier.LooksLikeOpenMeld(cluster.Select(ToSmall).ToList())
+            && (!allowSplit || FaceLeafGroupAllowed(cluster)))
             return [cluster];
 
         if (!allowSplit || cluster.Count < 3)
@@ -122,7 +125,8 @@ public static class OpponentAreaClassifier
             {
                 var four = ordered.GetRange(i, 4);
                 var meld4 = MeldClassifier.InferMeld(four.Select(t => t.TileCode!).ToList());
-                if (meld4 != null && meld4.Type.StartsWith("KAN", StringComparison.Ordinal))
+                if (meld4 != null && meld4.Type.StartsWith("KAN", StringComparison.Ordinal)
+                    && FaceLeafGroupAllowed(four))
                 {
                     groups.Add(four);
                     i += 4;
@@ -133,7 +137,8 @@ public static class OpponentAreaClassifier
             if (ordered.Count - i >= 3)
             {
                 var three = ordered.GetRange(i, 3);
-                if (MeldClassifier.InferMeld(three.Select(t => t.TileCode!).ToList()) != null)
+                if (MeldClassifier.InferMeld(three.Select(t => t.TileCode!).ToList()) != null
+                    && FaceLeafGroupAllowed(three))
                 {
                     groups.Add(three);
                     i += 3;
@@ -260,4 +265,8 @@ public static class OpponentAreaClassifier
     private static float AbsYOf(Tile tile) => HasAbs(tile) ? tile.AbsY : tile.Y;
 
     private static int BandY(Tile tile) => (int)MathF.Round(AbsYOf(tile) / 20f) * 20;
+
+    private static bool FaceLeafGroupAllowed(IReadOnlyList<Tile> group)
+        => IconNodeScan.FaceLeafGroupHasCallCue(
+            group, t => t.NodeType, t => t.Width, t => t.Height, t => t.Rotation);
 }
