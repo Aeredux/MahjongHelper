@@ -30,9 +30,26 @@ public static unsafe class MahjongHandReader
         public PersistedTile? DrawnTile { get; set; }
     }
 
-    public sealed record MahjongTileObservation(int NodeIndex, uint NodeId, ushort NodeType, float X, float Y, uint IconId, string? TileCode);
+    public sealed record MahjongTileObservation(
+        int NodeIndex,
+        uint NodeId,
+        ushort NodeType,
+        float X,
+        float Y,
+        uint IconId,
+        string? TileCode,
+        float Rotation = 0,
+        int Width = 42,
+        int Height = 55,
+        uint ParentNodeId = 0,
+        float AbsX = 0,
+        float AbsY = 0);
 
-    public sealed record MahjongHandSnapshot(IReadOnlyList<MahjongTileObservation> HandTiles, MahjongTileObservation? DrawnTile, bool IsFromCache = false)
+    public sealed record MahjongHandSnapshot(
+        IReadOnlyList<MahjongTileObservation> HandTiles,
+        MahjongTileObservation? DrawnTile,
+        bool IsFromCache = false,
+        IReadOnlyList<IReadOnlyList<MahjongTileObservation>>? Melds = null)
     {
         public string ToDisplayText()
         {
@@ -78,6 +95,7 @@ public static unsafe class MahjongHandReader
                 : new MahjongHandSnapshot(handTiles, drawnTile);
 
         var uld = addon->UldManager;
+        var stripTiles = new List<MahjongTileObservation>();
         for (int i = 0; i < uld.NodeListCount; i++)
         {
             try
@@ -89,18 +107,48 @@ public static unsafe class MahjongHandReader
                 try { visible = node->IsVisible(); } catch { }
                 if (!visible) continue;
 
-                if ((int)node->Type == 1055 && node->Width == 42 && node->Height == 55)
+                var isHandSized = (node->Width == 42 && node->Height == 55)
+                                  || (node->Width == 55 && node->Height == 42);
+                if (isHandSized)
                 {
                     if (TryFindCapturedIcon(node, capture, out var iconId) && iconId > 0)
                     {
-                        handTiles.Add(new MahjongTileObservation(
+                        float rotation = 0;
+                        uint parentId = 0;
+                        float absX = 0;
+                        float absY = 0;
+                        try { rotation = node->Rotation; } catch { }
+                        try
+                        {
+                            var walk = node;
+                            var steps = 0;
+                            while (walk != null && steps++ < 32)
+                            {
+                                absX += walk->X;
+                                absY += walk->Y;
+                                if (steps == 1 && walk->ParentNode != null)
+                                    parentId = walk->ParentNode->NodeId;
+                                walk = walk->ParentNode;
+                            }
+                        }
+                        catch { }
+                        var observation = new MahjongTileObservation(
                             i,
                             node->NodeId,
                             (ushort)node->Type,
                             node->X,
                             node->Y,
                             iconId,
-                            iconMap?.Resolve(iconId)));
+                            iconMap?.Resolve(iconId),
+                            rotation,
+                            node->Width,
+                            node->Height,
+                            parentId,
+                            absX,
+                            absY);
+                        stripTiles.Add(observation);
+                        if (node->Width == 42 && node->Height == 55)
+                            handTiles.Add(observation);
                     }
                 }
 
@@ -125,10 +173,55 @@ public static unsafe class MahjongHandReader
         }
 
         handTiles.Sort((left, right) => left.X.CompareTo(right.X));
+        var anchors = stripTiles
+            .Where(t => t.NodeType == 1055 && t.Width == 42 && t.Height == 55
+                        && (t.NodeIndex == 54 || t.NodeIndex is >= 59 and <= 71))
+            .ToList();
+        float? stripAbsY = anchors.Count > 0
+            ? anchors.Average(t => t.AbsY != 0 || t.AbsX != 0 ? t.AbsY : t.Y)
+            : null;
+        var trays = AppendFaceLeavesOnStrip(addon, capture, iconMap, stripTiles, anchors, stripAbsY);
+        var stripForSplit = stripTiles
+            .Where(t => t.NodeIndex is < 55 or > 58)
+            .Where(t =>
+            {
+                if (stripAbsY is not float band)
+                    return true;
+                var y = t.AbsY != 0 || t.AbsX != 0 ? t.AbsY : t.Y;
+                return Math.Abs(y - band) <= OpponentAreaClassifier.PlayerStripBandPx;
+            })
+            .ToList();
+        List<List<MahjongTileObservation>> stripMelds = [];
+        if (stripForSplit.Count > 0)
+        {
+            var classified = HandStripClassifier.Split(stripForSplit
+                .Select((t, index) => new HandStripClassifier.Tile(
+                    index, t.X, t.Y, t.Width, t.Height, t.Rotation, t.ParentNodeId, t.TileCode,
+                    t.NodeIndex, t.AbsX, t.AbsY, t.NodeType))
+                .ToList(), trays);
+            var closed = classified.ClosedIds
+                .Where(id => id >= 0 && id < stripForSplit.Count)
+                .Select(id => stripForSplit[id])
+                .Where(t => t.Width == 42 && t.Height == 55)
+                .OrderBy(t => t.X)
+                .ThenBy(t => t.NodeIndex)
+                .ToList();
+            if (closed.Count > 0)
+                handTiles = closed;
+            if (classified.DrawId is int drawId && drawId >= 0 && drawId < stripForSplit.Count)
+                drawnTile = stripForSplit[drawId];
+            stripMelds = classified.MeldGroups
+                .Select(group => group
+                    .Where(id => id >= 0 && id < stripForSplit.Count)
+                    .Select(id => stripForSplit[id])
+                    .ToList())
+                .Where(group => group.Count > 0)
+                .ToList();
+        }
 
         if (handTiles.Count > 0)
         {
-            var liveSnapshot = new MahjongHandSnapshot(handTiles, drawnTile, IsFromCache: false);
+            var liveSnapshot = new MahjongHandSnapshot(handTiles, drawnTile, IsFromCache: false, Melds: stripMelds);
             SaveSnapshot(liveSnapshot);
             return liveSnapshot;
         }
@@ -248,6 +341,104 @@ public static unsafe class MahjongHandReader
             return false;
         }
     }
+
+    private static List<IconNodeScan.Tray> AppendFaceLeavesOnStrip(
+        AtkUnitBase* addon,
+        IconIdCapture capture,
+        MahjongIconMap? iconMap,
+        List<MahjongTileObservation> stripTiles,
+        List<MahjongTileObservation> anchors,
+        float? stripAbsY)
+    {
+        var trays = new List<IconNodeScan.Tray>();
+        if (addon == null || stripAbsY is not float band || anchors.Count == 0)
+            return trays;
+
+        try
+        {
+            var scanned = EmjUiReader.ScanAddonNodes(addon, capture, iconMap);
+            static float AbsXOf(MahjongTileObservation t) => t.AbsX != 0 || t.AbsY != 0 ? t.AbsX : t.X;
+            static float AbsYOf(MahjongTileObservation t) => t.AbsX != 0 || t.AbsY != 0 ? t.AbsY : t.Y;
+            static (int X, int Y) Snap(MahjongTileObservation t)
+                => ((int)MathF.Round(AbsXOf(t) / IconNodeScan.LeafSnapPx),
+                    (int)MathF.Round(AbsYOf(t) / IconNodeScan.LeafSnapPx));
+
+            var packPos = anchors.Select(Snap).ToHashSet();
+            var existing = stripTiles.Select(Snap).ToHashSet();
+
+            var faces = scanned.IconNodes
+                .Where(s => s.Visible && IconNodeScan.IsFaceLeaf(s.NodeType, s.Width, s.Height))
+                .Where(s => MeldClassifier.IsUsableTile(s.TileCode))
+                .Where(s => Math.Abs((s.AbsX != 0 || s.AbsY != 0 ? s.AbsY : s.Y) - band)
+                            <= OpponentAreaClassifier.PlayerStripBandPx)
+                .ToList();
+            faces = IconNodeScan.PreferLeafTiles(
+                    faces,
+                    s => s.IconId,
+                    s => s.AbsX != 0 || s.AbsY != 0 ? s.AbsX : s.X,
+                    s => s.AbsX != 0 || s.AbsY != 0 ? s.AbsY : s.Y,
+                    s => s.Width,
+                    s => s.Height)
+                .ToList();
+
+            foreach (var face in faces)
+            {
+                var obs = ToObservation(face);
+                var key = Snap(obs);
+                if (packPos.Contains(key) || existing.Contains(key))
+                    continue;
+                existing.Add(key);
+                stripTiles.Add(obs);
+            }
+
+            foreach (var cue in scanned.IconNodes)
+            {
+                if (!cue.Visible
+                    || !IconNodeScan.IsCallCueNode(cue.NodeType, cue.Width, cue.Height, cue.Rotation)
+                    || !MeldClassifier.IsUsableTile(cue.TileCode))
+                    continue;
+                if (Math.Abs((cue.AbsX != 0 || cue.AbsY != 0 ? cue.AbsY : cue.Y) - band)
+                    > OpponentAreaClassifier.PlayerStripBandPx)
+                    continue;
+                stripTiles.Add(ToObservation(cue));
+            }
+
+            foreach (var slot in scanned.IconNodes)
+            {
+                if (!slot.Visible || !IconNodeScan.IsFuuroTray(slot.NodeType, slot.Width, slot.Height))
+                    continue;
+                if (Math.Abs((slot.AbsX != 0 || slot.AbsY != 0 ? slot.AbsY : slot.Y) - band)
+                    > OpponentAreaClassifier.PlayerStripBandPx)
+                    continue;
+                trays.Add(new IconNodeScan.Tray(
+                    slot.AbsX != 0 || slot.AbsY != 0 ? slot.AbsX : slot.X,
+                    slot.AbsX != 0 || slot.AbsY != 0 ? slot.AbsY : slot.Y,
+                    slot.Width,
+                    slot.Height));
+            }
+        }
+        catch
+        {
+        }
+
+        return trays;
+    }
+
+    private static MahjongTileObservation ToObservation(EmjUiReader.UiSlot slot)
+        => new(
+            slot.NodeIndex,
+            slot.NodeId,
+            slot.NodeType,
+            slot.X,
+            slot.Y,
+            slot.IconId,
+            slot.TileCode,
+            slot.Rotation,
+            slot.Width,
+            slot.Height,
+            slot.ParentNodeId,
+            slot.AbsX,
+            slot.AbsY);
 
     private static bool TryFindCapturedIcon(AtkResNode* root, IconIdCapture capture, out uint iconId)
     {

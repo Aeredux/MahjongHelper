@@ -21,7 +21,7 @@ The in-game **suggestion overlay** and **settings window** are KamiToolKit Nativ
   - Server provider (uses local HTTP API responses)
 - Talks to a local Mahjong server at `http://localhost:8080`:
   - `GET /api/health`
-  - `POST /api/suggest-move`
+  - `POST /api/suggest-move` (hand, draw, opponents, seat/round wind, plus KAN-54: `dora`, aka `M0`/`P0`/`S0`, `discard_tiles` own pond, real `tsumogiri`, own+opponent `melds`)
   - `POST /api/evaluate-call`
   - `POST /api/validate-move`
 - Optional auto-play behavior:
@@ -41,8 +41,8 @@ Main command: `/mj`
 - `/mj auto` toggles auto-play.
 - `/mj pause` pauses/resumes pending auto-play actions.
 - `/mj leave` withdraws and closes a stuck NPC mahjong match (FireCallback 16 then 19). Overlay **Leave** asks for confirmation first.
-- `/mj snap` writes overlay/suggestion sidecar JSON under `%APPDATA%/MahjongHelper/captures/` (plus a `request_snap` file-watch fallback). JSON-only — it does **not** take a PNG. `scripts/mj-snap.ps1` POSTs Telesto ExecuteCommand to `http://localhost:45678/` (Host **localhost**, not `127.0.0.1`). The plugin keeps the last 10 capture files.
-- `/mj screenshot` (alias `/mj printscreen`) writes a PNG we control via **CaptureFallback** first (Dalamud viewport/backbuffer of the game scene, then GDI `PrintWindow`/`BitBlt` of the FFXIV HWND) — it does **not** wait ~5s on `ScheduleScreenShot`. Files land in `%APPDATA%/MahjongHelper/screenshots/mj-*.png` and are copied into cfg `ScreenShotDir` when writable. Chat names the method (`CaptureFallback/DalamudViewport`, `CaptureFallback/PrintWindow`, …). `/mj screenshot game` is the optional Square-writer path (async `ScheduleScreenShot`, FORCE-CLEAR / stuck recovery, then CaptureFallback). `/mj screenshot status` dumps CanTake / Requested / Result / LocationOnDisk / lastMethod / lastPath. `/mj snap` stays JSON-only. Telesto is not required. Hide UI / Scroll Lock is **not** toggled.
+- `/mj snap` writes overlay/suggestion sidecar JSON under `%APPDATA%/MahjongHelper/captures/` (plus a `request_snap` file-watch fallback). It also writes the current solver POST body (`suggest-move`) to `%APPDATA%/MahjongHelper/solver_snap.json` and prints a field summary (dora, aka, own pond, tsumogiri count, melds, winds). JSON-only — it does **not** take a PNG. `scripts/mj-snap.ps1` POSTs Telesto ExecuteCommand to `http://localhost:45678/` (Host **localhost**, not `127.0.0.1`). Required telegram shape and the missing-`id` error are documented in [`docs/telesto.md`](docs/telesto.md). The plugin keeps the last 10 capture files. Use solver_snap.json with autoplay off after a Release rebuild + plugin reload.
+- `/mj screenshot` (alias `/mj printscreen`) writes a PNG we control via **CaptureFallback** first (Dalamud viewport/backbuffer of the game scene, then GDI `PrintWindow`/`BitBlt` of the FFXIV HWND) — it does **not** wait ~5s on `ScheduleScreenShot`. Files land in `%APPDATA%/MahjongHelper/screenshots/mj-*.png` and are copied into cfg `ScreenShotDir` when writable. Chat names the method (`CaptureFallback/DalamudViewport`, `CaptureFallback/PrintWindow`, …). `/mj screenshot game` is the optional Square-writer path (async `ScheduleScreenShot`, FORCE-CLEAR / stuck recovery, then CaptureFallback). `/mj screenshot status` dumps CanTake / Requested / Result / LocationOnDisk / lastMethod / lastPath. `/mj snap` stays JSON-only (captures sidecar + `solver_snap.json`). Telesto is not required. Hide UI / Scroll Lock is **not** toggled.
 - `/mj mark discard` records a manual discard marker in diagnostics.
 - `/mj mark call` records a manual call marker in diagnostics.
 
@@ -105,6 +105,7 @@ Mahjong Helper writes debug artifacts to:
 Common files include:
 
 - `server_log.txt` (HTTP request/response logs)
+- `solver_snap.json` / `solver_snap.log` (`/mj snap` payload + summary)
 - `autoplay.log` (auto-play action traces)
 - `captures/` (`/mj snap` sidecar JSON; last 10 files kept)
 - `screenshots/` (`/mj screenshot` CaptureFallback PNGs)

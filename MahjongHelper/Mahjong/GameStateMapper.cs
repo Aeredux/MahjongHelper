@@ -5,8 +5,7 @@ namespace MahjongHelper.Mahjong;
 
 /// <summary>
 /// Converts MahjongGameState into server API request objects.
-/// Tile codes from the icon map may include red dora notation (M0/P0/S0),
-/// which are normalized to regular 5s (M5/P5/S5) for the server.
+/// Aka tiles stay as M0/P0/S0. Doman dora panel tiles are sent as-is (no Tenhou remap).
 /// </summary>
 public static class GameStateMapper
 {
@@ -17,21 +16,6 @@ public static class GameStateMapper
         [2] = "WEST",
         [3] = "NORTH",
     };
-
-    /// <summary>
-    /// Normalizes red dora tiles (M0/P0/S0) to regular 5s (M5/P5/S5).
-    /// The server's TileType enum does not accept red dora notation.
-    /// </summary>
-    private static string NormalizeTile(string tile)
-    {
-        return tile switch
-        {
-            "M0" => "M5",
-            "P0" => "P5",
-            "S0" => "S5",
-            _ => tile
-        };
-    }
 
     /// <summary>
     /// Builds a suggest-move request from the current game state.
@@ -54,6 +38,10 @@ public static class GameStateMapper
             hand.RemoveAt(hand.Count - 1);
         }
 
+        var playerMelds = ToMeldInfos(state.PlayerMelds.Value);
+        var playerPond = BuildPond(state.PlayerDiscards.Value, state.PlayerTsumogiri.Value);
+        var player = BuildPlayerInfo(state, playerPond, playerMelds);
+
         return new SuggestMoveRequest
         {
             Hand = hand,
@@ -61,6 +49,10 @@ public static class GameStateMapper
             Opponents = BuildOpponents(state),
             SeatWind = state.SeatWind.Value is int sw ? WindNames.GetValueOrDefault(sw) : null,
             RoundWind = state.RoundWind.Value is int rw ? WindNames.GetValueOrDefault(rw) : null,
+            Dora = FilterValidTiles(state.DoraIndicators.Value),
+            DiscardTiles = playerPond.Select(d => d.Tile).ToList(),
+            Melds = playerMelds,
+            Player = player,
         };
     }
 
@@ -83,22 +75,29 @@ public static class GameStateMapper
         if (hand == null || hand.Count == 0)
             return null;
 
+        var playerMelds = ToMeldInfos(state.PlayerMelds.Value);
+        var playerPond = BuildPond(state.PlayerDiscards.Value, state.PlayerTsumogiri.Value);
+        var hasOpenMeld = playerMelds.Exists(m => MeldClassifier.IsOpenMeld(m.Type));
+
         return new EvaluateCallRequest
         {
             Hand = hand,
-            CallTile = callTile != null ? NormalizeTile(callTile) : null,
+            CallTile = MeldClassifier.IsUsableTile(callTile) ? callTile : null,
             CallType = callType?.ToUpperInvariant(),
-            Menzen = true,
+            Menzen = !hasOpenMeld,
             PlayerScore = state.PlayerScore.Value is int ps and > 0 ? ps : null,
             Opponents = BuildOpponents(state),
             SeatWind = state.SeatWind.Value is int sw ? WindNames.GetValueOrDefault(sw) : null,
             RoundWind = state.RoundWind.Value is int rw ? WindNames.GetValueOrDefault(rw) : null,
+            Dora = FilterValidTiles(state.DoraIndicators.Value),
+            DiscardTiles = playerPond.Select(d => d.Tile).ToList(),
+            Melds = playerMelds,
+            Player = BuildPlayerInfo(state, playerPond, playerMelds),
         };
     }
 
     /// <summary>
-    /// Resolves the player's hand tile codes from icon IDs.
-    /// Normalizes red dora tiles (M0/P0/S0) to regular 5s for the server.
+    /// Resolves the player's hand tile codes from icon IDs, preserving aka (M0/P0/S0).
     /// </summary>
     private static List<string>? ResolveHand(MahjongGameState state, MahjongIconMap iconMap)
     {
@@ -110,28 +109,44 @@ public static class GameStateMapper
         {
             var code = iconMap.Resolve(id);
             if (code != null)
-                tiles.Add(NormalizeTile(code));
+                tiles.Add(code);
         }
 
         return tiles.Count > 0 ? tiles : null;
     }
 
     /// <summary>
-    /// Resolves the drawn tile code from its icon ID.
-    /// Normalizes red dora tiles (M0/P0/S0) to regular 5s for the server.
+    /// Resolves the drawn tile code from its icon ID, preserving aka (M0/P0/S0).
     /// </summary>
     private static string? ResolveDrawnTile(MahjongGameState state, MahjongIconMap iconMap)
     {
         if (state.DrawIconId.Value is uint drawId and > 0)
-        {
-            var code = iconMap.Resolve(drawId);
-            return code != null ? NormalizeTile(code) : null;
-        }
+            return iconMap.Resolve(drawId);
         return null;
     }
 
+    private static OpponentInfo? BuildPlayerInfo(
+        MahjongGameState state,
+        List<DiscardedTile> pond,
+        List<MeldInfo> melds)
+    {
+        var riichiStatus = state.RiichiStatus.Value;
+        var riichi = riichiStatus is { Count: >= 1 } && riichiStatus[0];
+        var wind = state.SeatWind.Value is int sw ? WindNames.GetValueOrDefault(sw) : null;
+        if (pond.Count == 0 && melds.Count == 0 && !riichi && wind == null)
+            return null;
+
+        return new OpponentInfo
+        {
+            Wind = wind,
+            Discards = pond,
+            Riichi = riichi,
+            Melds = melds,
+        };
+    }
+
     /// <summary>
-    /// Builds opponent info list from state discard pools and riichi status.
+    /// Builds opponent info list from state discard pools, tsumogiri, riichi, and melds.
     /// Opponents are: Right (index 1), Opposite (index 2), Left (index 3).
     /// </summary>
     private static List<OpponentInfo>? BuildOpponents(MahjongGameState state)
@@ -140,43 +155,37 @@ public static class GameStateMapper
         var riichiStatus = state.RiichiStatus.Value;
         var seatWind = state.SeatWind.Value is int sw ? sw : -1;
 
-        // Right opponent
-        var rightDiscards = FilterValidTiles(state.RightDiscards.Value);
-        if (rightDiscards.Count > 0 || (riichiStatus is { Count: >= 4 } && riichiStatus[1]))
-        {
-            opponents.Add(new OpponentInfo
-            {
-                Wind = GetOpponentWind(seatWind, 1),
-                Discards = rightDiscards.Select(t => new DiscardedTile { Tile = t }).ToList(),
-                Riichi = riichiStatus is { Count: >= 4 } && riichiStatus[1],
-            });
-        }
-
-        // Opposite opponent
-        var oppositeDiscards = FilterValidTiles(state.OppositeDiscards.Value);
-        if (oppositeDiscards.Count > 0 || (riichiStatus is { Count: >= 4 } && riichiStatus[2]))
-        {
-            opponents.Add(new OpponentInfo
-            {
-                Wind = GetOpponentWind(seatWind, 2),
-                Discards = oppositeDiscards.Select(t => new DiscardedTile { Tile = t }).ToList(),
-                Riichi = riichiStatus is { Count: >= 4 } && riichiStatus[2],
-            });
-        }
-
-        // Left opponent
-        var leftDiscards = FilterValidTiles(state.LeftDiscards.Value);
-        if (leftDiscards.Count > 0 || (riichiStatus is { Count: >= 4 } && riichiStatus[3]))
-        {
-            opponents.Add(new OpponentInfo
-            {
-                Wind = GetOpponentWind(seatWind, 3),
-                Discards = leftDiscards.Select(t => new DiscardedTile { Tile = t }).ToList(),
-                Riichi = riichiStatus is { Count: >= 4 } && riichiStatus[3],
-            });
-        }
+        TryAddOpponent(opponents, state.RightDiscards.Value, state.RightTsumogiri.Value, state.RightMelds.Value,
+            seatWind, 1, riichiStatus is { Count: >= 4 } && riichiStatus[1]);
+        TryAddOpponent(opponents, state.OppositeDiscards.Value, state.OppositeTsumogiri.Value, state.OppositeMelds.Value,
+            seatWind, 2, riichiStatus is { Count: >= 4 } && riichiStatus[2]);
+        TryAddOpponent(opponents, state.LeftDiscards.Value, state.LeftTsumogiri.Value, state.LeftMelds.Value,
+            seatWind, 3, riichiStatus is { Count: >= 4 } && riichiStatus[3]);
 
         return opponents.Count > 0 ? opponents : null;
+    }
+
+    private static void TryAddOpponent(
+        List<OpponentInfo> opponents,
+        IReadOnlyList<string>? discards,
+        IReadOnlyList<bool>? tsumogiri,
+        IReadOnlyList<ObservedMeld>? melds,
+        int seatWind,
+        int offset,
+        bool riichi)
+    {
+        var pond = BuildPond(discards, tsumogiri);
+        var meldInfos = ToMeldInfos(melds);
+        if (pond.Count == 0 && meldInfos.Count == 0 && !riichi)
+            return;
+
+        opponents.Add(new OpponentInfo
+        {
+            Wind = GetOpponentWind(seatWind, offset),
+            Discards = pond,
+            Riichi = riichi,
+            Melds = meldInfos,
+        });
     }
 
     /// <summary>
@@ -189,18 +198,52 @@ public static class GameStateMapper
         return WindNames.GetValueOrDefault((playerSeatWind + offset) % 4);
     }
 
+    private static List<DiscardedTile> BuildPond(IReadOnlyList<string>? tiles, IReadOnlyList<bool>? tsumogiri)
+    {
+        var result = new List<DiscardedTile>();
+        if (tiles == null || tiles.Count == 0)
+            return result;
+
+        for (var i = 0; i < tiles.Count; i++)
+        {
+            var tile = tiles[i];
+            if (!MeldClassifier.IsUsableTile(tile))
+                continue;
+            result.Add(new DiscardedTile
+            {
+                Tile = tile,
+                Tsumogiri = tsumogiri != null && i < tsumogiri.Count && tsumogiri[i],
+            });
+        }
+
+        return result;
+    }
+
+    private static List<MeldInfo> ToMeldInfos(IReadOnlyList<ObservedMeld>? melds)
+    {
+        if (melds == null || melds.Count == 0)
+            return [];
+
+        return melds
+            .Where(m => m.Tiles.Count > 0)
+            .Select(m => new MeldInfo
+            {
+                Type = m.Type,
+                Tiles = m.Tiles.Where(MeldClassifier.IsUsableTile).ToList(),
+            })
+            .Where(m => m.Tiles.Count > 0)
+            .ToList();
+    }
+
     /// <summary>
     /// Filters out placeholder/unresolved tile strings (like "?" or "ICON_*").
-    /// Normalizes red dora tiles (M0/P0/S0) to regular 5s for the server.
+    /// Preserves aka M0/P0/S0.
     /// </summary>
     private static List<string> FilterValidTiles(IReadOnlyList<string>? tiles)
     {
         if (tiles == null || tiles.Count == 0)
             return [];
 
-        return tiles
-            .Where(t => !string.IsNullOrWhiteSpace(t) && !t.StartsWith("ICON_") && t != "?")
-            .Select(NormalizeTile)
-            .ToList();
+        return tiles.Where(MeldClassifier.IsUsableTile).ToList();
     }
 }

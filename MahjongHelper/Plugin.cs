@@ -106,6 +106,9 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
     private bool _screenshotRequested;
     private bool _screenshotPreferGameApi;
     private bool _screenshotInFlight;
+    private SuggestMoveRequest? _lastSuggestRequest;
+    private string? _lastSuggestRequestJson;
+    private static readonly string SolverSnapPath = Path.Combine(CacheDirectory, "solver_snap.json");
 
     public Task LoadAsync(CancellationToken cancellationToken)
     {
@@ -426,6 +429,7 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
         _lastMergedState = merged;
         MainWindow.normalizedStateText = merged.ToDisplayText();
         _lastSuccessfulMergeUpdateUtc = DateTime.UtcNow;
+        CacheSolverPayload(merged);
 
         // Always forward game state to auto-play manager, even if the normalized
         // signature hasn't changed. The manager needs continuous updates to detect
@@ -724,6 +728,47 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
         return sb.ToString();
     }
 
+    private void CacheSolverPayload(MahjongGameState state)
+    {
+        var request = GameStateMapper.BuildSuggestMoveRequest(state, _iconMap);
+        _lastSuggestRequest = request;
+        _lastSuggestRequestJson = request == null ? null : SolverJson.Serialize(request);
+    }
+
+    private void WriteSolverSnap()
+    {
+        try
+        {
+            if (_lastMergedState != null)
+                CacheSolverPayload(_lastMergedState);
+
+            Directory.CreateDirectory(CacheDirectory);
+            var json = _lastSuggestRequestJson;
+            if (string.IsNullOrEmpty(json))
+            {
+                json = "{\n  \"error\": \"no suggest-move payload yet (open EmjL / wait for a readable hand)\"\n}";
+            }
+
+            File.WriteAllText(SolverSnapPath, json);
+            var summary = SolverJson.BuildSnapSummary(_lastSuggestRequest);
+            File.AppendAllText(
+                Path.Combine(CacheDirectory, "solver_snap.log"),
+                $"[{DateTime.UtcNow:O}] {summary}{Environment.NewLine}{json}{Environment.NewLine}{Environment.NewLine}");
+
+            var msg = $"/mj snap wrote {SolverSnapPath} — {summary}";
+            Log.Information(msg);
+            try { ChatGui.Print(msg); } catch { }
+            AppendRecentTransition($"{DateTime.UtcNow:O} {msg}");
+            if (MainWindow.IsOpen)
+                MainWindow.serverSuggestionText = (MainWindow.serverSuggestionText ?? string.Empty) + Environment.NewLine + msg;
+        }
+        catch (Exception ex)
+        {
+            RecordFailure($"/mj snap failed: {ex.Message}");
+            AppendRecentTransition($"{DateTime.UtcNow:O} /mj snap failed: {ex.Message}");
+        }
+    }
+
     private static string BuildNormalizedStateSignature(MahjongGameState state)
     {
         var handIds = state.HandIconIds.Value == null ? string.Empty : string.Join(",", state.HandIconIds.Value);
@@ -733,6 +778,11 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
         var leftDiscards = state.LeftDiscards.Value == null ? string.Empty : string.Join(",", state.LeftDiscards.Value);
         var doraIndicators = state.DoraIndicators.Value == null ? string.Empty : string.Join(",", state.DoraIndicators.Value);
         var riichiStatus = state.RiichiStatus.Value == null ? string.Empty : string.Join(",", state.RiichiStatus.Value);
+        var playerTsumogiri = state.PlayerTsumogiri.Value == null ? string.Empty : string.Join(",", state.PlayerTsumogiri.Value);
+        var playerMelds = state.PlayerMelds.Value == null ? string.Empty : string.Join(";", state.PlayerMelds.Value);
+        var rightMelds = state.RightMelds.Value == null ? string.Empty : string.Join(";", state.RightMelds.Value);
+        var oppositeMelds = state.OppositeMelds.Value == null ? string.Empty : string.Join(";", state.OppositeMelds.Value);
+        var leftMelds = state.LeftMelds.Value == null ? string.Empty : string.Join(";", state.LeftMelds.Value);
         return string.Join("|",
             state.AgentState.Value.ToString(),
             state.AgentState.Source,
@@ -747,6 +797,11 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
             oppositeDiscards,
             leftDiscards,
             doraIndicators,
+            playerTsumogiri,
+            playerMelds,
+            rightMelds,
+            oppositeMelds,
+            leftMelds,
             state.SeatWind.Value.ToString(),
             state.RoundWind.Value.ToString(),
             state.RoundNumber.Value.ToString(),
@@ -860,7 +915,7 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
         else if (lower == "snap")
         {
             _snapRequested = true;
-            Log.Information("/mj snap queued — writing sidecar JSON on the next framework tick");
+            Log.Information("/mj snap queued — writing sidecar JSON and solver POST body on the next framework tick");
         }
         else if (lower is "screenshot status" or "printscreen status")
         {
@@ -1212,6 +1267,14 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
             int[] atkValues = Array.Empty<int>();
             object[] closedHand = Array.Empty<object>();
             object? drawnTile = null;
+            object[] handStripMelds = Array.Empty<object>();
+            object[] playerMeldSlots = Array.Empty<object>();
+            object[] rightMeldSlots = Array.Empty<object>();
+            object[] oppositeMeldSlots = Array.Empty<object>();
+            object[] leftMeldSlots = Array.Empty<object>();
+            object[] opponentMeldCandidates = Array.Empty<object>();
+            object[] allIconNodes = Array.Empty<object>();
+            object[] tileSizedNodes = Array.Empty<object>();
 
             unsafe
             {
@@ -1231,32 +1294,31 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
                     var hand = MahjongHandReader.Read(addon, _iconCapture, _iconMap);
                     closedHand = hand.HandTiles
                         .OrderBy(t => t.X)
-                        .Select(t => (object)new
-                        {
-                            t.NodeIndex,
-                            t.NodeId,
-                            t.NodeType,
-                            t.X,
-                            t.Y,
-                            t.IconId,
-                            t.TileCode,
-                        })
+                        .Select(DumpStripTile)
                         .ToArray();
                     if (hand.DrawnTile != null)
-                    {
-                        var d = hand.DrawnTile;
-                        drawnTile = new
-                        {
-                            d.NodeIndex,
-                            d.NodeId,
-                            d.NodeType,
-                            d.X,
-                            d.Y,
-                            d.IconId,
-                            d.TileCode,
-                        };
-                    }
+                        drawnTile = DumpStripTile(hand.DrawnTile);
+                    handStripMelds = (hand.Melds ?? Array.Empty<IReadOnlyList<MahjongHandReader.MahjongTileObservation>>())
+                        .Select(group => (object)group.Select(DumpStripTile).ToArray())
+                        .ToArray();
                 }
+            }
+
+            if (_lastUiState != null)
+            {
+                playerMeldSlots = DumpMeldSlots(_lastUiState, EmjUiReader.SlotKind.PlayerMeld);
+                rightMeldSlots = DumpMeldSlots(_lastUiState, EmjUiReader.SlotKind.RightMeld);
+                oppositeMeldSlots = DumpMeldSlots(_lastUiState, EmjUiReader.SlotKind.OppositeMeld);
+                leftMeldSlots = DumpMeldSlots(_lastUiState, EmjUiReader.SlotKind.LeftMeld);
+                opponentMeldCandidates = (_lastUiState.OpponentMeldCandidates ?? Array.Empty<EmjUiReader.UiSlot>())
+                    .Select(DumpUiSlot)
+                    .ToArray();
+                allIconNodes = (_lastUiState.AllIconNodes ?? Array.Empty<EmjUiReader.UiSlot>())
+                    .Select(DumpUiSlot)
+                    .ToArray();
+                tileSizedNodes = (_lastUiState.TileSizedNodes ?? Array.Empty<EmjUiReader.UiSlot>())
+                    .Select(DumpUiSlot)
+                    .ToArray();
             }
 
             var payload = new
@@ -1303,10 +1365,21 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
                 },
                 closedHand,
                 drawnTile,
+                handStripMelds,
+                playerMeldSlots,
+                opponentMelds = new
+                {
+                    right = rightMeldSlots,
+                    opposite = oppositeMeldSlots,
+                    left = leftMeldSlots,
+                },
+                opponentMeldCandidates,
+                allIconNodes,
+                tileSizedNodes,
             };
 
             var path = SnapCapture.WriteJson(payload);
-            var msg = $"[SNAP] wrote {path} phase={payload.phase} sug={suggestion?.Type}:{suggestion?.TileName} icon={suggestion?.TileIconId} pending={_autoPlayManager.PendingAction} atk0={rawAtk0}";
+            var msg = $"[SNAP] wrote {path} phase={payload.phase} sug={suggestion?.Type}:{suggestion?.TileName} icon={suggestion?.TileIconId} pending={_autoPlayManager.PendingAction} atk0={rawAtk0} icons={allIconNodes.Length} tileSized={tileSizedNodes.Length}";
             LogToFile("autoplay.log", msg);
             Log.Information(msg);
         }
@@ -1315,7 +1388,50 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
             Log.Warning(ex, "/mj snap failed");
             LogToFile("autoplay.log", $"[SNAP] failed: {ex.Message}");
         }
+
+        // KAN-54: also write the current solver POST body for AZPC field verify.
+        WriteSolverSnap();
     }
+
+    private static object DumpStripTile(MahjongHandReader.MahjongTileObservation t) => new
+    {
+        t.NodeIndex,
+        t.NodeId,
+        t.NodeType,
+        t.X,
+        t.Y,
+        t.Width,
+        t.Height,
+        t.Rotation,
+        t.ParentNodeId,
+        t.AbsX,
+        t.AbsY,
+        t.IconId,
+        t.TileCode,
+    };
+
+    private static object[] DumpMeldSlots(EmjUiReader.UiState state, EmjUiReader.SlotKind kind)
+        => state.Slots.Where(s => s.Kind == kind).OrderBy(s => s.SlotIndex).Select(DumpUiSlot).ToArray();
+
+    private static object DumpUiSlot(EmjUiReader.UiSlot s) => new
+    {
+        kind = s.Kind.ToString(),
+        s.SlotIndex,
+        s.NodeIndex,
+        s.NodeId,
+        s.NodeType,
+        s.X,
+        s.Y,
+        s.AbsX,
+        s.AbsY,
+        s.Width,
+        s.Height,
+        s.Rotation,
+        s.ParentNodeId,
+        s.IconId,
+        s.TileCode,
+        s.WalkDepth,
+    };
 
     private void LeaveStuckMatch()
     {

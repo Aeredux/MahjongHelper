@@ -1,0 +1,187 @@
+using MahjongHelper.Mahjong;
+using Xunit;
+
+namespace MahjongHelper.Tests;
+
+public class IconNodeScanTests
+{
+    [Fact]
+    public void Mahjong_icon_range_matches_doman_tile_ids()
+    {
+        Assert.True(IconNodeScan.IsMahjongTileIcon(76041));
+        Assert.True(IconNodeScan.IsMahjongTileIcon(76077));
+        Assert.True(IconNodeScan.IsMahjongTileIcon(76150));
+        Assert.False(IconNodeScan.IsMahjongTileIcon(0));
+        Assert.False(IconNodeScan.IsMahjongTileIcon(76040));
+        Assert.False(IconNodeScan.IsMahjongTileIcon(76151));
+    }
+
+    [Fact]
+    public void Type_1045_34x45_is_the_live_hand_echo()
+    {
+        Assert.True(IconNodeScan.IsType1045PondEcho(1045, 34, 45));
+        Assert.True(IconNodeScan.IsType1045PondEcho(1045, 45, 34));
+        Assert.False(IconNodeScan.IsType1045PondEcho(1045, 42, 55));
+        Assert.False(IconNodeScan.IsType1045PondEcho(1045, 40, 52));
+        Assert.False(IconNodeScan.IsType1045PondEcho(1031, 34, 45));
+    }
+
+    [Fact]
+    public void RejectPondEcho_drops_only_the_34x45_1045_strip()
+    {
+        var nodes = new (ushort Type, int Width, int Height)[]
+        {
+            (1045, 34, 45),
+            (1045, 42, 55),
+            (1031, 40, 52),
+        };
+        var kept = IconNodeScan.RejectPondEcho(nodes, n => n.Type, n => n.Width, n => n.Height);
+        Assert.Equal(2, kept.Count);
+        Assert.DoesNotContain(kept, n => n.Type == 1045 && n.Width == 34);
+    }
+
+    [Fact]
+    public void TileSized_is_a_discovery_window_not_a_fuuro_type()
+    {
+        Assert.True(IconNodeScan.IsTileSized(42, 55));
+        Assert.True(IconNodeScan.IsTileSized(34, 45));
+        Assert.True(IconNodeScan.IsTileSized(40, 52));
+        Assert.True(IconNodeScan.IsTileSized(55, 42));
+        Assert.False(IconNodeScan.IsTileSized(200, 80));
+        Assert.False(IconNodeScan.IsTileSized(8, 8));
+        Assert.False(IconNodeScan.IsTileSized(42, 200));
+        Assert.False(IconNodeScan.IsTileSized(192, 52));
+    }
+
+    [Fact]
+    public void Live_1060_tray_covers_m2_m1_m3_not_ghost_west()
+    {
+        var tray = new IconNodeScan.Tray(1525, 972, 140, 55);
+        Assert.True(IconNodeScan.CenterInTray(1524, 980, 42, 55, tray));
+        Assert.True(IconNodeScan.CenterInTray(1528, 980, 40, 52, tray));
+        Assert.True(IconNodeScan.CenterInTray(1580, 980, 40, 52, tray));
+        Assert.True(IconNodeScan.CenterInTray(1622, 980, 40, 52, tray));
+        Assert.False(IconNodeScan.CenterInTray(1385, 980, 42, 55, tray));
+        Assert.False(IconNodeScan.CenterInTray(1484, 980, 40, 52, tray));
+    }
+
+    [Fact]
+    public void CollapseStackedDuplicates_merges_1524_1528_m2_pair()
+    {
+        var tiles = new (float X, string Code)[]
+        {
+            (1524, "M2"),
+            (1528, "M2"),
+            (1580, "M1"),
+            (1622, "M3"),
+        };
+        var faces = IconNodeScan.CollapseStackedDuplicates(tiles, t => t.X, t => t.Code);
+        Assert.Equal(3, faces.Count);
+        Assert.Equal(["M2", "M1", "M3"], faces.Select(t => t.Code).ToList());
+        Assert.Equal("CHI", MeldClassifier.InferMeld(faces.Select(t => t.Code).ToList())!.Type);
+    }
+
+    [Fact]
+    public void FaceLeaf_is_type2_40x52_or_52x40()
+    {
+        Assert.True(IconNodeScan.IsFaceLeaf(2, 40, 52));
+        Assert.True(IconNodeScan.IsFaceLeaf(2, 52, 40));
+        Assert.False(IconNodeScan.IsFaceLeaf(2, 42, 55));
+        Assert.False(IconNodeScan.IsFaceLeaf(1055, 40, 52));
+        Assert.False(IconNodeScan.IsFaceLeaf(1038, 192, 52));
+    }
+
+    [Fact]
+    public void Upright_type2_west_triple_has_no_call_cue()
+    {
+        var ghosts = new (ushort Type, int W, int H, float Rot)[]
+        {
+            (2, 40, 52, 0),
+            (2, 40, 52, 0),
+            (2, 40, 52, 0),
+        };
+        Assert.False(IconNodeScan.FaceLeafGroupHasCallCue(ghosts, t => t.Type, t => t.W, t => t.H, t => t.Rot));
+
+        var chi = new (ushort Type, int W, int H, float Rot)[]
+        {
+            (2, 40, 52, 0),
+            (2, 40, 52, 0),
+            (2, 52, 40, 0),
+        };
+        Assert.True(IconNodeScan.FaceLeafGroupHasCallCue(chi, t => t.Type, t => t.W, t => t.H, t => t.Rot));
+
+        var with1056 = new (ushort Type, int W, int H, float Rot)[]
+        {
+            (2, 40, 52, 0),
+            (2, 40, 52, 0),
+            (1056, 42, 55, 4.712f),
+        };
+        Assert.True(IconNodeScan.ClusterHasCallCue(with1056, t => t.W, t => t.H, t => t.Rot));
+        Assert.True(IconNodeScan.IsCallCueNode(1056, 42, 55, 4.712f));
+        Assert.True(IconNodeScan.IsFuuroTray(1060, 140, 55));
+        // Doman CHI: only the called tile is sideways. Two upright 40×52
+        // in-hand leaves plus the 1056 cue are enough — M1/M3 must not be 52×40.
+        Assert.True(IconNodeScan.IsFaceLeaf(2, 40, 52));
+        Assert.False(IconNodeScan.HasCallCue(40, 52, 0));
+    }
+
+    [Fact]
+    public void Ghost_west_cluster_is_not_plausible_own_fuuro()
+    {
+        var west = new (float X, float Y, int W, int H, float Rot)[]
+        {
+            (1385, 980, 42, 55, 4.712f),
+            (1391, 980, 40, 52, 0),
+            (1442, 980, 40, 52, 0),
+            (1484, 980, 40, 52, 0),
+        };
+        var chi = new (float X, float Y, int W, int H, float Rot)[]
+        {
+            (1524, 980, 42, 55, 4.712f),
+            (1528, 980, 40, 52, 0),
+            (1580, 980, 40, 52, 0),
+            (1622, 980, 40, 52, 0),
+        };
+        var trays = new[] { new IconNodeScan.Tray(1525, 972, 140, 55) };
+
+        Assert.False(IconNodeScan.IsPlausibleOwnLeftoverFuuro(
+            west, 1327, trays, t => t.W, t => t.H, t => t.Rot, t => t.X, t => t.Y));
+        Assert.True(IconNodeScan.IsPlausibleOwnLeftoverFuuro(
+            chi, 1327, trays, t => t.W, t => t.H, t => t.Rot, t => t.X, t => t.Y));
+        Assert.True(IconNodeScan.IsPlausibleOwnLeftoverFuuro(
+            chi, 1327, trays: null, t => t.W, t => t.H, t => t.Rot, t => t.X, t => t.Y));
+    }
+
+    [Fact]
+    public void PreferLeafTiles_keeps_the_smaller_node_at_the_same_spot()
+    {
+        var nodes = new (uint Icon, float X, float Y, int W, int H)[]
+        {
+            (76050, 520, 46, 200, 80),
+            (76050, 520, 46, 40, 52),
+            (76050, 560, 46, 40, 52),
+            (76050, 600, 46, 40, 52),
+        };
+
+        var kept = IconNodeScan.PreferLeafTiles(nodes, n => n.Icon, n => n.X, n => n.Y, n => n.W, n => n.H);
+        Assert.Equal(3, kept.Count);
+        Assert.DoesNotContain(kept, n => n.W == 200);
+        Assert.All(kept, n => Assert.Equal(40, n.W));
+    }
+
+    [Fact]
+    public void DropContainers_removes_a_tray_that_covers_three_tiles()
+    {
+        var nodes = new (float X, float Y, int W, int H)[]
+        {
+            (500, 40, 200, 80),
+            (520, 46, 40, 52),
+            (560, 46, 40, 52),
+            (600, 46, 40, 52),
+        };
+
+        var kept = IconNodeScan.DropContainers(nodes, n => n.X, n => n.Y, n => n.W, n => n.H);
+        Assert.Equal(3, kept.Count);
+        Assert.DoesNotContain(kept, n => n.W == 200);
+    }
+}

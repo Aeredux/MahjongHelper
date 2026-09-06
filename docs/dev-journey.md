@@ -62,6 +62,21 @@
 
 **Result:** Cloud VM cannot press a live client. AZPC: rebuild Release, reload plugin, `/mj screenshot` during EmjL with overlay on; expect a new file under `Documents\My Games\FINAL FANTASY XIV - A Realm Reborn\screenshots`. Chat may appear in the shot.
 
+## 2026-09-05: KAN-54 solver POST sends dora, aka, own pond, tsumogiri, melds
+
+**What:** Extended the Helper → MahjongSolver POST body so KAN-51 defense is no longer half-blind. Rebased onto post-KAN-55 master (`bc19627`).
+
+**Why:** The mapper stripped aka to plain 5s, never sent own pond / dora / melds, and left `tsumogiri` always false.
+
+**Changes:**
+- Stopped remapping `M0`/`P0`/`S0` to `M5`/`P5`/`S5`.
+- Send Doman dora panel tiles as `dora` with no Tenhou +1 remap (the panel tile is the dora).
+- Send own pond as `discard_tiles` plus a `player` object with per-tile `tsumogiri`.
+- Derive tsumogiri from last draw vs new pond tile, plus UI rotation / 45×34 size.
+- Classify parent-split discard-type groups as melds; send own + opponent `melds`.
+- `/mj snap` still writes KAN-12 captures sidecar; also writes `%APPDATA%/MahjongHelper/solver_snap.json` for POST-body verify (autoplay off). `/mj screenshot` stays on the KAN-55 CaptureFallback path.
+
+**Result:** Existing JSON keys unchanged. Additive fields only. Seat/round wind still sent. NativeAddon overlay/settings and `/mj screenshot` preserved.
 
 ## 2026-09-03: Same-tick FireCallback 7 after Riichi ListItemClick passes riichi
 

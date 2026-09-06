@@ -24,6 +24,10 @@ public static unsafe class EmjUiReader
         RightDiscard,
         OppositeDiscard,
         LeftDiscard,
+        PlayerMeld,
+        RightMeld,
+        OppositeMeld,
+        LeftMeld,
         DoraIndicator,
     }
 
@@ -134,9 +138,21 @@ public static unsafe class EmjUiReader
         int Width,
         int Height,
         uint IconId,
-        string? TileCode);
+        string? TileCode,
+        float Rotation = 0,
+        uint ParentNodeId = 0,
+        bool Tsumogiri = false,
+        float AbsX = 0,
+        float AbsY = 0,
+        int WalkDepth = 0);
 
-    public sealed record UiState(IReadOnlyList<UiSlot> Slots, UiGameInfo GameInfo, DateTime UtcCapturedAt)
+    public sealed record UiState(
+        IReadOnlyList<UiSlot> Slots,
+        UiGameInfo GameInfo,
+        DateTime UtcCapturedAt,
+        IReadOnlyList<UiSlot>? OpponentMeldCandidates = null,
+        IReadOnlyList<UiSlot>? AllIconNodes = null,
+        IReadOnlyList<UiSlot>? TileSizedNodes = null)
     {
         public string ToDisplayText()
         {
@@ -168,8 +184,25 @@ public static unsafe class EmjUiReader
                 if (discards.Count > 0)
                 {
                     sb.Append("  ");
-                    sb.AppendLine(string.Join(" ", discards.Select(s => s.TileCode ?? (s.IconId > 0 ? $"ICON_{s.IconId}" : "(no-icon)"))));
+                    sb.AppendLine(string.Join(" ", discards.Select(s =>
+                    {
+                        var code = s.TileCode ?? (s.IconId > 0 ? $"ICON_{s.IconId}" : "(no-icon)");
+                        return s.Tsumogiri ? code + "*" : code;
+                    })));
                     foreach (var slot in discards)
+                        sb.AppendLine(DescribeSlot(slot));
+                }
+            }
+
+            foreach (var kind in new[] { SlotKind.PlayerMeld, SlotKind.RightMeld, SlotKind.OppositeMeld, SlotKind.LeftMeld })
+            {
+                var melds = Slots.Where(s => s.Kind == kind).OrderBy(s => s.SlotIndex).ToList();
+                sb.AppendLine($"{kind}: {melds.Count} tiles");
+                if (melds.Count > 0)
+                {
+                    sb.Append("  ");
+                    sb.AppendLine(string.Join(" ", melds.Select(s => s.TileCode ?? (s.IconId > 0 ? $"ICON_{s.IconId}" : "(no-icon)"))));
+                    foreach (var slot in melds)
                         sb.AppendLine(DescribeSlot(slot));
                 }
             }
@@ -202,7 +235,8 @@ public static unsafe class EmjUiReader
         private static string DescribeSlot(UiSlot slot)
         {
             var tile = slot.TileCode ?? (slot.IconId > 0 ? $"ICON_{slot.IconId}" : "(no-icon)");
-            return $"  [{slot.Kind}:{slot.SlotIndex}] node={slot.NodeIndex} id={slot.NodeId} type={slot.NodeType} vis={slot.Visible} pos=({slot.X:F0},{slot.Y:F0}) size=({slot.Width},{slot.Height}) {tile}";
+            var tsumo = slot.Tsumogiri ? " tsumogiri" : "";
+            return $"  [{slot.Kind}:{slot.SlotIndex}] node={slot.NodeIndex} id={slot.NodeId} type={slot.NodeType} vis={slot.Visible} pos=({slot.X:F0},{slot.Y:F0}) abs=({slot.AbsX:F0},{slot.AbsY:F0}) size=({slot.Width},{slot.Height}) rot={slot.Rotation:F2} parent={slot.ParentNodeId} {tile}{tsumo}";
         }
     }
 
@@ -230,9 +264,11 @@ public static unsafe class EmjUiReader
         }
 
         var visibleCandidates = new List<UiSlot>();
+        var extraStrip = new List<UiSlot>();
 
         // Scan all nodes for visible tile components.
         // 34x45 nodes are discard pool / dora tiles; 42x55 nodes are player hand tiles.
+        // 55x42 is a called tile in the player strip (42x55 rotated).
         // We also track 34x45 tiles separately for discard/dora classification.
         var smallTiles = new List<UiSlot>();
 
@@ -252,11 +288,12 @@ public static unsafe class EmjUiReader
             if (!visible)
                 continue;
 
-            // 42x55 = player hand tile candidates (existing logic)
-            if (type == 1055 && node->Width == 42 && node->Height == 55)
+            // 42×55 = local hand strip and toimen face-up fuuro (not only type 1055).
+            if (type >= 1000 && node->Width == 42 && node->Height == 55)
             {
                 uint iconId = 0;
                 TryFindIcon(node, iconCapture, out iconId);
+                var extras = ReadNodeExtras(node);
 
                 var candidate = new UiSlot(
                     SlotKind.VisibleTileCandidate,
@@ -270,17 +307,53 @@ public static unsafe class EmjUiReader
                     node->Width,
                     node->Height,
                     iconId,
-                    iconId > 0 ? iconMap?.Resolve(iconId) : null);
+                    iconId > 0 ? iconMap?.Resolve(iconId) : null,
+                    extras.Rotation,
+                    extras.ParentNodeId,
+                    false,
+                    extras.AbsX,
+                    extras.AbsY);
 
                 visibleCandidates.Add(candidate);
                 slots.Add(candidate);
             }
 
-            // 34x45 = discard pool / dora indicator tile candidates
-            if (node->Width == 34 && node->Height == 45)
+            // 55x42 = called tile in the local hand strip (42x55 rotated 90°)
+            // or kamicha/shimocha open fuuro.
+            if (type >= 1000 && node->Width == 55 && node->Height == 42)
+            {
+                uint rotatedIcon = 0;
+                TryFindIcon(node, iconCapture, out rotatedIcon);
+                if (rotatedIcon > 0)
+                {
+                    var extras = ReadNodeExtras(node);
+                    extraStrip.Add(new UiSlot(
+                        SlotKind.PlayerMeld,
+                        extraStrip.Count,
+                        i,
+                        node->NodeId,
+                        (ushort)node->Type,
+                        visible,
+                        node->X,
+                        node->Y,
+                        node->Width,
+                        node->Height,
+                        rotatedIcon,
+                        iconMap?.Resolve(rotatedIcon),
+                        extras.Rotation,
+                        extras.ParentNodeId,
+                        false,
+                        extras.AbsX,
+                        extras.AbsY));
+                }
+            }
+
+            // 34x45 = discard / meld candidates. 45x34 is the same tile rotated (tsumogiri).
+            if ((node->Width == 34 && node->Height == 45) || (node->Width == 45 && node->Height == 34))
             {
                 uint iconId = 0;
                 TryFindIcon(node, iconCapture, out iconId);
+                var extras = ReadNodeExtras(node);
 
                 smallTiles.Add(new UiSlot(
                     SlotKind.PlayerDiscard, // placeholder kind, will be reclassified
@@ -294,7 +367,12 @@ public static unsafe class EmjUiReader
                     node->Width,
                     node->Height,
                     iconId,
-                    iconId > 0 ? iconMap?.Resolve(iconId) : null));
+                    iconId > 0 ? iconMap?.Resolve(iconId) : null,
+                    extras.Rotation,
+                    extras.ParentNodeId,
+                    IsRotatedTsumogiri(extras.Rotation, node->Width, node->Height),
+                    extras.AbsX,
+                    extras.AbsY));
             }
 
             // 50x60 type=1006 = dora indicator slots (nodeIds 28-32, up to 5 kan dora)
@@ -354,64 +432,250 @@ public static unsafe class EmjUiReader
             slots.Add(canonicalDraw with { Kind = SlotKind.CanonicalPlayerDraw, SlotIndex = 0 });
         }
 
+        // Called sets sit on the same 42×55 Y=0 strip as the closed hand. Peel them out
+        // so they become PlayerMeld instead of CanonicalPlayerHand. Live AZPC after
+        // 7ad3d5d: own fuuro is nested type-2 40×52 leaves, not 1055/1045.
+        var scanned = ScanAddonNodes(addon, iconCapture, iconMap);
+        ApplyHandStripMeldSplit(slots, rawHand, extraStrip, scanned.IconNodes);
+        var opponentMeldCandidates = ClassifyOpponentAreaMelds(slots, extraStrip, smallTiles, scanned.IconNodes);
+
         var gameInfo = ReadGameInfo(addon, iconCapture, iconMap);
 
-        return new UiState(slots, gameInfo, DateTime.UtcNow);
+        return new UiState(slots, gameInfo, DateTime.UtcNow, opponentMeldCandidates, scanned.IconNodes, scanned.TileSizedNodes);
     }
 
     /// <summary>
-    /// Classifies 34x45 tile nodes into discard pools (4 players) based on their
-    /// component NodeType. Each player's discard pool uses a distinct component type:
+    /// Classifies 34x45 / 45x34 tile nodes into discard pools and called-tile (meld) groups.
+    /// Each player's discard pool uses a distinct component type:
     ///   1021 = local player discards
     ///   1022 = left player (kamicha) discards
     ///   1023 = right player (shimocha) discards
     ///   1024 = opposite player (toimen) discards
-    /// Dora indicators are read separately via RootNode child-tree navigation.
+    /// When the same type has multiple parent groups, the largest is the pond and
+    /// smaller groups are treated as that player's melds.
+    /// Dora indicators are read separately (type 1006). Type 1009 is chi-choice UI.
     /// </summary>
     private static void ClassifySmallTiles(AtkUldManager uld, List<UiSlot> smallTiles, IconIdCapture? iconCapture, MahjongIconMap? iconMap, List<UiSlot> outputSlots)
     {
         if (smallTiles.Count == 0)
             return;
 
-        // Only consider tiles that have an icon (face-up tiles)
         var tilesWithIcons = smallTiles.Where(t => t.IconId > 0).ToList();
         if (tilesWithIcons.Count == 0)
             return;
 
-        // Classify by NodeType — each player's discard pool uses a distinct component type.
-        // The game stores discard tiles newest-first in the node list, so we group by
-        // player, reverse each group to get chronological order, then assign slot indices.
-        var groups = new Dictionary<SlotKind, List<UiSlot>>
-        {
-            { SlotKind.PlayerDiscard, new List<UiSlot>() },
-            { SlotKind.LeftDiscard, new List<UiSlot>() },
-            { SlotKind.RightDiscard, new List<UiSlot>() },
-            { SlotKind.OppositeDiscard, new List<UiSlot>() },
-        };
+        var classified = SmallTileClassifier.Classify(
+            tilesWithIcons.Select((t, i) => new SmallTileClassifier.Tile(
+                i, t.NodeType, t.X, t.Y, t.AbsX, t.AbsY, t.Width, t.Height,
+                t.Rotation, t.ParentNodeId, t.TileCode,
+                t.Tsumogiri || IsRotatedTsumogiri(t.Rotation, t.Width, t.Height))).ToList());
 
-        foreach (var tile in tilesWithIcons)
+        foreach (var item in classified)
         {
-            var kind = tile.NodeType switch
-            {
-                1021 => SlotKind.PlayerDiscard,
-                1022 => SlotKind.LeftDiscard,
-                1023 => SlotKind.RightDiscard,
-                1024 => SlotKind.OppositeDiscard,
-                _ => (SlotKind?)null,
-            };
-
-            if (kind == null)
+            if (item.Tile.Id < 0 || item.Tile.Id >= tilesWithIcons.Count)
                 continue;
-
-            groups[kind.Value].Add(tile);
+            var source = tilesWithIcons[item.Tile.Id];
+            outputSlots.Add(source with
+            {
+                Kind = ToSlotKind(item.Kind),
+                SlotIndex = item.SlotIndex,
+                Tsumogiri = item.Tile.Tsumogiri,
+            });
         }
+    }
 
-        foreach (var (kind, tiles) in groups)
+    private static List<UiSlot> ClassifyOpponentAreaMelds(
+        List<UiSlot> slots, List<UiSlot> extraStrip, List<UiSlot> smallTiles, List<UiSlot>? allIconNodes = null)
+    {
+        var claimed = new HashSet<int>();
+        var claimedPos = new HashSet<(int X, int Y)>();
+        foreach (var slot in slots)
         {
-            tiles.Reverse();
-            for (int i = 0; i < tiles.Count; i++)
-                outputSlots.Add(tiles[i] with { Kind = kind, SlotIndex = i });
+            if (slot.Kind is SlotKind.CanonicalPlayerHand or SlotKind.CanonicalPlayerDraw
+                or SlotKind.PlayerMeld or SlotKind.RightMeld or SlotKind.OppositeMeld or SlotKind.LeftMeld
+                or SlotKind.PlayerDiscard or SlotKind.RightDiscard or SlotKind.OppositeDiscard or SlotKind.LeftDiscard
+                or SlotKind.DoraIndicator)
+            {
+                claimed.Add(slot.NodeIndex);
+                claimedPos.Add(SnapPos(slot));
+            }
         }
+
+        static float AbsOfX(UiSlot s) => s.AbsX != 0 || s.AbsY != 0 ? s.AbsX : s.X;
+        static float AbsOfY(UiSlot s) => s.AbsX != 0 || s.AbsY != 0 ? s.AbsY : s.Y;
+        static (int X, int Y) SnapPos(UiSlot s)
+            => ((int)MathF.Round(AbsOfX(s) / IconNodeScan.LeafSnapPx),
+                (int)MathF.Round(AbsOfY(s) / IconNodeScan.LeafSnapPx));
+
+        var candidates = new List<UiSlot>();
+        void Consider(UiSlot slot)
+        {
+            if (!slot.Visible || slot.IconId == 0 || !IconNodeScan.IsMahjongTileIcon(slot.IconId))
+                return;
+            if (claimed.Contains(slot.NodeIndex) || claimedPos.Contains(SnapPos(slot)))
+                return;
+            if (slot.NodeType is 1009 or 1006 or 1021 or 1022 or 1023 or 1024 or 1038)
+                return;
+            if (!IconNodeScan.IsTileSized(slot.Width, slot.Height)
+                && !IconNodeScan.IsFaceLeaf(slot.NodeType, slot.Width, slot.Height))
+                return;
+            if (IconNodeScan.IsType1045PondEcho(slot.NodeType, slot.Width, slot.Height))
+                return;
+            if (candidates.Any(c => c.NodeIndex == slot.NodeIndex && c.IconId == slot.IconId
+                                    && Math.Abs(c.AbsX - slot.AbsX) < 1 && Math.Abs(c.AbsY - slot.AbsY) < 1))
+                return;
+            candidates.Add(slot);
+        }
+
+        foreach (var slot in extraStrip)
+            Consider(slot);
+        foreach (var slot in slots.Where(s => s.Kind == SlotKind.VisibleTileCandidate))
+            Consider(slot);
+        foreach (var slot in smallTiles)
+            Consider(slot);
+        if (allIconNodes != null)
+        {
+            foreach (var slot in allIconNodes)
+                Consider(slot);
+        }
+
+        candidates = IconNodeScan.DropContainers(
+                candidates,
+                AbsOfX,
+                AbsOfY,
+                s => s.Width,
+                s => s.Height)
+            .ToList();
+        candidates = IconNodeScan.PreferLeafTiles(
+                candidates,
+                s => s.IconId,
+                AbsOfX,
+                AbsOfY,
+                s => s.Width,
+                s => s.Height)
+            .ToList();
+        if (allIconNodes != null)
+        {
+            foreach (var cue in allIconNodes)
+            {
+                if (!IconNodeScan.IsCallCueNode(cue.NodeType, cue.Width, cue.Height, cue.Rotation))
+                    continue;
+                Consider(cue);
+            }
+        }
+
+        var pondHints = new List<OpponentAreaClassifier.PondHint>();
+        foreach (var pondKind in new[] { SlotKind.PlayerDiscard, SlotKind.RightDiscard, SlotKind.OppositeDiscard, SlotKind.LeftDiscard })
+        {
+            var pond = slots.Where(s => s.Kind == pondKind).ToList();
+            if (pond.Count == 0)
+                continue;
+            pondHints.Add(new OpponentAreaClassifier.PondHint(
+                ToClassifierKind(pondKind),
+                pond.Average(s => s.AbsX != 0 || s.AbsY != 0 ? s.AbsX : s.X),
+                pond.Average(s => s.AbsX != 0 || s.AbsY != 0 ? s.AbsY : s.Y)));
+        }
+
+        var strip = slots.Where(s => s.Kind is SlotKind.CanonicalPlayerHand or SlotKind.CanonicalPlayerDraw).ToList();
+        float? stripY = strip.Count > 0
+            ? strip.Average(s => s.AbsY != 0 || s.AbsX != 0 ? s.AbsY : s.Y)
+            : null;
+        float? packMaxAbsX = strip.Count > 0
+            ? strip.Max(s => s.AbsX != 0 || s.AbsY != 0 ? s.AbsX : s.X)
+            : null;
+        var trays = (allIconNodes ?? [])
+            .Where(s => s.Visible && IconNodeScan.IsFuuroTray(s.NodeType, s.Width, s.Height))
+            .Select(s => new IconNodeScan.Tray(AbsOfX(s), AbsOfY(s), s.Width, s.Height))
+            .ToList();
+
+        var classified = OpponentAreaClassifier.Classify(
+            candidates.Select((s, i) => new OpponentAreaClassifier.Tile(
+                i, s.X, s.Y, s.AbsX, s.AbsY, s.Width, s.Height, s.Rotation,
+                s.ParentNodeId, s.TileCode, s.NodeType, s.NodeIndex)).ToList(),
+            pondHints,
+            stripY,
+            packMaxAbsX,
+            trays);
+
+        foreach (var assignment in classified)
+        {
+            var existing = slots.Count(s => s.Kind == ToSlotKind(assignment.Kind));
+            foreach (var id in assignment.TileIds)
+            {
+                if (id < 0 || id >= candidates.Count)
+                    continue;
+                var tile = candidates[id];
+                slots.Add(tile with { Kind = ToSlotKind(assignment.Kind), SlotIndex = existing++ });
+            }
+        }
+
+        return candidates;
+    }
+
+    private static SlotKind ToSlotKind(SmallTileClassifier.Kind kind) => kind switch
+    {
+        SmallTileClassifier.Kind.PlayerDiscard => SlotKind.PlayerDiscard,
+        SmallTileClassifier.Kind.LeftDiscard => SlotKind.LeftDiscard,
+        SmallTileClassifier.Kind.RightDiscard => SlotKind.RightDiscard,
+        SmallTileClassifier.Kind.OppositeDiscard => SlotKind.OppositeDiscard,
+        SmallTileClassifier.Kind.PlayerMeld => SlotKind.PlayerMeld,
+        SmallTileClassifier.Kind.LeftMeld => SlotKind.LeftMeld,
+        SmallTileClassifier.Kind.RightMeld => SlotKind.RightMeld,
+        SmallTileClassifier.Kind.OppositeMeld => SlotKind.OppositeMeld,
+        _ => SlotKind.PlayerMeld,
+    };
+
+    private static SmallTileClassifier.Kind ToClassifierKind(SlotKind kind) => kind switch
+    {
+        SlotKind.PlayerDiscard => SmallTileClassifier.Kind.PlayerDiscard,
+        SlotKind.LeftDiscard => SmallTileClassifier.Kind.LeftDiscard,
+        SlotKind.RightDiscard => SmallTileClassifier.Kind.RightDiscard,
+        SlotKind.OppositeDiscard => SmallTileClassifier.Kind.OppositeDiscard,
+        SlotKind.PlayerMeld => SmallTileClassifier.Kind.PlayerMeld,
+        SlotKind.LeftMeld => SmallTileClassifier.Kind.LeftMeld,
+        SlotKind.RightMeld => SmallTileClassifier.Kind.RightMeld,
+        SlotKind.OppositeMeld => SmallTileClassifier.Kind.OppositeMeld,
+        _ => SmallTileClassifier.Kind.PlayerDiscard,
+    };
+
+    private static (float Rotation, uint ParentNodeId, float AbsX, float AbsY) ReadNodeExtras(AtkResNode* node)
+    {
+        float rotation = 0;
+        uint parentId = 0;
+        float absX = 0;
+        float absY = 0;
+        try { rotation = node->Rotation; } catch { }
+        try
+        {
+            var walk = node;
+            var steps = 0;
+            while (walk != null && steps++ < 32)
+            {
+                absX += walk->X;
+                absY += walk->Y;
+                if (steps == 1 && walk->ParentNode != null)
+                    parentId = walk->ParentNode->NodeId;
+                walk = walk->ParentNode;
+            }
+        }
+        catch { }
+        return (rotation, parentId, absX, absY);
+    }
+
+    /// <summary>
+    /// Doman / Tenhou-style ponds rotate tsumogiri 90°. Width/height swap (45x34) is the same cue.
+    /// </summary>
+    internal static bool IsRotatedTsumogiri(float rotation, int width, int height)
+    {
+        if (width == 45 && height == 34)
+            return true;
+
+        var abs = Math.Abs(rotation);
+        while (abs > Math.PI * 2)
+            abs -= (float)(Math.PI * 2);
+        var dist90 = Math.Abs(abs - (float)(Math.PI / 2));
+        var dist270 = Math.Abs(abs - (float)(3 * Math.PI / 2));
+        return dist90 < 0.35f || dist270 < 0.35f;
     }
 
     /// <summary>
@@ -1421,6 +1685,171 @@ public static unsafe class EmjUiReader
         //     return GamePhase.CallDecisionPrompt;
     }
 
+    /// <summary>
+    /// Reclassifies tiles on the local hand strip so open calls become
+    /// <see cref="SlotKind.PlayerMeld"/> and drop out of the closed hand.
+    /// Includes unclaimed type-2 40×52 leaves on the same AbsY band.
+    /// </summary>
+    private static void ApplyHandStripMeldSplit(
+        List<UiSlot> slots, List<UiSlot> rawHand, List<UiSlot> extraStrip, List<UiSlot>? allIconNodes)
+    {
+        var byNode = new Dictionary<(uint NodeId, int NodeIndex, int SnapX, int SnapY, uint Icon), UiSlot>();
+
+        static float AbsOfX(UiSlot s) => s.AbsX != 0 || s.AbsY != 0 ? s.AbsX : s.X;
+        static float AbsOfY(UiSlot s) => s.AbsX != 0 || s.AbsY != 0 ? s.AbsY : s.Y;
+        static (int X, int Y) SnapPos(UiSlot s)
+            => ((int)MathF.Round(AbsOfX(s) / IconNodeScan.LeafSnapPx),
+                (int)MathF.Round(AbsOfY(s) / IconNodeScan.LeafSnapPx));
+        static (uint NodeId, int NodeIndex, int SnapX, int SnapY, uint Icon) SlotKey(UiSlot s)
+        {
+            var snap = SnapPos(s);
+            // Nested type-2 leaves often share child NodeIndex 0. Keep distinct
+            // faces by NodeId when present, otherwise by snap + icon.
+            if (s.NodeId != 0)
+                return (s.NodeId, 0, 0, 0, 0);
+            return (0, s.NodeIndex, snap.X, snap.Y, s.IconId);
+        }
+
+        void Consider(UiSlot slot)
+        {
+            if (!slot.Visible || slot.IconId == 0)
+                return;
+            if (slot.NodeIndex is >= 55 and <= 58)
+                return;
+            if (slot.X < 0 && !IconNodeScan.IsFaceLeaf(slot.NodeType, slot.Width, slot.Height))
+                return;
+
+            var key = SlotKey(slot);
+            if (byNode.TryGetValue(key, out var existing))
+            {
+                if (HandStripClassifier.IsRotated(ToStripTile(0, slot))
+                    && !HandStripClassifier.IsRotated(ToStripTile(0, existing)))
+                    byNode[key] = slot;
+                return;
+            }
+
+            byNode[key] = slot;
+        }
+
+        foreach (var slot in rawHand)
+        {
+            if (slot.NodeIndex == 54 || slot.NodeIndex is >= 59 and <= 71)
+                Consider(slot);
+        }
+
+        var stripAnchors = byNode.Values
+            .Where(s => s.NodeType == 1055 && s.Width == 42 && s.Height == 55)
+            .ToList();
+        float? stripAbsY = stripAnchors.Count > 0
+            ? stripAnchors.Average(s => s.AbsY != 0 || s.AbsX != 0 ? s.AbsY : s.Y)
+            : null;
+        var packPos = stripAnchors.Select(SnapPos).ToHashSet();
+
+        bool OnPlayerStrip(UiSlot slot)
+        {
+            if (stripAbsY is not float band)
+                return true;
+            var y = slot.AbsY != 0 || slot.AbsX != 0 ? slot.AbsY : slot.Y;
+            return Math.Abs(y - band) <= OpponentAreaClassifier.PlayerStripBandPx;
+        }
+
+        foreach (var slot in extraStrip)
+        {
+            if (OnPlayerStrip(slot))
+                Consider(slot);
+        }
+
+        foreach (var slot in slots.Where(s => s.Kind == SlotKind.VisibleTileCandidate))
+        {
+            if (slot.NodeIndex is >= 54 and <= 71)
+                continue;
+            if (OnPlayerStrip(slot))
+                Consider(slot);
+        }
+
+        var trays = new List<IconNodeScan.Tray>();
+        if (allIconNodes != null && stripAbsY is float)
+        {
+            var faces = allIconNodes
+                .Where(s => s.Visible && IconNodeScan.IsFaceLeaf(s.NodeType, s.Width, s.Height))
+                .Where(s => MeldClassifier.IsUsableTile(s.TileCode))
+                .Where(OnPlayerStrip)
+                .Where(s => !packPos.Contains(SnapPos(s)))
+                .ToList();
+            faces = IconNodeScan.PreferLeafTiles(
+                    faces,
+                    s => s.IconId,
+                    AbsOfX,
+                    AbsOfY,
+                    s => s.Width,
+                    s => s.Height)
+                .ToList();
+            foreach (var face in faces)
+            {
+                if (byNode.Values.Any(s => SnapPos(s) == SnapPos(face)))
+                    continue;
+                Consider(face);
+            }
+
+            foreach (var cue in allIconNodes)
+            {
+                if (!cue.Visible || !OnPlayerStrip(cue))
+                    continue;
+                if (!IconNodeScan.IsCallCueNode(cue.NodeType, cue.Width, cue.Height, cue.Rotation))
+                    continue;
+                if (!MeldClassifier.IsUsableTile(cue.TileCode))
+                    continue;
+                Consider(cue);
+            }
+
+            foreach (var slot in allIconNodes)
+            {
+                if (!slot.Visible || !OnPlayerStrip(slot))
+                    continue;
+                if (!IconNodeScan.IsFuuroTray(slot.NodeType, slot.Width, slot.Height))
+                    continue;
+                trays.Add(new IconNodeScan.Tray(AbsOfX(slot), AbsOfY(slot), slot.Width, slot.Height));
+            }
+        }
+
+        if (byNode.Count == 0)
+            return;
+
+        var list = byNode.Values.OrderBy(AbsOfX).ThenBy(s => s.NodeIndex).ToList();
+        var tiles = list.Select((s, i) => ToStripTile(i, s)).ToList();
+        var split = HandStripClassifier.Split(tiles, trays);
+        if (split.ClosedIds.Count == 0 && split.MeldGroups.Count == 0 && split.DrawId == null)
+            return;
+
+        slots.RemoveAll(s => s.Kind is SlotKind.CanonicalPlayerHand or SlotKind.CanonicalPlayerDraw);
+
+        for (var i = 0; i < split.ClosedIds.Count; i++)
+        {
+            var id = split.ClosedIds[i];
+            if (id < 0 || id >= list.Count)
+                continue;
+            slots.Add(list[id] with { Kind = SlotKind.CanonicalPlayerHand, SlotIndex = i });
+        }
+
+        if (split.DrawId is int drawId && drawId >= 0 && drawId < list.Count)
+            slots.Add(list[drawId] with { Kind = SlotKind.CanonicalPlayerDraw, SlotIndex = 0 });
+
+        var meldIndex = slots.Count(s => s.Kind == SlotKind.PlayerMeld);
+        foreach (var group in split.MeldGroups)
+        {
+            foreach (var id in group)
+            {
+                if (id < 0 || id >= list.Count)
+                    continue;
+                slots.Add(list[id] with { Kind = SlotKind.PlayerMeld, SlotIndex = meldIndex++ });
+            }
+        }
+    }
+
+    private static HandStripClassifier.Tile ToStripTile(int id, UiSlot slot)
+        => new(id, slot.X, slot.Y, slot.Width, slot.Height, slot.Rotation, slot.ParentNodeId,
+            slot.TileCode, slot.NodeIndex, slot.AbsX, slot.AbsY, slot.NodeType);
+
     private static List<UiSlot> BuildCanonicalHand(List<UiSlot> rawHand)
     {
         // Real hand tiles are nodes 59-71 (ids 134, 1340001-1340012) = 13 hand slots.
@@ -1510,6 +1939,7 @@ public static unsafe class EmjUiReader
 
         uint iconId = 0;
         TryFindIcon(node, iconCapture, out iconId);
+        var extras = ReadNodeExtras(node);
 
         slot = new UiSlot(
             kind,
@@ -1523,9 +1953,169 @@ public static unsafe class EmjUiReader
             node->Width,
             node->Height,
             iconId,
-            iconId > 0 ? iconMap?.Resolve(iconId) : null);
+            iconId > 0 ? iconMap?.Resolve(iconId) : null,
+            extras.Rotation,
+            extras.ParentNodeId,
+            false,
+            extras.AbsX,
+            extras.AbsY);
 
         return true;
+    }
+
+    public readonly record struct AddonNodeScan(List<UiSlot> IconNodes, List<UiSlot> TileSizedNodes);
+
+    /// <summary>
+    /// Deep-walk every addon NodeList, nested component UldManager, RootNode
+    /// sibling chain, and ChildNode list. Records:
+    ///   IconNodes — any node whose texture resolves to a mahjong tile icon
+    ///               (no type/size filter; includes hidden nodes)
+    ///   TileSizedNodes — visible 16–80px nodes, even when icon id is 0
+    /// so /mj snap can show where live fuuro actually lives.
+    /// </summary>
+    public static AddonNodeScan ScanAddonNodes(AtkUnitBase* addon, IconIdCapture? iconCapture, MahjongIconMap? iconMap)
+    {
+        var icons = new List<UiSlot>();
+        var tileSized = new List<UiSlot>();
+        if (addon == null)
+            return new AddonNodeScan(icons, tileSized);
+
+        var seen = new HashSet<nint>();
+        var nextIndex = 1_000_000;
+        WalkUld(addon->UldManager, 0, iconCapture, iconMap, icons, tileSized, seen, ref nextIndex);
+        return new AddonNodeScan(icons, tileSized);
+    }
+
+    /// <summary>Back-compat wrapper used by older call sites / tests.</summary>
+    public static List<UiSlot> ScanAllIconNodes(AtkUnitBase* addon, IconIdCapture? iconCapture, MahjongIconMap? iconMap)
+        => ScanAddonNodes(addon, iconCapture, iconMap).IconNodes;
+
+    private static void WalkUld(
+        AtkUldManager uld,
+        int depth,
+        IconIdCapture? iconCapture,
+        MahjongIconMap? iconMap,
+        List<UiSlot> icons,
+        List<UiSlot> tileSized,
+        HashSet<nint> seen,
+        ref int nextIndex)
+    {
+        if (depth > 8)
+            return;
+
+        try
+        {
+            var count = uld.NodeListCount;
+            for (int i = 0; i < count; i++)
+            {
+                var node = uld.NodeList[i];
+                if (node == null)
+                    continue;
+                var index = depth == 0 ? i : nextIndex++;
+                VisitIconNode(node, index, depth, iconCapture, iconMap, icons, tileSized, seen, ref nextIndex);
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            var sibling = uld.RootNode;
+            var steps = 0;
+            while (sibling != null && steps++ < 256)
+            {
+                VisitIconNode(sibling, nextIndex++, depth, iconCapture, iconMap, icons, tileSized, seen, ref nextIndex);
+                sibling = sibling->PrevSiblingNode;
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private static void VisitIconNode(
+        AtkResNode* node,
+        int nodeIndex,
+        int depth,
+        IconIdCapture? iconCapture,
+        MahjongIconMap? iconMap,
+        List<UiSlot> icons,
+        List<UiSlot> tileSized,
+        HashSet<nint> seen,
+        ref int nextIndex)
+    {
+        if (node == null || depth > 8 || !seen.Add((nint)node))
+            return;
+
+        uint iconId = 0;
+        try { TryFindIcon(node, iconCapture, out iconId); }
+        catch { iconId = 0; }
+
+        bool visible;
+        try { visible = node->IsVisible(); }
+        catch { visible = false; }
+
+        var extras = ReadNodeExtras(node);
+        var slot = new UiSlot(
+            SlotKind.VisibleTileCandidate,
+            icons.Count + tileSized.Count,
+            nodeIndex,
+            node->NodeId,
+            (ushort)node->Type,
+            visible,
+            node->X,
+            node->Y,
+            node->Width,
+            node->Height,
+            iconId,
+            iconId > 0 ? iconMap?.Resolve(iconId) : null,
+            extras.Rotation,
+            extras.ParentNodeId,
+            false,
+            extras.AbsX,
+            extras.AbsY,
+            depth);
+
+        if (IconNodeScan.IsMahjongTileIcon(iconId))
+            icons.Add(slot);
+        if (visible && IconNodeScan.IsTileSized(node->Width, node->Height))
+            tileSized.Add(slot);
+
+        if ((int)node->Type >= 1000)
+        {
+            try
+            {
+                var comp = (AtkComponentNode*)node;
+                if (comp->Component != null)
+                    WalkUld(comp->Component->UldManager, depth + 1, iconCapture, iconMap, icons, tileSized, seen, ref nextIndex);
+            }
+            catch
+            {
+            }
+        }
+
+        try
+        {
+            var child = node->ChildNode;
+            var steps = 0;
+            while (child != null && steps++ < 128)
+            {
+                VisitIconNode(child, nextIndex++, depth + 1, iconCapture, iconMap, icons, tileSized, seen, ref nextIndex);
+                child = child->PrevSiblingNode;
+            }
+
+            child = node->ChildNode != null ? node->ChildNode->NextSiblingNode : null;
+            steps = 0;
+            while (child != null && steps++ < 128)
+            {
+                VisitIconNode(child, nextIndex++, depth + 1, iconCapture, iconMap, icons, tileSized, seen, ref nextIndex);
+                child = child->NextSiblingNode;
+            }
+        }
+        catch
+        {
+        }
     }
 
     private static bool TryFindIcon(AtkResNode* root, IconIdCapture? capture, out uint iconId)
