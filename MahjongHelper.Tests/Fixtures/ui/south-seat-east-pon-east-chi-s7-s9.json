@@ -1,0 +1,27 @@
+{
+  "name": "south-seat-east-pon-east-chi-s7-s9",
+  "source": "trimmed live AZPC f7ce7e4 — SOUTH-seat EAST PON+CHI on 1061 86x35 with TileCode S9 and EAST",
+  "command": "/mj dump-ui",
+  "seatWind": "SOUTH",
+  "roundWind": "EAST",
+  "expected": {
+    "snapLine": "own=none | WEST=none | NORTH=none | EAST=CHI S7-S8-S9, PON EAST×3"
+  },
+  "allIconNodes": [
+    { "nodeType": 1061, "width": 86, "height": 35, "absX": 972, "absY": 781, "iconId": 76067, "tileCode": "S9", "visible": true, "ancestorVisible": true, "parentNodeId": 400 },
+    { "nodeType": 1061, "width": 86, "height": 35, "absX": 972, "absY": 867, "iconId": 76068, "tileCode": "EAST", "visible": true, "ancestorVisible": true, "parentNodeId": 401 },
+    { "nodeType": 1062, "width": 86, "height": 35, "absX": 1562, "absY": 459, "iconId": 0, "visible": true, "ancestorVisible": true, "parentNodeId": 402 },
+    { "nodeType": 1063, "width": 86, "height": 35, "absX": 1040, "absY": 40, "iconId": 0, "visible": true, "ancestorVisible": true, "parentNodeId": 403 },
+    { "nodeType": 1060, "width": 140, "height": 55, "absX": 1525, "absY": 972, "iconId": 0, "visible": false, "ancestorVisible": false, "parentNodeId": 80 },
+    { "nodeType": 2, "width": 40, "height": 52, "absX": 968, "absY": 810, "iconId": 76067, "tileCode": "S9", "visible": true, "ancestorVisible": true, "parentNodeId": 200 },
+    { "nodeType": 2, "width": 40, "height": 52, "absX": 1002, "absY": 779, "iconId": 76066, "tileCode": "S7", "visible": true, "ancestorVisible": true, "parentNodeId": 200 },
+    { "nodeType": 2, "width": 40, "height": 52, "absX": 1028, "absY": 779, "iconId": 76065, "tileCode": "S8", "visible": true, "ancestorVisible": true, "parentNodeId": 200 },
+    { "nodeType": 2, "width": 40, "height": 52, "absX": 968, "absY": 896, "iconId": 76068, "tileCode": "EAST", "visible": true, "ancestorVisible": true, "parentNodeId": 201 },
+    { "nodeType": 2, "width": 40, "height": 52, "absX": 1002, "absY": 865, "iconId": 76068, "tileCode": "EAST", "visible": true, "ancestorVisible": true, "parentNodeId": 201 },
+    { "nodeType": 2, "width": 40, "height": 52, "absX": 1028, "absY": 865, "iconId": 76068, "tileCode": "EAST", "visible": true, "ancestorVisible": true, "parentNodeId": 201 },
+    { "nodeType": 1021, "width": 34, "height": 45, "absX": 1200, "absY": 1100, "iconId": 76050, "tileCode": "P3", "visible": true, "ancestorVisible": true, "parentNodeId": 10 },
+    { "nodeType": 1022, "width": 34, "height": 45, "absX": 900, "absY": 850, "iconId": 76051, "tileCode": "S8", "visible": true, "ancestorVisible": true, "parentNodeId": 11 },
+    { "nodeType": 1023, "width": 34, "height": 45, "absX": 1600, "absY": 550, "iconId": 76052, "tileCode": "P8", "visible": true, "ancestorVisible": true, "parentNodeId": 20 },
+    { "nodeType": 1024, "width": 34, "height": 45, "absX": 1100, "absY": 400, "iconId": 76053, "tileCode": "P4", "visible": true, "ancestorVisible": true, "parentNodeId": 50 }
+  ]
+}

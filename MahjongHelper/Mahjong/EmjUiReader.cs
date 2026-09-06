@@ -282,9 +282,11 @@ public static unsafe class EmjUiReader
             if (type < 1000)
                 continue;
 
-            bool visible;
-            try { visible = node->IsVisible(); }
-            catch { visible = false; }
+            bool selfVisible;
+            try { selfVisible = node->IsVisible(); }
+            catch { selfVisible = false; }
+            var extras = ReadNodeExtras(node);
+            var visible = MeldPresence.IsOnScreen(selfVisible, extras.AncestorVisible);
             if (!visible)
                 continue;
 
@@ -293,7 +295,6 @@ public static unsafe class EmjUiReader
             {
                 uint iconId = 0;
                 TryFindIcon(node, iconCapture, out iconId);
-                var extras = ReadNodeExtras(node);
 
                 var candidate = new UiSlot(
                     SlotKind.VisibleTileCandidate,
@@ -326,7 +327,6 @@ public static unsafe class EmjUiReader
                 TryFindIcon(node, iconCapture, out rotatedIcon);
                 if (rotatedIcon > 0)
                 {
-                    var extras = ReadNodeExtras(node);
                     extraStrip.Add(new UiSlot(
                         SlotKind.PlayerMeld,
                         extraStrip.Count,
@@ -353,7 +353,6 @@ public static unsafe class EmjUiReader
             {
                 uint iconId = 0;
                 TryFindIcon(node, iconCapture, out iconId);
-                var extras = ReadNodeExtras(node);
 
                 smallTiles.Add(new UiSlot(
                     SlotKind.PlayerDiscard, // placeholder kind, will be reclassified
@@ -407,10 +406,16 @@ public static unsafe class EmjUiReader
         for (int di = 0; di < doraSlots.Count; di++)
             slots.Add(doraSlots[di] with { SlotIndex = di });
 
+        // Scan before pond classification so extra 1023 parent / peel can
+        // see populated 1060–1063 slots. Empty 86×35 chrome is not a tray;
+        // a 86×35 slot that carries a tile (live 1062 M4) is.
+        var scanned = ScanAddonNodes(addon, iconCapture, iconMap);
+        var fuuroTrays = CollectVisibleFuuroTrays(scanned.IconNodes);
+
         // Classify 34x45 tiles into discard pools and dora indicators by spatial position.
         // In the Mahjong UI, tiles are arranged with the local player at the bottom.
         // The classification uses parent node grouping and Y-position heuristics.
-        ClassifySmallTiles(uld, smallTiles, iconCapture, iconMap, slots);
+        ClassifySmallTiles(uld, smallTiles, iconCapture, iconMap, slots, fuuroTrays);
 
         var canonicalHand = BuildCanonicalHand(rawHand);
         for (var i = 0; i < canonicalHand.Count; i++)
@@ -435,7 +440,6 @@ public static unsafe class EmjUiReader
         // Called sets sit on the same 42×55 Y=0 strip as the closed hand. Peel them out
         // so they become PlayerMeld instead of CanonicalPlayerHand. Live AZPC after
         // 7ad3d5d: own fuuro is nested type-2 40×52 leaves, not 1055/1045.
-        var scanned = ScanAddonNodes(addon, iconCapture, iconMap);
         ApplyHandStripMeldSplit(slots, rawHand, extraStrip, scanned.IconNodes);
         var opponentMeldCandidates = ClassifyOpponentAreaMelds(slots, extraStrip, smallTiles, scanned.IconNodes);
 
@@ -455,7 +459,19 @@ public static unsafe class EmjUiReader
     /// smaller groups are treated as that player's melds.
     /// Dora indicators are read separately (type 1006). Type 1009 is chi-choice UI.
     /// </summary>
-    private static void ClassifySmallTiles(AtkUldManager uld, List<UiSlot> smallTiles, IconIdCapture? iconCapture, MahjongIconMap? iconMap, List<UiSlot> outputSlots)
+    private static List<IconNodeScan.Tray> CollectVisibleFuuroTrays(IReadOnlyList<UiSlot>? nodes)
+    {
+        static float AbsX(UiSlot s) => s.AbsX != 0 || s.AbsY != 0 ? s.AbsX : s.X;
+        static float AbsY(UiSlot s) => s.AbsX != 0 || s.AbsY != 0 ? s.AbsY : s.Y;
+        return (nodes ?? [])
+            .Where(s => s.Visible && IconNodeScan.IsPopulatedFuuroSlot(
+                s.NodeType, s.Width, s.Height, s.IconId, s.TileCode))
+            .Select(s => new IconNodeScan.Tray(
+                AbsX(s), AbsY(s), s.Width, s.Height, s.NodeType, s.IconId, s.TileCode))
+            .ToList();
+    }
+
+    private static void ClassifySmallTiles(AtkUldManager uld, List<UiSlot> smallTiles, IconIdCapture? iconCapture, MahjongIconMap? iconMap, List<UiSlot> outputSlots, IReadOnlyList<IconNodeScan.Tray>? trays = null)
     {
         if (smallTiles.Count == 0)
             return;
@@ -468,7 +484,8 @@ public static unsafe class EmjUiReader
             tilesWithIcons.Select((t, i) => new SmallTileClassifier.Tile(
                 i, t.NodeType, t.X, t.Y, t.AbsX, t.AbsY, t.Width, t.Height,
                 t.Rotation, t.ParentNodeId, t.TileCode,
-                t.Tsumogiri || IsRotatedTsumogiri(t.Rotation, t.Width, t.Height))).ToList());
+                t.Tsumogiri || IsRotatedTsumogiri(t.Rotation, t.Width, t.Height))).ToList(),
+            trays);
 
         foreach (var item in classified)
         {
@@ -510,6 +527,8 @@ public static unsafe class EmjUiReader
         var candidates = new List<UiSlot>();
         void Consider(UiSlot slot)
         {
+            // Visible is ancestor-AND (see ReadNodeExtras). Self-only IsVisible
+            // is how previous-round leftover type-2 / 1056 survive deal reset.
             if (!slot.Visible || slot.IconId == 0 || !IconNodeScan.IsMahjongTileIcon(slot.IconId))
                 return;
             if (claimed.Contains(slot.NodeIndex) || claimedPos.Contains(SnapPos(slot)))
@@ -584,8 +603,10 @@ public static unsafe class EmjUiReader
             ? strip.Max(s => s.AbsX != 0 || s.AbsY != 0 ? s.AbsX : s.X)
             : null;
         var trays = (allIconNodes ?? [])
-            .Where(s => s.Visible && IconNodeScan.IsFuuroTray(s.NodeType, s.Width, s.Height))
-            .Select(s => new IconNodeScan.Tray(AbsOfX(s), AbsOfY(s), s.Width, s.Height))
+            .Where(s => s.Visible && IconNodeScan.IsPopulatedFuuroSlot(
+                s.NodeType, s.Width, s.Height, s.IconId, s.TileCode))
+            .Select(s => new IconNodeScan.Tray(
+                AbsOfX(s), AbsOfY(s), s.Width, s.Height, s.NodeType, s.IconId, s.TileCode))
             .ToList();
 
         var classified = OpponentAreaClassifier.Classify(
@@ -638,12 +659,26 @@ public static unsafe class EmjUiReader
         _ => SmallTileClassifier.Kind.PlayerDiscard,
     };
 
-    private static (float Rotation, uint ParentNodeId, float AbsX, float AbsY) ReadNodeExtras(AtkResNode* node)
+    private readonly record struct NodeWalkExtras(
+        float Rotation,
+        uint ParentNodeId,
+        float AbsX,
+        float AbsY,
+        IReadOnlyList<bool> AncestorVisible);
+
+    /// <summary>
+    /// Walks up to 32 ancestors. A leftover type-2 / 1056 icon can keep
+    /// <c>IsVisible() == true</c> after deal reset while its fuuro container
+    /// is hidden — that is the previous-round ghost source. Same ancestor
+    /// gate as stale call-button text.
+    /// </summary>
+    private static NodeWalkExtras ReadNodeExtras(AtkResNode* node)
     {
         float rotation = 0;
         uint parentId = 0;
         float absX = 0;
         float absY = 0;
+        var ancestorVisible = new List<bool>();
         try { rotation = node->Rotation; } catch { }
         try
         {
@@ -655,11 +690,20 @@ public static unsafe class EmjUiReader
                 absY += walk->Y;
                 if (steps == 1 && walk->ParentNode != null)
                     parentId = walk->ParentNode->NodeId;
+                var parent = walk->ParentNode;
+                if (parent != null)
+                {
+                    bool parentVisible;
+                    try { parentVisible = parent->IsVisible(); }
+                    catch { parentVisible = false; }
+                    ancestorVisible.Add(parentVisible);
+                }
+
                 walk = walk->ParentNode;
             }
         }
         catch { }
-        return (rotation, parentId, absX, absY);
+        return new NodeWalkExtras(rotation, parentId, absX, absY, ancestorVisible);
     }
 
     /// <summary>
@@ -1693,22 +1737,14 @@ public static unsafe class EmjUiReader
     private static void ApplyHandStripMeldSplit(
         List<UiSlot> slots, List<UiSlot> rawHand, List<UiSlot> extraStrip, List<UiSlot>? allIconNodes)
     {
-        var byNode = new Dictionary<(uint NodeId, int NodeIndex, int SnapX, int SnapY, uint Icon), UiSlot>();
+        var byNode = new Dictionary<IconNodeScan.HandStripSlotKey, UiSlot>();
 
         static float AbsOfX(UiSlot s) => s.AbsX != 0 || s.AbsY != 0 ? s.AbsX : s.X;
         static float AbsOfY(UiSlot s) => s.AbsX != 0 || s.AbsY != 0 ? s.AbsY : s.Y;
         static (int X, int Y) SnapPos(UiSlot s)
-            => ((int)MathF.Round(AbsOfX(s) / IconNodeScan.LeafSnapPx),
-                (int)MathF.Round(AbsOfY(s) / IconNodeScan.LeafSnapPx));
-        static (uint NodeId, int NodeIndex, int SnapX, int SnapY, uint Icon) SlotKey(UiSlot s)
-        {
-            var snap = SnapPos(s);
-            // Nested type-2 leaves often share child NodeIndex 0. Keep distinct
-            // faces by NodeId when present, otherwise by snap + icon.
-            if (s.NodeId != 0)
-                return (s.NodeId, 0, 0, 0, 0);
-            return (0, s.NodeIndex, snap.X, snap.Y, s.IconId);
-        }
+            => IconNodeScan.SnapLeaf(AbsOfX(s), AbsOfY(s));
+        static IconNodeScan.HandStripSlotKey SlotKey(UiSlot s)
+            => IconNodeScan.HandStripSlotKeyOf(s.NodeId, s.NodeIndex, AbsOfX(s), AbsOfY(s), s.IconId);
 
         void Consider(UiSlot slot)
         {
@@ -1743,7 +1779,13 @@ public static unsafe class EmjUiReader
         float? stripAbsY = stripAnchors.Count > 0
             ? stripAnchors.Average(s => s.AbsY != 0 || s.AbsX != 0 ? s.AbsY : s.Y)
             : null;
-        var packPos = stripAnchors.Select(SnapPos).ToHashSet();
+        // Only callback-7 1055s are the closed pack. Fuuro-row 1055
+        // neighbors (live NORTH PON @1526/1623) must not occupy packPos
+        // or overlapping type-2 leaves never enter Split.
+        var packPos = stripAnchors
+            .Where(s => s.NodeIndex is >= 59 and <= 71)
+            .Select(SnapPos)
+            .ToHashSet();
 
         bool OnPlayerStrip(UiSlot slot)
         {
@@ -1786,8 +1828,16 @@ public static unsafe class EmjUiReader
                 .ToList();
             foreach (var face in faces)
             {
-                if (byNode.Values.Any(s => SnapPos(s) == SnapPos(face)))
-                    continue;
+                var faceSnap = SnapPos(face);
+                var clash = byNode.FirstOrDefault(kv => SnapPos(kv.Value) == faceSnap);
+                if (clash.Value != null)
+                {
+                    // Prefer the type-2 leaf over a 1055 wrapper at the same snap.
+                    if (clash.Value.Width * clash.Value.Height <= face.Width * face.Height)
+                        continue;
+                    byNode.Remove(clash.Key);
+                }
+
                 Consider(face);
             }
 
@@ -1808,7 +1858,7 @@ public static unsafe class EmjUiReader
                     continue;
                 if (!IconNodeScan.IsFuuroTray(slot.NodeType, slot.Width, slot.Height))
                     continue;
-                trays.Add(new IconNodeScan.Tray(AbsOfX(slot), AbsOfY(slot), slot.Width, slot.Height));
+                trays.Add(new IconNodeScan.Tray(AbsOfX(slot), AbsOfY(slot), slot.Width, slot.Height, slot.NodeType));
             }
         }
 
@@ -1933,13 +1983,14 @@ public static unsafe class EmjUiReader
         if (node == null)
             return false;
 
-        bool visible;
-        try { visible = node->IsVisible(); }
-        catch { visible = false; }
+        bool selfVisible;
+        try { selfVisible = node->IsVisible(); }
+        catch { selfVisible = false; }
 
         uint iconId = 0;
         TryFindIcon(node, iconCapture, out iconId);
         var extras = ReadNodeExtras(node);
+        var visible = MeldPresence.IsOnScreen(selfVisible, extras.AncestorVisible);
 
         slot = new UiSlot(
             kind,
@@ -1968,10 +2019,11 @@ public static unsafe class EmjUiReader
     /// <summary>
     /// Deep-walk every addon NodeList, nested component UldManager, RootNode
     /// sibling chain, and ChildNode list. Records:
-    ///   IconNodes — any node whose texture resolves to a mahjong tile icon
-    ///               (no type/size filter; includes hidden nodes)
-    ///   TileSizedNodes — visible 16–80px nodes, even when icon id is 0
-    /// so /mj snap can show where live fuuro actually lives.
+    ///   IconNodes — mahjong tile icons, plus type 1060–1063 fuuro slots
+    ///               (no icon required, including 86×35 chrome). Slot
+    ///               <see cref="UiSlot.Visible"/> is ancestor-AND. Empty
+    ///               chrome without a tile is not leftover presence.
+    ///   TileSizedNodes — on-screen 16–80px nodes, even when icon id is 0
     /// </summary>
     public static AddonNodeScan ScanAddonNodes(AtkUnitBase* addon, IconIdCapture? iconCapture, MahjongIconMap? iconMap)
     {
@@ -2052,11 +2104,12 @@ public static unsafe class EmjUiReader
         try { TryFindIcon(node, iconCapture, out iconId); }
         catch { iconId = 0; }
 
-        bool visible;
-        try { visible = node->IsVisible(); }
-        catch { visible = false; }
+        bool selfVisible;
+        try { selfVisible = node->IsVisible(); }
+        catch { selfVisible = false; }
 
         var extras = ReadNodeExtras(node);
+        var visible = MeldPresence.IsOnScreen(selfVisible, extras.AncestorVisible);
         var slot = new UiSlot(
             SlotKind.VisibleTileCandidate,
             icons.Count + tileSized.Count,
@@ -2077,7 +2130,8 @@ public static unsafe class EmjUiReader
             extras.AbsY,
             depth);
 
-        if (IconNodeScan.IsMahjongTileIcon(iconId))
+        if (IconNodeScan.IsMahjongTileIcon(iconId)
+            || IconNodeScan.IsFuuroSlotType((ushort)node->Type))
             icons.Add(slot);
         if (visible && IconNodeScan.IsTileSized(node->Width, node->Height))
             tileSized.Add(slot);

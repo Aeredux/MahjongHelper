@@ -60,6 +60,23 @@ public class MeldClassifierTests
     }
 
     [Fact]
+    public void CollapseDuplicatePairPons_drops_leftover_s2_pair()
+    {
+        var melds = new[]
+        {
+            new ObservedMeld("PON", ["S2", "S2", "S2"]),
+            new ObservedMeld("PON", ["S2", "S2"]),
+            new ObservedMeld("PON", ["GREEN", "GREEN"]),
+        };
+
+        var collapsed = MeldClassifier.CollapseDuplicatePairPons(melds);
+        Assert.Equal(2, collapsed.Count);
+        Assert.Contains(collapsed, m => m.Tiles.Count == 3 && m.Tiles[0] == "S2");
+        Assert.Contains(collapsed, m => m.Tiles.SequenceEqual(new[] { "GREEN", "GREEN" }));
+        Assert.DoesNotContain(collapsed, m => m.Tiles.Count == 2 && m.Tiles[0] == "S2");
+    }
+
+    [Fact]
     public void IsUsableTile_rejects_placeholders()
     {
         Assert.True(MeldClassifier.IsUsableTile("M0"));

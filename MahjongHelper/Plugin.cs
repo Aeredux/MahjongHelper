@@ -103,6 +103,8 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
     private string _lastActionProbeSignature = string.Empty;
     private DateTime _nextAutoplayHeartbeatUtc = DateTime.MinValue;
     private bool _snapRequested;
+    private bool _dumpUiRequested;
+    private string? _dumpUiName;
     private bool _screenshotRequested;
     private bool _screenshotPreferGameApi;
     private bool _screenshotInFlight;
@@ -147,7 +149,7 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "/mj — toggle debug window | /mj overlay | /mj compact | /mj auto | /mj pause | /mj leave | /mj snap | /mj screenshot [status|game] | /mj mark discard|call | /mj probecallback <a> <b> [run] | /mj clicktile <nodeIndex> [run]"
+            HelpMessage = "/mj — toggle debug window | /mj overlay | /mj compact | /mj auto | /mj pause | /mj leave | /mj snap | /mj dump-ui [name] | /mj screenshot [status|game] | /mj mark discard|call | /mj probecallback <a> <b> [run] | /mj clicktile <nodeIndex> [run]"
         });
 
         // Tell the UI system that we want our windows to be drawn through the window system
@@ -189,6 +191,13 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
         {
             _snapRequested = false;
             WriteSnapCapture("framework");
+        }
+
+        if (_dumpUiRequested)
+        {
+            _dumpUiRequested = false;
+            WriteUiDump(_dumpUiName);
+            _dumpUiName = null;
         }
 
         if (_screenshotRequested)
@@ -750,17 +759,23 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
             }
 
             File.WriteAllText(SolverSnapPath, json);
-            var summary = SolverJson.BuildSnapSummary(_lastSuggestRequest);
+            var lines = SolverJson.BuildSnapSummaryLines(_lastSuggestRequest);
+            var summary = string.Join(" ", lines);
             File.AppendAllText(
                 Path.Combine(CacheDirectory, "solver_snap.log"),
                 $"[{DateTime.UtcNow:O}] {summary}{Environment.NewLine}{json}{Environment.NewLine}{Environment.NewLine}");
 
-            var msg = $"/mj snap wrote {SolverSnapPath} — {summary}";
-            Log.Information(msg);
-            try { ChatGui.Print(msg); } catch { }
-            AppendRecentTransition($"{DateTime.UtcNow:O} {msg}");
-            if (MainWindow.IsOpen)
-                MainWindow.serverSuggestionText = (MainWindow.serverSuggestionText ?? string.Empty) + Environment.NewLine + msg;
+            for (var i = 0; i < lines.Count; i++)
+            {
+                var msg = i == 0
+                    ? $"/mj snap wrote {SolverSnapPath} — {lines[i]}"
+                    : lines[i];
+                Log.Information(msg);
+                try { ChatGui.Print(msg); } catch { }
+                AppendRecentTransition($"{DateTime.UtcNow:O} {msg}");
+                if (MainWindow.IsOpen)
+                    MainWindow.serverSuggestionText = (MainWindow.serverSuggestionText ?? string.Empty) + Environment.NewLine + msg;
+            }
         }
         catch (Exception ex)
         {
@@ -916,6 +931,12 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
         {
             _snapRequested = true;
             Log.Information("/mj snap queued — writing sidecar JSON and solver POST body on the next framework tick");
+        }
+        else if (lower == "dump-ui" || lower.StartsWith("dump-ui "))
+        {
+            _dumpUiName = trimmed.Length > 7 ? trimmed[7..].Trim() : null;
+            _dumpUiRequested = true;
+            Log.Information("/mj dump-ui queued — writing UI nodes under %APPDATA%/MahjongHelper/ui-dumps/");
         }
         else if (lower is "screenshot status" or "printscreen status")
         {
@@ -1430,7 +1451,79 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
         s.ParentNodeId,
         s.IconId,
         s.TileCode,
+        s.Visible,
+        ancestorVisible = s.Visible,
         s.WalkDepth,
+    };
+
+    private void WriteUiDump(string? name)
+    {
+        try
+        {
+            if (_lastMergedState != null)
+                CacheSolverPayload(_lastMergedState);
+
+            var nodes = (_lastUiState?.AllIconNodes ?? Array.Empty<EmjUiReader.UiSlot>())
+                .Select(ToDumpNode)
+                .ToList();
+            var tileSized = (_lastUiState?.TileSizedNodes ?? Array.Empty<EmjUiReader.UiSlot>())
+                .Select(ToDumpNode)
+                .ToList();
+            var trays = nodes
+                .Where(n => n.Visible && IconNodeScan.IsPopulatedFuuroSlot(
+                    n.NodeType, n.Width, n.Height, n.IconId, n.TileCode))
+                .ToList();
+
+            var dump = new UiDump
+            {
+                Name = UiDumpIO.SanitizeName(name),
+                Source = "live /mj dump-ui",
+                Command = "/mj dump-ui",
+                SeatWind = _lastSuggestRequest?.SeatWind
+                           ?? SolverJson.WindName(_lastUiState?.GameInfo?.SeatWind),
+                RoundWind = _lastSuggestRequest?.RoundWind
+                            ?? SolverJson.WindName(_lastUiState?.GameInfo?.RoundWind),
+                Expected = new UiDumpExpected
+                {
+                    SnapLine = _lastSuggestRequest == null
+                        ? null
+                        : SolverJson.BuildSnapSummaryLines(_lastSuggestRequest).ElementAtOrDefault(1),
+                    Own = _lastSuggestRequest?.Melds?.ToList(),
+                    Opponents = _lastSuggestRequest?.Opponents?.ToList(),
+                },
+                AllIconNodes = nodes,
+                TileSizedNodes = tileSized,
+                Trays = trays,
+            };
+
+            var path = UiDumpIO.Write(dump, name);
+            var msg = $"/mj dump-ui wrote {path} icons={nodes.Count} trays={trays.Count} seat={dump.SeatWind ?? "-"}";
+            Log.Information(msg);
+            try { ChatGui.Print(msg); } catch { }
+            AppendRecentTransition($"{DateTime.UtcNow:O} {msg}");
+        }
+        catch (Exception ex)
+        {
+            RecordFailure($"/mj dump-ui failed: {ex.Message}");
+            AppendRecentTransition($"{DateTime.UtcNow:O} /mj dump-ui failed: {ex.Message}");
+        }
+    }
+
+    private static UiDumpNode ToDumpNode(EmjUiReader.UiSlot s) => new()
+    {
+        NodeType = s.NodeType,
+        Width = s.Width,
+        Height = s.Height,
+        AbsX = s.AbsX != 0 || s.AbsY != 0 ? s.AbsX : s.X,
+        AbsY = s.AbsX != 0 || s.AbsY != 0 ? s.AbsY : s.Y,
+        IconId = s.IconId,
+        TileCode = s.TileCode,
+        Visible = s.Visible,
+        AncestorVisible = s.Visible,
+        ParentNodeId = s.ParentNodeId,
+        Rotation = s.Rotation,
+        NodeIndex = s.NodeIndex,
+        NodeId = s.NodeId,
     };
 
     private void LeaveStuckMatch()

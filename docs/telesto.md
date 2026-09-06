@@ -49,6 +49,7 @@ Same `ExecuteCommand` shape; only `payload.command` changes.
 | Command | What Helper does |
 | --- | --- |
 | `/mj snap` | JSON-only. Writes `%APPDATA%/MahjongHelper/captures/snap-*.json` plus `%APPDATA%/MahjongHelper/solver_snap.json`. Does **not** take a PNG. |
+| `/mj dump-ui [name]` | Writes `%APPDATA%/MahjongHelper/ui-dumps/{name}.json` (nodes + trays + seat/round + expected snap line) for offline goldens. |
 | `/mj screenshot` | Writes a PNG via CaptureFallback (or `/mj screenshot game` for the Square writer). Telesto only runs the slash command; it does not press PrintScreen itself. |
 
 Example screenshot telegram:

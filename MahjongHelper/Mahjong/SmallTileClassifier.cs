@@ -50,7 +50,8 @@ public static class SmallTileClassifier
         [1024] = Kind.OppositeDiscard,
     };
 
-    public static IReadOnlyList<ClassifiedTile> Classify(IReadOnlyList<Tile> tiles)
+    public static IReadOnlyList<ClassifiedTile> Classify(
+        IReadOnlyList<Tile> tiles, IReadOnlyList<IconNodeScan.Tray>? trays = null)
     {
         var result = new List<ClassifiedTile>();
         if (tiles == null || tiles.Count == 0)
@@ -77,6 +78,15 @@ public static class SmallTileClassifier
             var meldKind = MeldKindForPond(pondKind);
             var largest = byParent[0].ToList();
             var (pond, peeled) = PeelSharedParentMelds(largest);
+            // Extra 1023 parent / shared-parent peel is how leftover WHITE/S6
+            // become RightMeld without a type-2 leftover gate. Require a
+            // populated seat slot (not empty 86×35 1062 chrome).
+            if (peeled.Count > 0 && !IconNodeScan.SeatHasLiveFuuroSlot(meldKind, trays))
+            {
+                pond = largest;
+                peeled = [];
+            }
+
             pond.Reverse();
             for (var i = 0; i < pond.Count; i++)
                 result.Add(new ClassifiedTile(pondKind, i, pond[i]));
@@ -93,6 +103,8 @@ public static class SmallTileClassifier
                 var extra = byParent[g].OrderBy(t => t.X).ThenBy(t => t.Y).ToList();
                 if (!LooksLikeOpenMeld(extra))
                     continue;
+                if (!IconNodeScan.SeatHasLiveFuuroSlot(meldKind, trays))
+                    continue;
                 foreach (var tile in extra)
                     result.Add(new ClassifiedTile(meldKind, meldIndex++, tile));
             }
@@ -103,20 +115,45 @@ public static class SmallTileClassifier
         var leftovers = withIcons
             .Where(t => t.NodeType is not (1021 or 1022 or 1023 or 1024 or 1009 or 1006 or 1045 or 1055))
             .GroupBy(t => t.ParentNodeId)
-            .Where(g => g.Count() is >= 2 and <= 4);
+            .Where(g => g.Count() is >= 3 and <= 8);
 
         foreach (var group in leftovers)
         {
-            var ordered = group.OrderBy(t => t.X).ThenBy(t => t.Y).ToList();
-            if (!LooksLikeOpenMeld(ordered))
-                continue;
-            var owner = GuessMeldOwner(ordered[0], pondParents, pondTilesByKind);
-            if (owner == null)
-                continue;
+            var area = group
+                .Select(t => new OpponentAreaClassifier.Tile(
+                    t.Id, t.X, t.Y, t.AbsX, t.AbsY, t.Width, t.Height,
+                    t.Rotation, t.ParentNodeId, t.TileCode, t.NodeType))
+                .ToList();
+            var parts = OpponentAreaClassifier.SplitFuuroGroups(area, allowSplit: false);
+            foreach (var part in parts)
+            {
+                if (part.Count < 3)
+                    continue;
+                var owner = GuessMeldOwner(part, pondParents, pondTilesByKind);
+                if (owner == null)
+                    continue;
+                if (!IconNodeScan.SeatHasLiveFuuroSlot(owner.Value, trays))
+                    continue;
+                if (owner == Kind.OppositeMeld
+                    && !IconNodeScan.IsPlausibleOppositeLeftoverFuuro(
+                        part,
+                        trays,
+                        t => t.NodeType,
+                        t => t.Width,
+                        t => t.Height,
+                        t => t.Rotation,
+                    t => t.AbsX != 0 || t.AbsY != 0 ? t.AbsX : t.X,
+                    t => t.AbsX != 0 || t.AbsY != 0 ? t.AbsY : t.Y,
+                    t => t.TileCode))
+                    continue;
 
-            var existing = result.Count(s => s.Kind == owner);
-            foreach (var tile in ordered)
-                result.Add(new ClassifiedTile(owner.Value, existing++, tile));
+                var existing = result.Count(s => s.Kind == owner);
+                foreach (var tile in part)
+                {
+                    var source = group.First(t => t.Id == tile.Id);
+                    result.Add(new ClassifiedTile(owner.Value, existing++, source));
+                }
+            }
         }
 
         return result;
@@ -264,37 +301,35 @@ public static class SmallTileClassifier
     }
 
     private static Kind? GuessMeldOwner(
-        Tile tile,
+        IReadOnlyList<OpponentAreaClassifier.Tile> group,
         Dictionary<Kind, uint> pondParents,
         Dictionary<Kind, List<Tile>> pondTiles)
     {
+        if (group.Count == 0)
+            return null;
+
         foreach (var (pondKind, parentId) in pondParents)
         {
-            if (parentId != 0 && parentId == tile.ParentNodeId)
+            if (parentId != 0 && parentId == group[0].ParentNodeId)
                 return MeldKindForPond(pondKind);
         }
 
-        Kind? nearest = null;
-        var best = float.MaxValue;
-        foreach (var (pondKind, group) in pondTiles)
+        var hints = new List<OpponentAreaClassifier.PondHint>();
+        foreach (var (pondKind, pond) in pondTiles)
         {
-            if (group.Count == 0)
+            if (pond.Count == 0)
                 continue;
-            var cx = group.Average(UseAbs(group) ? t => t.AbsX : t => t.X);
-            var cy = group.Average(UseAbs(group) ? t => t.AbsY : t => t.Y);
-            var tx = UseAbs(group) ? tile.AbsX : tile.X;
-            var ty = UseAbs(group) ? tile.AbsY : tile.Y;
-            var dx = tx - cx;
-            var dy = ty - cy;
-            var dist = dx * dx + dy * dy;
-            if (dist < best)
-            {
-                best = dist;
-                nearest = pondKind;
-            }
+            var useAbs = UseAbs(pond);
+            hints.Add(new OpponentAreaClassifier.PondHint(
+                pondKind,
+                pond.Average(useAbs ? t => t.AbsX : t => t.X),
+                pond.Average(useAbs ? t => t.AbsY : t => t.Y)));
         }
 
-        return nearest == null ? null : MeldKindForPond(nearest.Value);
+        if (hints.Count == 0)
+            return null;
+
+        return OpponentAreaClassifier.GuessOwner(group, hints, playerStripAbsY: null);
     }
 
     private static bool UseAbs(List<Tile> tiles)

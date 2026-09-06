@@ -92,5 +92,46 @@ public class SolverJsonTests
         Assert.Contains("ownMelds=1", summary);
         Assert.Contains("seat=EAST", summary);
         Assert.Contains("round=EAST", summary);
+        Assert.Contains("own=PON M5-M0-M5", summary);
+        Assert.Contains("SOUTH=none", summary);
+    }
+
+    [Fact]
+    public void BuildSnapSummary_lists_own_and_per_wind_opponent_melds()
+    {
+        var request = new SuggestMoveRequest
+        {
+            Hand = ["M2", "M2", "M0", "M6", "M7", "P6", "P8", "P8", "S1", "S1", "S2", "SOUTH", "SOUTH"],
+            DrawnTile = "P6",
+            Dora = ["M1"],
+            SeatWind = "EAST",
+            RoundWind = "EAST",
+            Melds = [],
+            Player = new OpponentInfo { Wind = "EAST" },
+            Opponents =
+            [
+                new OpponentInfo
+                {
+                    Wind = "SOUTH",
+                    Melds =
+                    [
+                        new MeldInfo { Type = "PON", Tiles = ["S9", "S9", "S9"] },
+                        new MeldInfo { Type = "CHI", Tiles = ["S4", "S5", "S6"] },
+                    ],
+                },
+                new OpponentInfo { Wind = "WEST" },
+                new OpponentInfo { Wind = "NORTH" },
+            ],
+        };
+
+        var lines = SolverJson.BuildSnapSummaryLines(request);
+        Assert.Equal(2, lines.Count);
+        Assert.Contains("ownMelds=0", lines[0]);
+        Assert.Contains("oppMelds=2", lines[0]);
+        Assert.Contains("seat=EAST", lines[0]);
+        Assert.Equal("own=none | SOUTH=PON S9×3, CHI S4-S5-S6 | WEST=none | NORTH=none", lines[1]);
+
+        Assert.Equal("PON S9×3", SolverJson.FormatMeld(new MeldInfo { Type = "PON", Tiles = ["S9", "S9", "S9"] }));
+        Assert.Equal("CHI S4-S5-S6", SolverJson.FormatMeld(new MeldInfo { Type = "CHI", Tiles = ["S4", "S5", "S6"] }));
     }
 }

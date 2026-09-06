@@ -354,12 +354,111 @@ public class HandStripClassifierTests
         Assert.DoesNotContain(split.MeldGroups, g => Codes(tiles, g).Contains("WEST"));
 
         var noTray = HandStripClassifier.Split(tiles, trays: null);
-        var nearby = Assert.Single(noTray.MeldGroups);
-        var nearbyCodes = Codes(tiles, nearby);
-        Assert.Contains("M1", nearbyCodes);
-        Assert.Contains("M2", nearbyCodes);
-        Assert.Contains("M3", nearbyCodes);
-        Assert.DoesNotContain(noTray.MeldGroups, g => Codes(tiles, g).All(c => c == "WEST"));
+        Assert.Empty(noTray.MeldGroups);
+    }
+
+    [Fact]
+    public void Live_azpc_own_pon_north_1056_middle_is_player_meld()
+    {
+        // snap-20260906-095534536: own PON NORTH. Type-2 leaves at
+        // Abs (1526,972)/(1572,984)/(1623,972), 1056 cue @1568 rot≈4.712,
+        // 1055 upright neighbors on tray parent 112. Concealed NORTH at
+        // AbsX 1368 (parent 133, node 59–71) stays in the closed hand.
+        const float Rot270 = 4.712f;
+        var tiles = new List<HandStripClassifier.Tile>();
+        var closed = new[]
+        {
+            "M4", "M6", "M7", "M8", "M8", "M9", "S1", "S1", "S8", "S8", "M4", "P2", "NORTH",
+        };
+        for (var i = 0; i < closed.Length; i++)
+        {
+            var x = 1368 - (closed.Length - 1 - i) * 42;
+            tiles.Add(T(i, x, closed[i], nodeIndex: 59 + i, nodeType: 1055, width: 42, height: 55,
+                absX: x, absY: 972, parent: 133));
+        }
+
+        tiles.Add(T(13, 0, "NORTH", parent: 112, nodeIndex: 200, width: 42, height: 55,
+            nodeType: 1055, absX: 1526, absY: 972));
+        tiles.Add(T(14, 0, "NORTH", parent: 112, nodeIndex: 202, width: 42, height: 55,
+            nodeType: 1055, absX: 1623, absY: 972));
+        tiles.Add(T(15, 0, "NORTH", Rot270, parent: 112, nodeIndex: 190, width: 42, height: 55,
+            nodeType: 1056, absX: 1568, absY: 984));
+        tiles.Add(T(16, 0, "NORTH", parent: 112, nodeIndex: 210, width: 40, height: 52,
+            nodeType: 2, absX: 1526, absY: 972));
+        tiles.Add(T(17, 0, "NORTH", parent: 112, nodeIndex: 211, width: 40, height: 52,
+            nodeType: 2, absX: 1572, absY: 984));
+        tiles.Add(T(18, 0, "NORTH", parent: 112, nodeIndex: 212, width: 40, height: 52,
+            nodeType: 2, absX: 1623, absY: 972));
+
+        var trays = new[] { new IconNodeScan.Tray(1520, 968, 140, 55) };
+        var split = HandStripClassifier.Split(tiles, trays);
+
+        Assert.Equal(13, split.ClosedIds.Count);
+        Assert.Contains(12, split.ClosedIds);
+        Assert.Equal("NORTH", tiles[12].TileCode);
+        Assert.Equal(1368, tiles[12].AbsX);
+        Assert.DoesNotContain(13, split.ClosedIds);
+        Assert.DoesNotContain(14, split.ClosedIds);
+
+        var pon = Assert.Single(split.MeldGroups);
+        var ponCodes = Codes(tiles, pon);
+        Assert.Equal(3, ponCodes.Count);
+        Assert.All(ponCodes, c => Assert.Equal("NORTH", c));
+        Assert.Equal("PON", MeldClassifier.InferMeld(ponCodes)!.Type);
+        Assert.DoesNotContain(12, pon);
+
+        var noTray = HandStripClassifier.Split(tiles, trays: null);
+        Assert.Empty(noTray.MeldGroups);
+        Assert.Contains(12, noTray.ClosedIds);
+    }
+
+    [Fact]
+    public void Shared_nodeid_type2_north_leaves_survive_slotkey_then_split()
+    {
+        // EmjUiReader used to key by NodeId only; live leaves all NodeId=4.
+        const uint IconNorth = 76071;
+        var raw = new (int NodeIndex, float AbsX, float AbsY)[]
+        {
+            (1002866, 1526, 972),
+            (1002813, 1572, 984),
+            (1002839, 1623, 972),
+        };
+        var byNode = new Dictionary<IconNodeScan.HandStripSlotKey, (int NodeIndex, float AbsX, float AbsY)>();
+        foreach (var face in raw)
+            byNode[IconNodeScan.HandStripSlotKeyOf(4, face.NodeIndex, face.AbsX, face.AbsY, IconNorth)] = face;
+        Assert.Equal(3, byNode.Count);
+
+        var tiles = new List<HandStripClassifier.Tile>();
+        var closed = new[]
+        {
+            "M4", "M6", "M7", "M8", "M8", "M9", "S1", "S1", "S8", "S8", "M4", "P2", "NORTH",
+        };
+        for (var i = 0; i < closed.Length; i++)
+        {
+            var x = 1368 - (closed.Length - 1 - i) * 42;
+            tiles.Add(T(i, x, closed[i], nodeIndex: 59 + i, nodeType: 1055, width: 42, height: 55,
+                absX: x, absY: 972, parent: 133));
+        }
+
+        var id = 13;
+        foreach (var face in byNode.Values.OrderBy(f => f.AbsX))
+        {
+            tiles.Add(T(id++, 0, "NORTH", parent: 3, nodeIndex: face.NodeIndex, width: 40, height: 52,
+                nodeType: 2, absX: face.AbsX, absY: face.AbsY));
+        }
+
+        tiles.Add(T(id, 0, "NORTH", 4.712f, parent: 3, nodeIndex: 190, width: 42, height: 55,
+            nodeType: 1056, absX: 1568, absY: 984));
+        var trays = new[] { new IconNodeScan.Tray(1526, 972, 140, 55) };
+
+        var split = HandStripClassifier.Split(tiles, trays);
+        var pon = Assert.Single(split.MeldGroups);
+        var ponCodes = Codes(tiles, pon);
+        Assert.Equal(3, ponCodes.Count);
+        Assert.All(ponCodes, c => Assert.Equal("NORTH", c));
+        Assert.Equal("PON", MeldClassifier.InferMeld(ponCodes)!.Type);
+        Assert.Contains(12, split.ClosedIds);
+        Assert.DoesNotContain(12, pon);
     }
 
     [Fact]
@@ -379,9 +478,11 @@ public class HandStripClassifierTests
         tiles.Add(T(13, 0, "WEST", parent: 80, nodeIndex: 202, width: 40, height: 52,
             nodeType: 2, absX: 1572, absY: 980));
 
-        var split = HandStripClassifier.Split(tiles);
+        var trays = new[] { new IconNodeScan.Tray(1480, 972, 140, 55, 1060) };
+        var split = HandStripClassifier.Split(tiles, trays);
         var pon = Assert.Single(split.MeldGroups);
         Assert.Equal(["WEST", "WEST", "WEST"], Codes(tiles, pon));
+        Assert.Empty(HandStripClassifier.Split(tiles, trays: null).MeldGroups);
     }
 
     [Fact]

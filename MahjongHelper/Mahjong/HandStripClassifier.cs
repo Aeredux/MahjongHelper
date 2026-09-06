@@ -449,11 +449,17 @@ public static class HandStripClassifier
             .Average(LayoutY);
     }
 
+    /// <summary>
+    /// Concealed 42×55 tiles occupy callback-7 slots (59–71). Fuuro-row
+    /// type-1055 neighbors (live NORTH PON at AbsX≈1526/1623) are the same
+    /// size but not the closed pack — treating them as pack hid the type-2
+    /// leaves and emptied playerMeldSlots.
+    /// </summary>
     internal static bool IsClosedPackTile(Tile tile)
-        => tile.NodeIndex != DrawNodeIndex
-           && tile.Width == 42
+        => tile.Width == 42
            && tile.Height == 55
-           && (tile.NodeType == 1055 || tile.NodeIndex is >= 59 and <= 71);
+           && tile.NodeIndex is >= 59 and <= 71
+           && tile.NodeType is 1055 or 0;
 
     private static List<Tile> ReservedClosedPack(IEnumerable<Tile> tiles)
         => tiles.Where(IsClosedPackTile).OrderBy(LayoutX).ThenBy(t => t.Id).ToList();

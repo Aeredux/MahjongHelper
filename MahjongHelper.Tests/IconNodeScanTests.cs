@@ -119,10 +119,132 @@ public class IconNodeScanTests
         Assert.True(IconNodeScan.ClusterHasCallCue(with1056, t => t.W, t => t.H, t => t.Rot));
         Assert.True(IconNodeScan.IsCallCueNode(1056, 42, 55, 4.712f));
         Assert.True(IconNodeScan.IsFuuroTray(1060, 140, 55));
+        Assert.False(IconNodeScan.IsFuuroSlot(1062, 86, 35));
+        Assert.False(IconNodeScan.IsFuuroSlot(1061, 86, 35));
+        Assert.False(IconNodeScan.IsFuuroSlot(1063, 86, 35));
+        Assert.True(IconNodeScan.IsFuuroSlot(1062, 55, 140));
+        Assert.True(IconNodeScan.IsFuuroSlot(1061, 55, 140));
+        Assert.True(IconNodeScan.IsFuuroSlot(1063, 140, 55));
+        Assert.False(IconNodeScan.IsFuuroSlot(1055, 42, 55));
+        Assert.Equal(SmallTileClassifier.Kind.PlayerMeld, IconNodeScan.FuuroSlotOwner(1060));
+        Assert.Equal(SmallTileClassifier.Kind.LeftMeld, IconNodeScan.FuuroSlotOwner(1061));
+        Assert.Equal(SmallTileClassifier.Kind.RightMeld, IconNodeScan.FuuroSlotOwner(1062));
+        Assert.Equal(SmallTileClassifier.Kind.OppositeMeld, IconNodeScan.FuuroSlotOwner(1063));
+        Assert.False(IconNodeScan.SeatHasLiveFuuroSlot(
+            SmallTileClassifier.Kind.RightMeld, [new IconNodeScan.Tray(850, 300, 86, 35, 1062)]));
+        Assert.True(IconNodeScan.SeatHasLiveFuuroSlot(
+            SmallTileClassifier.Kind.RightMeld, [new IconNodeScan.Tray(850, 300, 55, 140, 1062)]));
+        Assert.False(IconNodeScan.SeatHasLiveFuuroSlot(
+            SmallTileClassifier.Kind.RightMeld, [new IconNodeScan.Tray(1525, 972, 140, 55)]));
+        Assert.False(IconNodeScan.SeatHasLiveFuuroSlot(SmallTileClassifier.Kind.LeftMeld, []));
+        Assert.True(IconNodeScan.IsFuuroSlotType(1062));
+        Assert.True(IconNodeScan.IsPopulatedFuuroSlot(1062, 86, 35, 76044, "M4"));
+        Assert.False(IconNodeScan.IsPopulatedFuuroSlot(1062, 86, 35));
+        Assert.True(IconNodeScan.SeatHasLiveFuuroSlot(
+            SmallTileClassifier.Kind.RightMeld,
+            [new IconNodeScan.Tray(1562, 459, 86, 35, 1062, 76044, "M4")]));
+        Assert.False(IconNodeScan.SeatHasLiveFuuroSlot(
+            SmallTileClassifier.Kind.RightMeld,
+            [new IconNodeScan.Tray(1562, 459, 86, 35, 1062)]));
         // Doman CHI: only the called tile is sideways. Two upright 40×52
         // in-hand leaves plus the 1056 cue are enough — M1/M3 must not be 52×40.
         Assert.True(IconNodeScan.IsFaceLeaf(2, 40, 52));
         Assert.False(IconNodeScan.HasCallCue(40, 52, 0));
+    }
+
+    [Fact]
+    public void Shared_child_nodeid_does_not_collapse_distinct_north_faces()
+    {
+        // snap-20260906-100051365: three type-2 NORTH leaves all NodeId=4.
+        const uint IconNorth = 76071;
+        var faces = new (int NodeIndex, float AbsX, float AbsY)[]
+        {
+            (1002866, 1526, 972),
+            (1002813, 1572, 984),
+            (1002839, 1623, 972),
+        };
+
+        var keys = faces
+            .Select(f => IconNodeScan.HandStripSlotKeyOf(4, f.NodeIndex, f.AbsX, f.AbsY, IconNorth))
+            .ToList();
+        Assert.Equal(3, keys.Distinct().Count());
+        Assert.Single(keys.Select(k => k.NodeId).Distinct());
+
+        var byNode = new Dictionary<IconNodeScan.HandStripSlotKey, (int NodeIndex, float AbsX, float AbsY)>();
+        foreach (var face in faces)
+            byNode[IconNodeScan.HandStripSlotKeyOf(4, face.NodeIndex, face.AbsX, face.AbsY, IconNorth)] = face;
+        // type-1056 cue Abs (1568,984) shares LeafSnap with the middle type-2
+        // (1572,984). NodeIndex must keep the cue as a fourth byNode entry.
+        byNode[IconNodeScan.HandStripSlotKeyOf(4, 190, 1568, 984, IconNorth)] = (190, 1568, 984);
+        Assert.Equal(4, byNode.Count);
+
+        // Same node scanned twice still dedupes.
+        var again = IconNodeScan.HandStripSlotKeyOf(4, 1002866, 1526, 972, IconNorth);
+        Assert.Equal(keys[0], again);
+    }
+
+    [Fact]
+    public void Upright_type2_dora_band_is_not_plausible_opposite_fuuro()
+    {
+        var dora = new (ushort Type, float X, float Y, int W, int H, float Rot)[]
+        {
+            (2, 1043, 396, 40, 52, 0),
+            (2, 1069, 396, 40, 52, 0),
+            (2, 1092, 430, 40, 52, 0),
+        };
+        Assert.False(IconNodeScan.IsPlausibleOppositeLeftoverFuuro(
+            dora, trays: null, t => t.Type, t => t.W, t => t.H, t => t.Rot, t => t.X, t => t.Y));
+
+        var chi = new (ushort Type, float X, float Y, int W, int H, float Rot)[]
+        {
+            (2, 1041, 410, 40, 52, 0),
+            (2, 1078, 396, 40, 52, 0),
+            (2, 1104, 430, 52, 40, 0),
+        };
+        Assert.True(IconNodeScan.IsPlausibleOppositeLeftoverFuuro(
+            chi, trays: null, t => t.Type, t => t.W, t => t.H, t => t.Rot, t => t.X, t => t.Y));
+
+        var handSized = new (ushort Type, float X, float Y, int W, int H, float Rot)[]
+        {
+            (1055, 480, 40, 42, 55, 0),
+            (1055, 522, 40, 42, 55, 0),
+            (1055, 564, 40, 42, 55, 0),
+        };
+        Assert.True(IconNodeScan.IsPlausibleOppositeLeftoverFuuro(
+            handSized, trays: null, t => t.Type, t => t.W, t => t.H, t => t.Rot, t => t.X, t => t.Y));
+    }
+
+    [Fact]
+    public void Upright_type2_honor_pon_is_plausible_opposite_dora_band_is_not()
+    {
+        var east = new (ushort Type, float X, float Y, int W, int H, float Rot, string Code)[]
+        {
+            (2, 1040, 410, 40, 52, 0, "EAST"),
+            (2, 1078, 396, 40, 52, 0, "EAST"),
+            (2, 1114, 430, 40, 52, 0, "EAST"),
+        };
+        Assert.True(IconNodeScan.IsPlausibleOppositeLeftoverFuuro(
+            east, trays: null, t => t.Type, t => t.W, t => t.H, t => t.Rot, t => t.X, t => t.Y, t => t.Code));
+
+        var dora = new (ushort Type, float X, float Y, int W, int H, float Rot, string Code)[]
+        {
+            (2, 1043, 396, 40, 52, 0, "M5"),
+            (2, 1069, 396, 40, 52, 0, "M5"),
+            (2, 1092, 430, 40, 52, 0, "M0"),
+        };
+        Assert.False(IconNodeScan.IsPlausibleOppositeLeftoverFuuro(
+            dora, trays: null, t => t.Type, t => t.W, t => t.H, t => t.Rot, t => t.X, t => t.Y, t => t.Code));
+
+        var chi = new (ushort Type, float X, float Y, int W, int H, float Rot, string Code)[]
+        {
+            (2, 1041, 80, 40, 52, 0, "M4"),
+            (2, 1078, 66, 40, 52, 0, "M5"),
+            (2, 1114, 80, 40, 52, 0, "M6"),
+        };
+        Assert.True(IconNodeScan.IsPlausibleOppositeLeftoverFuuro(
+            chi, trays: null, t => t.Type, t => t.W, t => t.H, t => t.Rot, t => t.X, t => t.Y, t => t.Code));
+        Assert.False(IconNodeScan.SeatHasLiveFuuroSlot(
+            SmallTileClassifier.Kind.OppositeMeld, [new IconNodeScan.Tray(1040, 40, 86, 35, 1063)]));
     }
 
     [Fact]
@@ -148,7 +270,7 @@ public class IconNodeScanTests
             west, 1327, trays, t => t.W, t => t.H, t => t.Rot, t => t.X, t => t.Y));
         Assert.True(IconNodeScan.IsPlausibleOwnLeftoverFuuro(
             chi, 1327, trays, t => t.W, t => t.H, t => t.Rot, t => t.X, t => t.Y));
-        Assert.True(IconNodeScan.IsPlausibleOwnLeftoverFuuro(
+        Assert.False(IconNodeScan.IsPlausibleOwnLeftoverFuuro(
             chi, 1327, trays: null, t => t.W, t => t.H, t => t.Rot, t => t.X, t => t.Y));
     }
 
