@@ -1,5 +1,16 @@
 # Dev Journey
 
+## 2026-09-06: KAN-55 `/mj screenshot` prefers CaptureFallback (no 5s wait)
+
+**What:** AZPC confirmed the game writer is dead and the ~5s `ScheduleScreenShot` wait made every `/mj screenshot` slow.
+
+**Changes:**
+- Default `/mj screenshot` / `/mj printscreen` goes straight to CaptureFallback. No ScheduleScreenShot wait, no key-inject wait.
+- `/mj screenshot game` keeps the old Square-writer path (stuck recovery + FORCE-CLEAR, then CaptureFallback).
+- Chat still names the method (`CaptureFallback/DalamudViewport`, etc.). README one-liner updated.
+
+**Result:** Cloud VM cannot time a live client. AZPC: reload; `/mj screenshot` should finish well under 1s and still write a real PNG.
+
 ## 2026-09-06: KAN-55 CaptureFallback when game screenshot writer is dead
 
 **What:** AZPC after ReShade disabled (`dxgi.dll` → `dxgi.dll.off`) and a full relaunch: `/mj screenshot` still got `ScheduleScreenShot=true`, Location set to a new `ffxiv_…png` under `FF14Modding\Screenshots`, **file never appears**, `ScreenShotRequested` sticks until FORCE-CLEARED. Manual PrintScreen fails the same way. Game API screenshot is broken independent of ReShade.

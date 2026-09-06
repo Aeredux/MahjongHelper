@@ -26,23 +26,41 @@ public sealed partial class Plugin
         }
     }
 
+    private void QueueScreenshot(bool preferGameApi)
+    {
+        if (_screenshotInFlight)
+        {
+            NotifyScreenshot("/mj screenshot already in progress — wait before retrying");
+            return;
+        }
+
+        _screenshotPreferGameApi = preferGameApi;
+        _screenshotRequested = true;
+        Log.Information(
+            preferGameApi
+                ? "/mj screenshot game queued — ScheduleScreenShot path on the next framework tick"
+                : "/mj screenshot queued — CaptureFallback on the next framework tick");
+    }
+
     private void StartGameScreenshot()
     {
         if (_screenshotInFlight)
         {
-            NotifyScreenshot("/mj screenshot already in progress — wait for Result/Location (or stuck) before retrying");
+            NotifyScreenshot("/mj screenshot already in progress — wait before retrying");
             return;
         }
 
         _screenshotInFlight = true;
-        _ = FireGameScreenshotAsync();
+        var preferGameApi = _screenshotPreferGameApi;
+        _screenshotPreferGameApi = false;
+        _ = FireGameScreenshotAsync(preferGameApi);
     }
 
-    private async Task FireGameScreenshotAsync()
+    private async Task FireGameScreenshotAsync(bool preferGameApi)
     {
         try
         {
-            await FireGameScreenshotCoreAsync().ConfigureAwait(false);
+            await FireGameScreenshotCoreAsync(preferGameApi).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -55,41 +73,44 @@ public sealed partial class Plugin
         }
     }
 
-    private async Task FireGameScreenshotCoreAsync()
+    private async Task FireGameScreenshotCoreAsync(bool preferGameApi)
     {
         var requestedAtUtc = DateTime.UtcNow;
         var folder = GameScreenshot.ResolveScreenshotsDirectory();
         var configured = FfxivCfgScreenshotDir.TryReadConfiguredDirectory();
-        var watchNote = configured != null
-            ? $"watching cfg ScreenShotDir={configured} (plus fallbacks; resolved={folder})"
-            : $"watching resolved={folder} (cfg ScreenShotDir unset; scanning all candidates)";
 
-        try
+        if (preferGameApi)
         {
-            var snap = GameScreenshot.CaptureApiSnapshot();
+            var watchNote = configured != null
+                ? $"watching cfg ScreenShotDir={configured} (plus fallbacks; resolved={folder})"
+                : $"watching resolved={folder} (cfg ScreenShotDir unset; scanning all candidates)";
+
+            try
+            {
+                var snap = GameScreenshot.CaptureApiSnapshot();
+                NotifyScreenshot(
+                    $"/mj screenshot game pre-schedule: CanTake={snap.CanTake} Requested={snap.Requested} " +
+                    $"Result={snap.Result} Location={snap.Location ?? "(none)"} — {watchNote}");
+            }
+            catch (Exception ex)
+            {
+                NotifyScreenshot($"/mj screenshot game pre-schedule failed: {ex.Message} — {watchNote}");
+            }
+
+            var gameFile = await TryGameApiForRealFileAsync(requestedAtUtc).ConfigureAwait(false);
+            if (gameFile != null)
+            {
+                GameScreenshot.RememberLastCapture(GameScreenshot.TriggerMethod.GameApi.ToString(), gameFile);
+                NotifyScreenshot($"/mj screenshot wrote {gameFile} via GameApi.");
+                return;
+            }
+
+            if (SafeCapture().Requested)
+                await ForceClearOnFrameworkAsync().ConfigureAwait(false);
+
             NotifyScreenshot(
-                $"/mj screenshot pre-schedule: CanTake={snap.CanTake} Requested={snap.Requested} " +
-                $"Result={snap.Result} Location={snap.Location ?? "(none)"} — {watchNote}");
+                "/mj screenshot game API did not produce a file. Running CaptureFallback.");
         }
-        catch (Exception ex)
-        {
-            NotifyScreenshot($"/mj screenshot pre-schedule failed: {ex.Message} — {watchNote}");
-        }
-
-        var gameFile = await TryGameApiForRealFileAsync(requestedAtUtc).ConfigureAwait(false);
-        if (gameFile != null)
-        {
-            GameScreenshot.RememberLastCapture(GameScreenshot.TriggerMethod.GameApi.ToString(), gameFile);
-            NotifyScreenshot($"/mj screenshot wrote {gameFile} via GameApi.");
-            return;
-        }
-
-        if (SafeCapture().Requested)
-            await ForceClearOnFrameworkAsync().ConfigureAwait(false);
-
-        NotifyScreenshot(
-            "/mj screenshot game API did not produce a file (Success-but-missing or stuck). " +
-            "Running CaptureFallback — not stopping at PrintScreen-pending.");
 
         var fallback = await RunCaptureFallbackAsync(configured, requestedAtUtc).ConfigureAwait(false);
         if (fallback.Wrote)
@@ -103,10 +124,13 @@ public sealed partial class Plugin
         }
 
         GameScreenshot.RememberLastCapture(ScreenshotCaptureFallback.MethodName, null);
-        NotifyScreenshot(
-            $"/mj screenshot CaptureFallback failed ({fallback.Detail}). " +
-            "Trying BoundKey / VK_SNAPSHOT last (also dead when the game writer is broken).");
+        NotifyScreenshot($"/mj screenshot CaptureFallback failed ({fallback.Detail}).");
 
+        if (!preferGameApi)
+            return;
+
+        NotifyScreenshot(
+            "Trying BoundKey / VK_SNAPSHOT last (also dead when the game writer is broken).");
         await TryKeyInjectAfterFallbackAsync(requestedAtUtc, folder).ConfigureAwait(false);
     }
 

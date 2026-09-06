@@ -104,6 +104,7 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
     private DateTime _nextAutoplayHeartbeatUtc = DateTime.MinValue;
     private bool _snapRequested;
     private bool _screenshotRequested;
+    private bool _screenshotPreferGameApi;
     private bool _screenshotInFlight;
 
     public Task LoadAsync(CancellationToken cancellationToken)
@@ -143,7 +144,7 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "/mj — toggle debug window | /mj overlay | /mj compact | /mj auto | /mj pause | /mj leave | /mj snap | /mj screenshot [status] | /mj mark discard|call | /mj probecallback <a> <b> [run] | /mj clicktile <nodeIndex> [run]"
+            HelpMessage = "/mj — toggle debug window | /mj overlay | /mj compact | /mj auto | /mj pause | /mj leave | /mj snap | /mj screenshot [status|game] | /mj mark discard|call | /mj probecallback <a> <b> [run] | /mj clicktile <nodeIndex> [run]"
         });
 
         // Tell the UI system that we want our windows to be drawn through the window system
@@ -865,22 +866,14 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
         {
             PrintScreenshotStatus();
         }
+        else if (lower is "screenshot game" or "printscreen game")
+        {
+            QueueScreenshot(preferGameApi: true);
+        }
         else if (lower is "screenshot" or "printscreen")
         {
-            // KAN-55: game PNG via ScreenShot API, then CaptureFallback. Snap stays JSON-only.
-            if (_screenshotInFlight)
-            {
-                var busy = "/mj screenshot already in progress — wait for Result/Location (or stuck) before retrying";
-                Log.Information(busy);
-                LogToFile("autoplay.log", $"[SCREENSHOT] {busy}");
-                try { ChatGui.Print(busy); } catch { }
-                AppendRecentTransition($"{DateTime.UtcNow:O} {busy}");
-            }
-            else
-            {
-                _screenshotRequested = true;
-                Log.Information("/mj screenshot queued — firing the game screenshot on the next framework tick");
-            }
+            // KAN-55: CaptureFallback first (no ~5s ScheduleScreenShot wait). Snap stays JSON-only.
+            QueueScreenshot(preferGameApi: false);
         }
         else if (lower == "mark discard")
         {

@@ -10,9 +10,9 @@ using FFXIVClientStructs.FFXIV.Client.UI;
 namespace MahjongHelper.Mahjong;
 
 /// <summary>
-/// KAN-55: fire FFXIV's built-in screenshot, then CaptureFallback (Dalamud
-/// viewport / GDI) when the game writer reports Success but writes no file.
-/// Key inject is last. Telesto is not required.
+/// KAN-55: screenshot helpers. Default chat command uses CaptureFallback
+/// (Dalamud viewport / GDI). <c>/mj screenshot game</c> still calls
+/// <c>ScheduleScreenShot</c> with stuck recovery. Telesto is not required.
 /// </summary>
 public static class GameScreenshot
 {

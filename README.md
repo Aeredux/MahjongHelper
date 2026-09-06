@@ -42,7 +42,7 @@ Main command: `/mj`
 - `/mj pause` pauses/resumes pending auto-play actions.
 - `/mj leave` withdraws and closes a stuck NPC mahjong match (FireCallback 16 then 19). Overlay **Leave** asks for confirmation first.
 - `/mj snap` writes overlay/suggestion sidecar JSON under `%APPDATA%/MahjongHelper/captures/` (plus a `request_snap` file-watch fallback). JSON-only — it does **not** take a PNG. `scripts/mj-snap.ps1` POSTs Telesto ExecuteCommand to `http://localhost:45678/` (Host **localhost**, not `127.0.0.1`). The plugin keeps the last 10 capture files.
-- `/mj screenshot` (alias `/mj printscreen`) tries FFXIV’s built-in screenshot, then writes a PNG we control if the game API is a phantom. Watch folder comes from `ScreenShotDir` in `FFXIV.cfg` (OneDrive and non-OneDrive `My Games\FINAL FANTASY XIV - A Realm Reborn`) when set, then the usual `Documents\My Games\...\screenshots` fallbacks; newest-file search scans **all** candidates. Priority: game `ScreenShot.ScheduleScreenShot` (async — chat reports `ScreenShotResult` / `ScreenShotLocation` or a stuck `ScreenShotRequested`) → **CaptureFallback** (Dalamud viewport/backbuffer of the game scene, then GDI `PrintWindow`/`BitBlt` of the FFXIV HWND) → bound `KEY_SCREENSHOT` / `VK_SNAPSHOT` last (also dead when the game writer never creates a file). CaptureFallback always writes `%APPDATA%/MahjongHelper/screenshots/mj-*.png` and copies into cfg `ScreenShotDir` when writable. If `ScreenShotRequested` stays true with a missing/stale Location, the plugin force-clears that bit, retries schedule once, then CaptureFallback — it does **not** stop at “Not injecting PrintScreen while pending”. Chat names the method that wrote the file. `/mj screenshot status` dumps CanTake / Requested / Result / LocationOnDisk / resolved dirs / lastMethod / lastPath. Telesto is not required; it can still `ExecuteCommand` `/mj screenshot`. Hide UI / Scroll Lock is **not** toggled.
+- `/mj screenshot` (alias `/mj printscreen`) writes a PNG we control via **CaptureFallback** first (Dalamud viewport/backbuffer of the game scene, then GDI `PrintWindow`/`BitBlt` of the FFXIV HWND) — it does **not** wait ~5s on `ScheduleScreenShot`. Files land in `%APPDATA%/MahjongHelper/screenshots/mj-*.png` and are copied into cfg `ScreenShotDir` when writable. Chat names the method (`CaptureFallback/DalamudViewport`, `CaptureFallback/PrintWindow`, …). `/mj screenshot game` is the optional Square-writer path (async `ScheduleScreenShot`, FORCE-CLEAR / stuck recovery, then CaptureFallback). `/mj screenshot status` dumps CanTake / Requested / Result / LocationOnDisk / lastMethod / lastPath. `/mj snap` stays JSON-only. Telesto is not required. Hide UI / Scroll Lock is **not** toggled.
 - `/mj mark discard` records a manual discard marker in diagnostics.
 - `/mj mark call` records a manual call marker in diagnostics.
 
@@ -107,7 +107,7 @@ Common files include:
 - `server_log.txt` (HTTP request/response logs)
 - `autoplay.log` (auto-play action traces)
 - `captures/` (`/mj snap` sidecar JSON; last 10 files kept)
-- `screenshots/` (`/mj screenshot` CaptureFallback PNGs when the game writer is broken)
+- `screenshots/` (`/mj screenshot` CaptureFallback PNGs)
 - `mahjong_ui_state_history.log` (deduped UI state history)
 - `normalized_state_history.log` (deduped normalized state history)
 - `probe_history.log`, `probe_signals.log`, `tile_candidates.log` (reverse-engineering logs)
