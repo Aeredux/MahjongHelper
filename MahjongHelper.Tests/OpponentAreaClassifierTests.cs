@@ -413,9 +413,9 @@ public class OpponentAreaClassifierTests
     [Fact]
     public void Live_7ad3d5d_type2_faces_seat_own_and_across_without_echo_or_tray()
     {
-        // snap-20260906-081032563 + user/screenshot: own fuuro is only CHI
-        // M1-M2-M3. Upright WEST×3 at 1391–1484 are ghosts, not a PON.
-        // Across CHI P2/P3/P4 stays. Echo and 192×52 tray stay out.
+        // snap-20260906-083929732: own fuuro is only CHI M1-M2-M3. Hand-row
+        // type-1056/type-2 WEST@1385–1484 is a ghost PON. Pond WEST honors
+        // (1022/1023/1024) are real discards and are not in this leftover set.
         var leftovers = new List<OpponentAreaClassifier.Tile>
         {
             Area(0, 0, 0, 1041, 410, 40, 52, parent: 300, "P2", nodeType: 2),

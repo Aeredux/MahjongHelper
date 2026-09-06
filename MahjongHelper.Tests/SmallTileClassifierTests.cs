@@ -6,6 +6,38 @@ namespace MahjongHelper.Tests;
 public class SmallTileClassifierTests
 {
     [Fact]
+    public void Pond_west_honors_stay_discards_not_own_pon()
+    {
+        // Frozen table: one WEST each in opponent ponds is real. Do not steal
+        // those 1022/1023/1024 tiles into a meld. Own PON WEST is the hand-row
+        // type-1056/type-2 ghost cluster, not these river tiles.
+        var tiles = new List<SmallTileClassifier.Tile>
+        {
+            Pond(0, 1022, 11, 0, 0, "S1", absX: 80, absY: 360),
+            Pond(1, 1022, 11, 34, 0, "WEST", absX: 114, absY: 360),
+            Pond(2, 1023, 20, 0, 0, "P8", absX: 800, absY: 400),
+            Pond(3, 1023, 20, 34, 0, "WEST", absX: 834, absY: 400),
+            Pond(4, 1024, 50, 0, 0, "P3", absX: 400, absY: 180),
+            Pond(5, 1024, 50, 34, 0, "WEST", absX: 434, absY: 180),
+        };
+
+        var classified = SmallTileClassifier.Classify(tiles);
+
+        Assert.Equal(2, classified.Count(c => c.Kind == SmallTileClassifier.Kind.LeftDiscard));
+        Assert.Equal(2, classified.Count(c => c.Kind == SmallTileClassifier.Kind.RightDiscard));
+        Assert.Equal(2, classified.Count(c => c.Kind == SmallTileClassifier.Kind.OppositeDiscard));
+        Assert.Equal(3, classified.Count(c => c.Tile.TileCode == "WEST"));
+        Assert.DoesNotContain(classified, c => c.Kind is SmallTileClassifier.Kind.PlayerMeld
+            or SmallTileClassifier.Kind.LeftMeld
+            or SmallTileClassifier.Kind.RightMeld
+            or SmallTileClassifier.Kind.OppositeMeld);
+        Assert.All(classified.Where(c => c.Tile.TileCode == "WEST"),
+            c => Assert.True(c.Kind is SmallTileClassifier.Kind.LeftDiscard
+                or SmallTileClassifier.Kind.RightDiscard
+                or SmallTileClassifier.Kind.OppositeDiscard));
+    }
+
+    [Fact]
     public void Type_1024_group_is_opposite_pond()
     {
         var tiles = Enumerable.Range(0, 6)

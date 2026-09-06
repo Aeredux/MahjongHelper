@@ -120,6 +120,7 @@ public static class IconNodeScan
     /// Own leftover type-2 / 1056 groups are real fuuro only when they have a
     /// call cue and either sit in a type-1060 tray or start past the closed
     /// 1055 pack. Ghost WEST 1056+type-2 at AbsX≈1385–1484 fails both.
+    /// Pond WEST on types 1021–1024 stay discards — those are real river tiles.
     /// </summary>
     public static bool IsPlausibleOwnLeftoverFuuro<T>(
         IReadOnlyList<T> tiles,
