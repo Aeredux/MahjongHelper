@@ -17,3 +17,10 @@ Other IDs (0-6, 9, 11-15, 17): no visible effect
 Usage:
   FireCallback(2, [7, handPos], true)  — discard tile at handPos (0-based from left)
   FireCallback(2, [8, 0], true)        — discard drawn tile (tsumogiri) OR skip call prompt
+
+Autoplay tsumogiri (KAN-59): do NOT use callback 8. At atk0=6 (discard-ready after
+draw animation AND call-prompt skip) callback 8 is skip/pass, not a discard.
+When the live hint matches a real drawn 1055 (Doman node 54) that is not in
+callback-7 slots 0-13, FireCallback 7 at the mapped X-sorted pos (13 closed → 13).
+Type-1022 is a draw visual only. Never invent a random closed tile. Never unstick
+via blind callback 8.

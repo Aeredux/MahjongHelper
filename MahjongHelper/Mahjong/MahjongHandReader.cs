@@ -239,7 +239,7 @@ public static unsafe class MahjongHandReader
     /// Nodes 59-71 are the remaining closed-hand slots.
     /// </summary>
     public static bool IsCallback7ClosedHandNode(int nodeIndex)
-        => nodeIndex == 54 || nodeIndex is >= 59 and <= 71;
+        => HintedDiscardPlanner.IsCallback7ClosedHandNode(nodeIndex);
 
     /// <summary>
     /// Closed type-1055 tiles in callback 7 order (left-to-right). Index 0-13 maps

@@ -45,6 +45,7 @@ public sealed class AutoPlayManager
     private int? _riichiDiscardSlot; // post-accept ATK [18]/[1] hand position
     private string? _lastSeenDiscardTile;
     private int? _lastSeenDiscardIconId;
+    private string? _unfulfillableDiscardHint; // hint missing from closed and draw; do not reschedule
     private bool _awaitingRiichiDiscard; // declared Riichi stuck; waiting to discard the saved tile
     private bool _riichiDeclarePending; // Riichi ListItemClick dispatched; waiting to see if it stuck
 
@@ -125,6 +126,7 @@ public sealed class AutoPlayManager
         {
             _lastSeenDiscardTile = null;
             _lastSeenDiscardIconId = null;
+            _unfulfillableDiscardHint = null;
         }
 
         // Capture the discard suggestion DURING WaitingForDiscard, before the
@@ -142,6 +144,10 @@ public sealed class AutoPlayManager
             var providerTile = _activeProvider.GetDiscardTile();
             if (!string.IsNullOrEmpty(providerTile))
                 _lastSeenDiscardTile = providerTile;
+
+            if (!string.IsNullOrEmpty(_lastSeenDiscardTile) &&
+                !IsUnfulfillableDiscardHint(_lastSeenDiscardTile))
+                _unfulfillableDiscardHint = null;
         }
 
         CaptureRiichiDeclaredTile(inGameSuggestion, gamePhase, prevPhase);
@@ -266,7 +272,8 @@ public sealed class AutoPlayManager
             _config.AutoPlayEnabled && _config.AutoDiscardEnabled && !_paused &&
             DateTime.UtcNow > _discardPhaseEnteredUtc.AddSeconds(8))
         {
-            if (!string.IsNullOrEmpty(_lastSeenDiscardTile))
+            if (!string.IsNullOrEmpty(_lastSeenDiscardTile) &&
+                !IsUnfulfillableDiscardHint(_lastSeenDiscardTile))
             {
                 Log($"Fallback: retrying live hint '{_lastSeenDiscardTile}' after 8s with no pending discard — not tsumogiri/callback 8");
                 _pendingAction = $"discard:{_lastSeenDiscardTile}";
@@ -404,10 +411,22 @@ public sealed class AutoPlayManager
             // differs — matching is by icon id and tile code on the closed list.
             int? hintIcon = _lastSeenDiscardIconId is > 0 ? _lastSeenDiscardIconId : null;
 
-            var result = _awaitingRiichiDiscard
-                ? ExecuteDeclaredRiichiDiscard(addon)
-                : ExecuteHintedDiscard(addon, tileCode, hintIcon, allowUnhintedDrawn: false);
+            bool result;
+            if (_awaitingRiichiDiscard)
+            {
+                result = ExecuteDeclaredRiichiDiscard(addon);
+            }
+            else
+            {
+                var hinted = ExecuteHintedDiscard(addon, tileCode, hintIcon, allowUnhintedDrawn: false);
+                if (hinted == HintedDiscardPlanner.Kind.MissingHint)
+                {
+                    MarkUnfulfillableDiscardHint(tileCode);
+                    return false;
+                }
 
+                result = hinted == HintedDiscardPlanner.Kind.FireCallback7;
+            }
             if (result)
             {
                 _awaitingRiichiDiscard = false;
@@ -422,7 +441,6 @@ public sealed class AutoPlayManager
 
             if (!result)
             {
-                // Tile not found in hand (stale icon data / reader mismatch)
                 _consecutiveFailedDiscards++;
                 Log($"Discard tile not found in hand, consecutive={_consecutiveFailedDiscards}");
             }
@@ -585,6 +603,16 @@ public sealed class AutoPlayManager
 
         if (string.IsNullOrEmpty(bestTile))
             return;
+
+        if (IsUnfulfillableDiscardHint(bestTile))
+        {
+            if (_lastActionSignature != $"unfulfillable:{bestTile}")
+            {
+                Log($"[DISCARD] Not rescheduling unfulfillable hint '{bestTile}' — not in closed hand and not the draw");
+                _lastActionSignature = $"unfulfillable:{bestTile}";
+            }
+            return;
+        }
 
         var sig = $"discard:{bestTile}";
         if (sig == _lastActionSignature)
@@ -882,6 +910,13 @@ public sealed class AutoPlayManager
                     (t.TileCode != null && drawn.TileCode != null && TileCodesMatch(t.TileCode, drawn.TileCode)));
                 if (drawnPos is >= 0)
                     AddAttempt(drawnPos.Value, closedHand[drawnPos.Value].NodeIndex, $"suggestion-drawn-via-closed pos={drawnPos} node={closedHand[drawnPos.Value].NodeIndex} code={drawn.TileCode} — not assuming pos 13 is type-1022");
+                else
+                {
+                    var mapped = HintedDiscardPlanner.MapRealDrawToCallback7Pos(
+                        closedHand.Select(ToPlannerTile).ToList(), ToPlannerTile(drawn));
+                    if (mapped is >= 0)
+                        AddAttempt(mapped.Value, drawn.NodeIndex, $"suggestion-tsumogiri via mapped draw pos={mapped} node={drawn.NodeIndex} code={drawn.TileCode} type={drawn.NodeType} (not callback 8)");
+                }
             }
         }
 
@@ -900,6 +935,13 @@ public sealed class AutoPlayManager
                 (t.TileCode != null && drawn.TileCode != null && TileCodesMatch(t.TileCode, drawn.TileCode)));
             if (drawnPos is >= 0)
                 AddAttempt(drawnPos.Value, closedHand[drawnPos.Value].NodeIndex, $"true-tsumogiri via closed pos={drawnPos} node={closedHand[drawnPos.Value].NodeIndex} code={drawn.TileCode} type={drawn.NodeType} (not blindly pos 13)");
+            else
+            {
+                var mapped = HintedDiscardPlanner.MapRealDrawToCallback7Pos(
+                    closedHand.Select(ToPlannerTile).ToList(), ToPlannerTile(drawn));
+                if (mapped is >= 0)
+                    AddAttempt(mapped.Value, drawn.NodeIndex, $"true-tsumogiri via mapped draw pos={mapped} node={drawn.NodeIndex} code={drawn.TileCode} type={drawn.NodeType} (not blindly pos 13, not callback 8)");
+            }
         }
 
         if (attempts.Count == 0)
@@ -1035,12 +1077,12 @@ public sealed class AutoPlayManager
 
     /// <summary>
     /// Discard the live hint via FireCallback 7 (same as a working normal turn).
-    /// Matches icon id and tile code from the same closed-hand list that is logged
-    /// (including node 54). A discard turn has 14 tiles: callback 7 handPos is 0-13.
-    /// Eligible index 13 is the 14th closed tile, not an illegal "latest/drawn" and
-    /// not the type-1022 visual. Never FireCallback 8. Success requires ATK to change.
+    /// Closed hits use eligible 0-13. A real drawn 1055 (live Doman: node 54)
+    /// that is not in that list is tsumogiri via the mapped callback-7 pos
+    /// (13 closed tiles → pos 13). Type-1022 is a visual only. Never FireCallback 8
+    /// (atk0=6 is skip/pass). Success requires ATK to change.
     /// </summary>
-    private unsafe bool ExecuteHintedDiscard(AtkUnitBase* addon, string tileCode, int? hintIconId, bool allowUnhintedDrawn)
+    private unsafe HintedDiscardPlanner.Kind ExecuteHintedDiscard(AtkUnitBase* addon, string tileCode, int? hintIconId, bool allowUnhintedDrawn)
     {
         var before = SnapshotAtk(addon);
         var snapshot = MahjongHandReader.Read(addon, _iconCapture, _iconMap);
@@ -1048,114 +1090,54 @@ public sealed class AutoPlayManager
         var closedHand = MahjongHandReader.ClosedTilesForCallback7(snapshot);
         var drawn = snapshot.DrawnTile;
 
-        bool MatchesHint(MahjongHandReader.MahjongTileObservation t)
-        {
-            if (hintIconId is > 0 && t.IconId == (uint)hintIconId.Value)
-                return true;
-            if (!string.IsNullOrEmpty(tileCode))
-            {
-                if (t.TileCode != null && TileCodesMatch(t.TileCode, tileCode))
-                    return true;
-                var resolved = _iconMap.Resolve(t.IconId);
-                if (resolved != null && TileCodesMatch(resolved, tileCode))
-                    return true;
-            }
-            return false;
-        }
-
-        var attempts = new List<(int Pos, int Node, string Reason)>();
-
-        void AddAttempt(int pos, int node, string reason)
-        {
-            // Discard turn: callback 7 handPos 0-13 (14 tiles). Slot 13 is a
-            // closed tile when eligible has 14 entries; it is not type-1022.
-            if (pos is < 0 or > 13)
-                return;
-            if (attempts.Any(a => a.Pos == pos))
-                return;
-            attempts.Add((pos, node, reason));
-        }
-
-        var hasHint = !string.IsNullOrEmpty(tileCode) || hintIconId is > 0;
-        if (hasHint)
-        {
-            // Match from the same closed=[] dump we log, then map that node onto
-            // callback 7 pos 0-13 via the filtered 54/59-71 list. Do not skip
-            // node 54. Do not cap at 0-12 — a discard turn's 14th tile is pos 13
-            // (live AZPC: RED icon 76074 at eligibleIndex 13).
-            foreach (var t in closedLogged)
-            {
-                if (!MatchesHint(t))
-                    continue;
-                if (!MahjongHandReader.IsCallback7ClosedHandNode(t.NodeIndex))
-                {
-                    Log($"[DISCARD] Hint '{tileCode}' icon={t.IconId} at node={t.NodeIndex} is a placeholder/extra — not a callback 7 slot");
-                    continue;
-                }
-
-                var pos = closedHand.FindIndex(c => c.NodeIndex == t.NodeIndex);
-                if (pos is >= 0 and <= 13)
-                    AddAttempt(pos, t.NodeIndex, $"hint-closed pos={pos} node={t.NodeIndex} code={t.TileCode} icon={t.IconId}");
-                else
-                    Log($"[DISCARD] Hint '{tileCode}' node={t.NodeIndex} icon={t.IconId} is not in callback 7 slots 0-13 (eligibleIndex={pos})");
-            }
-
-            // Eligible list is the callback 7 order — fire any 0-13 hit even if
-            // the logged-list walk missed (duplicate nodes / filter edge).
-            for (var i = 0; i < closedHand.Count && i <= 13; i++)
-            {
-                if (MatchesHint(closedHand[i]))
-                    AddAttempt(i, closedHand[i].NodeIndex, $"hint-eligible pos={i} node={closedHand[i].NodeIndex} code={closedHand[i].TileCode} icon={closedHand[i].IconId}");
-            }
-
-            // Type-1022 is a draw visual, not callback 7 pos 13. If the hint is
-            // the drawn tile, discard the closed slot that shares its icon.
-            if (drawn != null && MatchesHint(drawn))
-            {
-                var drawnPos = Callback7HandPosMatching(closedHand, t =>
-                    t.IconId == drawn.IconId ||
-                    (t.TileCode != null && drawn.TileCode != null && TileCodesMatch(t.TileCode, drawn.TileCode)));
-                if (drawnPos is >= 0)
-                    AddAttempt(drawnPos.Value, closedHand[drawnPos.Value].NodeIndex, $"hint-drawn-via-closed pos={drawnPos} node={closedHand[drawnPos.Value].NodeIndex} code={drawn.TileCode}");
-                else if (attempts.Count == 0)
-                    Log($"[DISCARD] Hint '{tileCode}' matches type-1022 draw node={drawn.NodeIndex} but that icon is not in eligible 0-13 — not firing callback 8");
-            }
-        }
-
-        if (attempts.Count == 0 && allowUnhintedDrawn && drawn != null)
-        {
-            var drawnPos = Callback7HandPosMatching(closedHand, t =>
-                t.IconId == drawn.IconId ||
-                (t.TileCode != null && drawn.TileCode != null && TileCodesMatch(t.TileCode, drawn.TileCode)));
-            if (drawnPos is >= 0)
-                AddAttempt(drawnPos.Value, closedHand[drawnPos.Value].NodeIndex, $"unhinted-drawn-via-closed pos={drawnPos} node={closedHand[drawnPos.Value].NodeIndex} code={drawn.TileCode} type={drawn.NodeType}");
-            else
-                Log($"[DISCARD] Unhinted draw {drawn.TileCode}(node={drawn.NodeIndex}) is not in eligible 0-13 — not firing callback 8");
-        }
+        var plan = HintedDiscardPlanner.PlanHintedDiscard(
+            tileCode,
+            hintIconId,
+            closedLogged.Select(ToPlannerTile).ToList(),
+            closedHand.Select(ToPlannerTile).ToList(),
+            drawn == null ? null : ToPlannerTile(drawn),
+            allowUnhintedDrawn);
 
         var closedDesc = string.Join(",", closedLogged.Select(t => $"{t.TileCode ?? "?"}(icon={t.IconId} node={t.NodeIndex})"));
         var eligibleDesc = string.Join(",", closedHand.Select((t, i) => $"{i}:{t.TileCode ?? "?"}(icon={t.IconId} node={t.NodeIndex})"));
         var drawnDesc = drawn != null ? $"{drawn.TileCode}(icon={drawn.IconId} node={drawn.NodeIndex} type={drawn.NodeType})" : "none";
-        Log($"[DISCARD] Hint tile={tileCode ?? "(none)"} icon={hintIconId?.ToString() ?? "(none)"} atk0={before.ElementAtOrDefault(0)} closed=[{closedDesc}] eligible=[{eligibleDesc}] draw={drawnDesc} attempts={attempts.Count}");
+        Log($"[DISCARD] Hint tile={tileCode ?? "(none)"} icon={hintIconId?.ToString() ?? "(none)"} atk0={before.ElementAtOrDefault(0)} closed=[{closedDesc}] eligible=[{eligibleDesc}] draw={drawnDesc} plan={plan.Kind} pos={plan.Callback7Pos?.ToString() ?? "-"} reason={plan.Reason}");
 
-        if (attempts.Count == 0)
+        if (plan.Kind != HintedDiscardPlanner.Kind.FireCallback7 || plan.Callback7Pos is not int handPos)
         {
-            Log($"[DISCARD] No callback-7 slot for hint '{tileCode}' icon={hintIconId?.ToString() ?? "(none)"} — not clicking a latest/drawn tile and not firing callback 8");
-            return false;
+            Log($"[DISCARD] {plan.Reason}");
+            return plan.Kind;
         }
 
-        var attempt = attempts[0];
-        Log($"[DISCARD] FireCallback 7 handPos={attempt.Pos} reason={attempt.Reason} (one attempt this tick, not ReceiveEvent)");
-        AddonClickHelper.TryDiscardTile(addon, attempt.Pos);
+        Log($"[DISCARD] FireCallback 7 handPos={handPos} reason={plan.Reason} (one attempt this tick, not ReceiveEvent, not callback 8)");
+        AddonClickHelper.TryDiscardTile(addon, handPos);
         var after7 = SnapshotAtk(addon);
         if (AtkChanged(before, after7))
         {
-            Log($"[DISCARD] Callback 7 pos={attempt.Pos} changed ATK atk0 {before.ElementAtOrDefault(0)}->{after7.ElementAtOrDefault(0)}");
-            return true;
+            Log($"[DISCARD] Callback 7 pos={handPos} changed ATK atk0 {before.ElementAtOrDefault(0)}->{after7.ElementAtOrDefault(0)}");
+            return HintedDiscardPlanner.Kind.FireCallback7;
         }
 
-        Log($"[DISCARD] Hint '{tileCode}' callback 7 pos={attempt.Pos} did not change ATK (still atk0={ReadAtkInt(addon, 0)}) — will retry callback 7 later, not ReceiveEvent");
-        return false;
+        Log($"[DISCARD] Hint '{tileCode}' callback 7 pos={handPos} did not change ATK (still atk0={ReadAtkInt(addon, 0)}) — will retry callback 7 later, not ReceiveEvent, not callback 8");
+        return HintedDiscardPlanner.Kind.FireCallback7;
+    }
+
+    private HintedDiscardPlanner.TileRef ToPlannerTile(MahjongHandReader.MahjongTileObservation t)
+        => new(t.NodeIndex, t.NodeType, t.IconId, t.TileCode ?? _iconMap.Resolve(t.IconId), t.X);
+
+    private bool IsUnfulfillableDiscardHint(string? tile)
+        => !string.IsNullOrEmpty(tile) &&
+           !string.IsNullOrEmpty(_unfulfillableDiscardHint) &&
+           tile.Equals(_unfulfillableDiscardHint, StringComparison.OrdinalIgnoreCase);
+
+    private void MarkUnfulfillableDiscardHint(string tileCode)
+    {
+        _unfulfillableDiscardHint = tileCode;
+        _lastActionSignature = $"unfulfillable:{tileCode}";
+        if (string.Equals(_lastSeenDiscardTile, tileCode, StringComparison.OrdinalIgnoreCase))
+            _lastSeenDiscardTile = null;
+        _consecutiveFailedDiscards = 0;
+        Log($"[DISCARD] Failing pending hint '{tileCode}' — not in closed hand and not the draw. Not rescheduling, not inventing a closed tile, not firing callback 8");
     }
 
     /// <summary>
@@ -1178,20 +1160,7 @@ public sealed class AutoPlayManager
     /// M0/P0/S0 (red 5s in UI) match M5/P5/S5 (server format).
     /// </summary>
     private static bool TileCodesMatch(string uiCode, string serverCode)
-    {
-        if (uiCode.Equals(serverCode, StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        // Red dora: UI uses M0/P0/S0, server uses M5/P5/S5
-        var normalizedUi = uiCode switch
-        {
-            "M0" => "M5",
-            "P0" => "P5",
-            "S0" => "S5",
-            _ => uiCode
-        };
-        return normalizedUi.Equals(serverCode, StringComparison.OrdinalIgnoreCase);
-    }
+        => HintedDiscardPlanner.TileCodesMatch(uiCode, serverCode);
 
     private unsafe bool ExecuteCallResponse(AtkUnitBase* addon, int callIndex)
     {
