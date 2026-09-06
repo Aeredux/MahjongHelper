@@ -75,7 +75,7 @@ public class SmallTileClassifierTests
 
         Assert.Equal(6, classified.Count);
         Assert.All(classified, c => Assert.Equal(SmallTileClassifier.Kind.PlayerDiscard, c.Kind));
-        Assert.Empty(classified.Where(c => c.Kind == SmallTileClassifier.Kind.PlayerMeld));
+        Assert.DoesNotContain(classified, c => c.Kind == SmallTileClassifier.Kind.PlayerMeld);
     }
 
     [Fact]

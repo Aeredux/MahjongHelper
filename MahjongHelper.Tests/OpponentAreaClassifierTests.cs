@@ -11,12 +11,12 @@ public class OpponentAreaClassifierTests
         // Screenshot geometry: player EAST, West/toimen CHI Man 1-2-3 sits
         // upright to the right of the face-down hand (top of the table), not
         // on the local 42×55 strip and not in the 34×45 pond.
-        var leftovers =
-        [
+        var leftovers = new List<OpponentAreaClassifier.Tile>
+        {
             Area(0, 0, 0, 480, 40, 42, 55, parent: 200, "M1"),
             Area(1, 42, 0, 522, 40, 42, 55, parent: 200, "M2"),
             Area(2, 84, 0, 564, 40, 42, 55, parent: 200, "M3"),
-        ];
+        };
         var ponds = new[]
         {
             new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.PlayerDiscard, 400, 620),
@@ -35,12 +35,12 @@ public class OpponentAreaClassifierTests
     [Fact]
     public void Toimen_chi_still_maps_without_pond_hints()
     {
-        var leftovers =
-        [
+        var leftovers = new List<OpponentAreaClassifier.Tile>
+        {
             Area(0, 0, 0, 480, 40, 42, 55, parent: 200, "M1"),
             Area(1, 42, 0, 522, 40, 42, 55, parent: 200, "M2"),
             Area(2, 84, 0, 564, 40, 42, 55, parent: 200, "M3"),
-        ];
+        };
 
         var assignments = OpponentAreaClassifier.Classify(leftovers, pondHints: null, playerStripAbsY: 620);
 
@@ -51,12 +51,12 @@ public class OpponentAreaClassifierTests
     [Fact]
     public void Player_strip_band_stays_player_meld()
     {
-        var leftovers =
-        [
+        var leftovers = new List<OpponentAreaClassifier.Tile>
+        {
             Area(0, 336, 0, 336, 620, 42, 55, parent: 9, "WEST"),
             Area(1, 378, 0, 378, 620, 42, 55, parent: 9, "WEST"),
             Area(2, 420, 0, 420, 620, 42, 55, parent: 9, "WEST"),
-        ];
+        };
 
         var assignments = OpponentAreaClassifier.Classify(leftovers, pondHints: null, playerStripAbsY: 620);
 
@@ -67,15 +67,15 @@ public class OpponentAreaClassifierTests
     [Fact]
     public void Left_and_right_55x42_go_to_correct_seats()
     {
-        var leftovers =
-        [
+        var leftovers = new List<OpponentAreaClassifier.Tile>
+        {
             Area(0, 0, 0, 70, 340, 55, 42, parent: 301, "S1"),
             Area(1, 45, 0, 70, 385, 55, 42, parent: 301, "S2"),
             Area(2, 90, 0, 70, 430, 55, 42, parent: 301, "S3"),
             Area(3, 0, 0, 860, 340, 55, 42, parent: 302, "P7"),
             Area(4, 45, 0, 860, 385, 55, 42, parent: 302, "P8"),
             Area(5, 90, 0, 860, 430, 55, 42, parent: 302, "P9"),
-        ];
+        };
         var ponds = new[]
         {
             new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.LeftDiscard, 90, 380),
@@ -97,12 +97,12 @@ public class OpponentAreaClassifierTests
     public void Mixed_upright_and_sideways_toimen_chi_is_still_opposite()
     {
         // Called tile in a toimen CHI is often the one rotated 90°.
-        var leftovers =
-        [
+        var leftovers = new List<OpponentAreaClassifier.Tile>
+        {
             Area(0, 0, 0, 500, 36, 42, 55, parent: 200, "M1"),
             Area(1, 42, 0, 542, 50, 55, 42, parent: 200, "M2"),
             Area(2, 84, 0, 584, 36, 42, 55, parent: 200, "M3"),
-        ];
+        };
 
         var assignments = OpponentAreaClassifier.Classify(leftovers, pondHints: null, playerStripAbsY: 620);
 
@@ -121,12 +121,12 @@ public class OpponentAreaClassifierTests
     [Fact]
     public void Chi_choice_type_1009_is_ignored()
     {
-        var leftovers =
-        [
+        var leftovers = new List<OpponentAreaClassifier.Tile>
+        {
             Area(0, 0, 0, 200, 400, 42, 55, parent: 12, "M2", nodeType: 1009),
             Area(1, 42, 0, 242, 400, 42, 55, parent: 12, "M3", nodeType: 1009),
             Area(2, 84, 0, 284, 400, 42, 55, parent: 12, "M4", nodeType: 1009),
-        ];
+        };
 
         Assert.Empty(OpponentAreaClassifier.Classify(leftovers, pondHints: null, playerStripAbsY: 620));
     }
@@ -134,14 +134,14 @@ public class OpponentAreaClassifierTests
     [Fact]
     public void Opposite_chi_feeds_solver_oppMelds_count()
     {
-        var leftovers =
-        [
+        var leftovers = new List<OpponentAreaClassifier.Tile>
+        {
             Area(0, 0, 0, 480, 40, 42, 55, parent: 200, "M1"),
             Area(1, 42, 0, 522, 40, 42, 55, parent: 200, "M2"),
             Area(2, 84, 0, 564, 40, 42, 55, parent: 200, "M3"),
-        ];
+        };
         var assignment = Assert.Single(OpponentAreaClassifier.Classify(leftovers, pondHints: null, playerStripAbsY: 620));
-        var tiles = assignment.TileIds.Select(id => leftovers[id].TileCode!).ToList();
+        IReadOnlyList<string> tiles = assignment.TileIds.Select(id => leftovers[id].TileCode!).ToList();
         var meld = Assert.Single(MeldClassifier.SplitIntoMelds(tiles));
 
         var summary = SolverJson.BuildSnapSummary(new SuggestMoveRequest
