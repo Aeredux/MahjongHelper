@@ -435,7 +435,7 @@ public static unsafe class EmjUiReader
 
         // Toimen/kamicha/shimocha fuuro are hand-sized tiles next to those
         // players' face-down hands — not on the local strip and often not 34×45.
-        var opponentMeldCandidates = ClassifyOpponentAreaMelds(slots, extraStrip);
+        var opponentMeldCandidates = ClassifyOpponentAreaMelds(slots, extraStrip, smallTiles);
 
         var gameInfo = ReadGameInfo(addon, iconCapture, iconMap);
 
@@ -482,7 +482,7 @@ public static unsafe class EmjUiReader
         }
     }
 
-    private static List<UiSlot> ClassifyOpponentAreaMelds(List<UiSlot> slots, List<UiSlot> extraStrip)
+    private static List<UiSlot> ClassifyOpponentAreaMelds(List<UiSlot> slots, List<UiSlot> extraStrip, List<UiSlot> smallTiles)
     {
         var claimed = new HashSet<int>();
         foreach (var slot in slots)
@@ -499,13 +499,13 @@ public static unsafe class EmjUiReader
         {
             if (!slot.Visible || slot.IconId == 0)
                 return;
-            if (slot.NodeIndex is >= 54 and <= 71)
-                return;
             if (claimed.Contains(slot.NodeIndex))
                 return;
             if (slot.NodeType is 1009 or 1006)
                 return;
-            if (!((slot.Width == 42 && slot.Height == 55) || (slot.Width == 55 && slot.Height == 42)))
+            var handSized = (slot.Width == 42 && slot.Height == 55) || (slot.Width == 55 && slot.Height == 42);
+            var pondSized = (slot.Width == 34 && slot.Height == 45) || (slot.Width == 45 && slot.Height == 34);
+            if (!handSized && !pondSized)
                 return;
             if (candidates.Any(c => c.NodeIndex == slot.NodeIndex))
                 return;
@@ -515,6 +515,8 @@ public static unsafe class EmjUiReader
         foreach (var slot in extraStrip)
             Consider(slot);
         foreach (var slot in slots.Where(s => s.Kind == SlotKind.VisibleTileCandidate))
+            Consider(slot);
+        foreach (var slot in smallTiles)
             Consider(slot);
 
         var pondHints = new List<OpponentAreaClassifier.PondHint>();

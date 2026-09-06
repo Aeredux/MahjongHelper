@@ -95,6 +95,89 @@ public class SmallTileClassifierTests
     }
 
     [Fact]
+    public void Type_1045_strip_is_not_a_left_meld()
+    {
+        // Live snap after 40b28b7: parent 60 type 1045 M4 M5 P6 P6 S5 S6 S7
+        // at AbsY≈518 became LeftMeld; MeldClassifier then invented CHI S5 S6 S7.
+        var tiles = new List<SmallTileClassifier.Tile>
+        {
+            Pond(0, 1022, 11, 0, 0, "M2", absX: 80, absY: 360),
+            Pond(1, 1022, 11, 34, 0, "S8", absX: 114, absY: 360),
+            Pond(2, 1045, 60, 0, 0, "M4", absX: 200, absY: 518),
+            Pond(3, 1045, 60, 42, 0, "M5", absX: 242, absY: 518),
+            Pond(4, 1045, 60, 84, 0, "P6", absX: 284, absY: 518),
+            Pond(5, 1045, 60, 126, 0, "P6", absX: 326, absY: 518),
+            Pond(6, 1045, 60, 168, 0, "S5", absX: 368, absY: 518),
+            Pond(7, 1045, 60, 210, 0, "S6", absX: 410, absY: 518),
+            Pond(8, 1045, 60, 252, 0, "S7", absX: 452, absY: 518),
+        };
+
+        var classified = SmallTileClassifier.Classify(tiles);
+
+        Assert.DoesNotContain(classified, c => c.Kind == SmallTileClassifier.Kind.LeftMeld);
+        Assert.DoesNotContain(classified, c => c.Tile.NodeType == 1045);
+        Assert.Equal(2, classified.Count(c => c.Kind == SmallTileClassifier.Kind.LeftDiscard));
+    }
+
+    [Fact]
+    public void Extra_1022_parent_pair_is_not_left_meld()
+    {
+        var tiles = new List<SmallTileClassifier.Tile>
+        {
+            Pond(0, 1022, 11, 0, 0, "P1"),
+            Pond(1, 1022, 11, 34, 0, "P2"),
+            Pond(2, 1022, 11, 68, 0, "P3"),
+            Pond(3, 1022, 11, 102, 0, "P4"),
+            Pond(4, 1022, 99, 0, 0, "M2", tsumogiri: true, width: 45, height: 34, absX: 1168, absY: 755),
+            Pond(5, 1022, 99, 34, 0, "S8", tsumogiri: true, width: 45, height: 34, absX: 1168, absY: 790),
+        };
+
+        var classified = SmallTileClassifier.Classify(tiles);
+
+        Assert.DoesNotContain(classified, c => c.Kind == SmallTileClassifier.Kind.LeftMeld);
+        Assert.Equal(4, classified.Count(c => c.Kind == SmallTileClassifier.Kind.LeftDiscard));
+    }
+
+    [Fact]
+    public void Type_1023_pond_plus_chi_cluster_is_right_meld()
+    {
+        var tiles = new List<SmallTileClassifier.Tile>
+        {
+            Pond(0, 1023, 20, 0, 0, "P8", absX: 800, absY: 400),
+            Pond(1, 1023, 20, 0, 200, "S2", absX: 800, absY: 200, width: 45, height: 34),
+            Pond(2, 1023, 20, 34, 200, "S3", absX: 834, absY: 200),
+            Pond(3, 1023, 20, 68, 200, "S4", absX: 868, absY: 200),
+        };
+
+        var classified = SmallTileClassifier.Classify(tiles);
+        var pond = classified.Where(c => c.Kind == SmallTileClassifier.Kind.RightDiscard).ToList();
+        var meld = classified.Where(c => c.Kind == SmallTileClassifier.Kind.RightMeld).ToList();
+
+        Assert.Single(pond);
+        Assert.Equal("P8", pond[0].Tile.TileCode);
+        Assert.Equal(["S2", "S3", "S4"], meld.Select(c => c.Tile.TileCode).ToList());
+    }
+
+    [Fact]
+    public void Mixed_pond_cluster_peels_rotated_chi()
+    {
+        var tiles = new List<SmallTileClassifier.Tile>
+        {
+            Pond(0, 1023, 20, 0, 0, "P8"),
+            Pond(1, 1023, 20, 40, 0, "S2", width: 45, height: 34),
+            Pond(2, 1023, 20, 80, 0, "S3"),
+            Pond(3, 1023, 20, 114, 0, "S4"),
+        };
+
+        var classified = SmallTileClassifier.Classify(tiles);
+        var meld = classified.Where(c => c.Kind == SmallTileClassifier.Kind.RightMeld).ToList();
+        var pond = classified.Where(c => c.Kind == SmallTileClassifier.Kind.RightDiscard).ToList();
+
+        Assert.Equal(["S2", "S3", "S4"], meld.Select(c => c.Tile.TileCode).ToList());
+        Assert.Equal("P8", Assert.Single(pond).Tile.TileCode);
+    }
+
+    [Fact]
     public void Leftover_other_type_group_goes_to_nearest_pond()
     {
         var tiles = new List<SmallTileClassifier.Tile>

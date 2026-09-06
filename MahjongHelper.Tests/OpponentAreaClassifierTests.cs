@@ -132,6 +132,68 @@ public class OpponentAreaClassifierTests
     }
 
     [Fact]
+    public void Live_azpc_1045_junk_is_not_left_and_shimocha_chi_is_right()
+    {
+        // snap after 40b28b7: seat EAST, Cactuar/SOUTH has S2-S3-S4 CHI
+        // (one called tile rotated). Capture left[] was type 1045 AbsY≈518
+        // plus type 1022 pond leftovers; right[] was empty.
+        var leftovers = new List<OpponentAreaClassifier.Tile>
+        {
+            Area(0, 0, 0, 200, 518, 42, 55, parent: 60, "M4", nodeType: 1045),
+            Area(1, 42, 0, 242, 518, 42, 55, parent: 60, "M5", nodeType: 1045),
+            Area(2, 84, 0, 284, 518, 42, 55, parent: 60, "P6", nodeType: 1045),
+            Area(3, 126, 0, 326, 518, 42, 55, parent: 60, "P6", nodeType: 1045),
+            Area(4, 168, 0, 368, 518, 42, 55, parent: 60, "S5", nodeType: 1045),
+            Area(5, 210, 0, 410, 518, 42, 55, parent: 60, "S6", nodeType: 1045),
+            Area(6, 252, 0, 452, 518, 42, 55, parent: 60, "S7", nodeType: 1045),
+            Area(7, 0, 0, 1168, 755, 45, 34, parent: 99, "M2", nodeType: 1022),
+            Area(8, 0, 40, 1168, 795, 45, 34, parent: 99, "S8", nodeType: 1022),
+            Area(9, 0, 0, 880, 360, 55, 42, parent: 90, "S2", nodeType: 1055),
+            Area(10, 0, 45, 880, 405, 42, 55, parent: 90, "S3", nodeType: 1055),
+            Area(11, 0, 90, 880, 450, 42, 55, parent: 90, "S4", nodeType: 1055),
+        };
+        var ponds = new[]
+        {
+            new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.PlayerDiscard, 400, 640),
+            new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.OppositeDiscard, 420, 180),
+            new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.RightDiscard, 820, 400),
+            new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.LeftDiscard, 90, 380),
+        };
+
+        var assignments = OpponentAreaClassifier.Classify(leftovers, ponds, playerStripAbsY: 640);
+
+        Assert.DoesNotContain(assignments, a => a.Kind == SmallTileClassifier.Kind.LeftMeld);
+        Assert.DoesNotContain(assignments, a => a.Kind == SmallTileClassifier.Kind.OppositeMeld);
+        var right = Assert.Single(assignments, a => a.Kind == SmallTileClassifier.Kind.RightMeld);
+        Assert.Equal([9, 10, 11], right.TileIds);
+
+        IReadOnlyList<string> tiles = right.TileIds.Select(id => leftovers[id].TileCode!).ToList();
+        var meld = Assert.Single(MeldClassifier.SplitIntoMelds(tiles));
+        Assert.Equal("CHI", meld.Type);
+        Assert.Equal(["S2", "S3", "S4"], meld.Tiles);
+
+        var summary = SolverJson.BuildSnapSummary(new SuggestMoveRequest
+        {
+            Hand = ["M4", "M6", "M7"],
+            DrawnTile = "M4",
+            SeatWind = "EAST",
+            RoundWind = "EAST",
+            Opponents =
+            [
+                new OpponentInfo
+                {
+                    Wind = "SOUTH",
+                    Melds = [new MeldInfo { Type = meld.Type, Tiles = meld.Tiles.ToList() }],
+                },
+                new OpponentInfo { Wind = "WEST" },
+                new OpponentInfo { Wind = "NORTH" },
+            ],
+        });
+        Assert.Contains("oppMelds=1", summary);
+        Assert.Contains("ownMelds=0", summary);
+    }
+
+    [Fact]
     public void Opposite_chi_feeds_solver_oppMelds_count()
     {
         var leftovers = new List<OpponentAreaClassifier.Tile>

@@ -90,19 +90,24 @@ public static class SmallTileClassifier
 
             for (var g = 1; g < byParent.Count; g++)
             {
-                foreach (var tile in byParent[g].OrderBy(t => t.X).ThenBy(t => t.Y))
+                var extra = byParent[g].OrderBy(t => t.X).ThenBy(t => t.Y).ToList();
+                if (!LooksLikeOpenMeld(extra))
+                    continue;
+                foreach (var tile in extra)
                     result.Add(new ClassifiedTile(meldKind, meldIndex++, tile));
             }
         }
 
         var leftovers = withIcons
-            .Where(t => t.NodeType is not (1021 or 1022 or 1023 or 1024 or 1009 or 1006 or 1055))
+            .Where(t => t.NodeType is not (1021 or 1022 or 1023 or 1024 or 1009 or 1006 or 1045 or 1055))
             .GroupBy(t => t.ParentNodeId)
-            .Where(g => g.Count() >= 3);
+            .Where(g => g.Count() is >= 2 and <= 4);
 
         foreach (var group in leftovers)
         {
             var ordered = group.OrderBy(t => t.X).ThenBy(t => t.Y).ToList();
+            if (!LooksLikeOpenMeld(ordered))
+                continue;
             var owner = GuessMeldOwner(ordered[0], pondParents, pondTilesByKind);
             if (owner == null)
                 continue;
@@ -124,9 +129,46 @@ public static class SmallTileClassifier
         _ => Kind.PlayerMeld,
     };
 
+    public static bool LooksLikeOpenMeld(IReadOnlyList<Tile> tiles)
+    {
+        if (tiles == null || tiles.Count is < 2 or > 4)
+            return false;
+        var codes = tiles
+            .Select(t => t.TileCode)
+            .Where(MeldClassifier.IsUsableTile)
+            .Select(c => c!)
+            .ToList();
+        return LooksLikeOpenMeld(codes);
+    }
+
+    public static bool LooksLikeOpenMeld(IReadOnlyList<string> codes)
+    {
+        if (codes == null || codes.Count is < 2 or > 4)
+            return false;
+        if (codes.Count == 2)
+            return string.Equals(
+                MeldClassifier.CanonicalKey(codes[0]),
+                MeldClassifier.CanonicalKey(codes[1]),
+                StringComparison.Ordinal);
+        return MeldClassifier.InferMeld(codes) != null;
+    }
+
+    public static bool IsSideways(float rotation, int width, int height)
+    {
+        if (width > height)
+            return true;
+        var abs = Math.Abs(rotation);
+        while (abs > Math.PI * 2)
+            abs -= (float)(Math.PI * 2);
+        var dist90 = Math.Abs(abs - (float)(Math.PI / 2));
+        var dist270 = Math.Abs(abs - (float)(3 * Math.PI / 2));
+        return dist90 < 0.35f || dist270 < 0.35f;
+    }
+
     /// <summary>
-    /// Same ATK parent can hold the 6-wide pond grid and a fuuro row next to
-    /// that player's hand. Keep the largest compact cluster as the pond.
+    /// Same ATK parent can hold the pond grid and a fuuro row. Clusters that
+    /// InferMeld are peeled; a 4+ mix with one rotated called tile is too.
+    /// A lone 3-tile pond that happens to be a sequence stays a pond.
     /// </summary>
     internal static (List<Tile> Pond, List<Tile> Melds) PeelSharedParentMelds(List<Tile> sameParent)
     {
@@ -134,15 +176,59 @@ public static class SmallTileClassifier
             return (sameParent, []);
 
         var clusters = ClusterByGap(sameParent, PondClusterGapPx);
-        if (clusters.Count <= 1)
+        var pond = new List<Tile>();
+        var melds = new List<Tile>();
+
+        foreach (var cluster in clusters)
+        {
+            if (LooksLikeOpenMeld(cluster) && (clusters.Count > 1 || cluster.Count == 4))
+            {
+                melds.AddRange(cluster);
+                continue;
+            }
+
+            var extracted = TryExtractCuedMeld(cluster);
+            if (extracted != null && extracted.Count < cluster.Count)
+            {
+                var extractedIds = extracted.Select(t => t.Id).ToHashSet();
+                melds.AddRange(extracted);
+                pond.AddRange(cluster.Where(t => !extractedIds.Contains(t.Id)));
+                continue;
+            }
+
+            pond.AddRange(cluster);
+        }
+
+        if (pond.Count == 0)
             return (sameParent, []);
 
-        var pond = clusters.OrderByDescending(c => c.Count).First();
-        var melds = clusters
-            .Where(c => !ReferenceEquals(c, pond) && c.Count >= 2 && c.Count <= 4)
-            .SelectMany(c => c)
-            .ToList();
-        return (pond.ToList(), melds);
+        return (pond, melds);
+    }
+
+    internal static List<Tile>? TryExtractCuedMeld(List<Tile> cluster)
+    {
+        if (cluster.Count < 4)
+            return null;
+
+        var ordered = cluster.OrderBy(t => t.X).ThenBy(t => t.Y).ThenBy(t => t.Id).ToList();
+        for (var i = 0; i + 2 < ordered.Count; i++)
+        {
+            var window = ordered.GetRange(i, 3);
+            if (!LooksLikeOpenMeld(window))
+                continue;
+            if (window.Count(t => IsSideways(t.Rotation, t.Width, t.Height)) != 1)
+                continue;
+            return window;
+        }
+
+        if (cluster.Count >= 4)
+        {
+            var four = ordered.Take(4).ToList();
+            if (LooksLikeOpenMeld(four) && four.Count(t => IsSideways(t.Rotation, t.Width, t.Height)) == 1)
+                return four;
+        }
+
+        return null;
     }
 
     internal static List<List<Tile>> ClusterByGap(List<Tile> tiles, float gapPx)
