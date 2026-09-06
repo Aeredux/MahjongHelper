@@ -274,27 +274,24 @@ public static class SmallTileClassifier
                 return MeldKindForPond(pondKind);
         }
 
-        Kind? nearest = null;
-        var best = float.MaxValue;
+        var hints = new List<OpponentAreaClassifier.PondHint>();
         foreach (var (pondKind, group) in pondTiles)
         {
             if (group.Count == 0)
                 continue;
-            var cx = group.Average(UseAbs(group) ? t => t.AbsX : t => t.X);
-            var cy = group.Average(UseAbs(group) ? t => t.AbsY : t => t.Y);
-            var tx = UseAbs(group) ? tile.AbsX : tile.X;
-            var ty = UseAbs(group) ? tile.AbsY : tile.Y;
-            var dx = tx - cx;
-            var dy = ty - cy;
-            var dist = dx * dx + dy * dy;
-            if (dist < best)
-            {
-                best = dist;
-                nearest = pondKind;
-            }
+            var useAbs = UseAbs(group);
+            hints.Add(new OpponentAreaClassifier.PondHint(
+                pondKind,
+                group.Average(useAbs ? t => t.AbsX : t => t.X),
+                group.Average(useAbs ? t => t.AbsY : t => t.Y)));
         }
 
-        return nearest == null ? null : MeldKindForPond(nearest.Value);
+        if (hints.Count == 0)
+            return null;
+
+        var tx = tile.AbsX != 0 || tile.AbsY != 0 ? tile.AbsX : tile.X;
+        var ty = tile.AbsX != 0 || tile.AbsY != 0 ? tile.AbsY : tile.Y;
+        return OpponentAreaClassifier.SeatLeftoverFuuro(tx, ty, hints, playerStripAbsY: null);
     }
 
     private static bool UseAbs(List<Tile> tiles)

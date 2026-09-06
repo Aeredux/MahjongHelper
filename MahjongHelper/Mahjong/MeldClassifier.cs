@@ -65,6 +65,37 @@ public static class MeldClassifier
         return result;
     }
 
+    /// <summary>
+    /// Drops a 2-tile PON when a 3-tile PON of the same tile already exists.
+    /// Live AZPC sometimes duplicates own PON S2 from a leftover pair; keep
+    /// the Green-pon 2-upright remainder when it is the only set of that tile.
+    /// </summary>
+    public static IReadOnlyList<ObservedMeld> CollapseDuplicatePairPons(IReadOnlyList<ObservedMeld> melds)
+    {
+        if (melds == null || melds.Count == 0)
+            return melds ?? [];
+
+        var keep = new List<ObservedMeld>();
+        foreach (var meld in melds)
+        {
+            if (meld.Type != "PON" || meld.Tiles.Count >= 3)
+            {
+                keep.Add(meld);
+                continue;
+            }
+
+            var pairKey = CanonicalKey(meld.Tiles[0]);
+            var hasFull = melds.Any(other =>
+                other.Type == "PON"
+                && other.Tiles.Count >= 3
+                && other.Tiles.All(t => CanonicalKey(t) == pairKey));
+            if (!hasFull)
+                keep.Add(meld);
+        }
+
+        return keep;
+    }
+
     public static ObservedMeld? InferMeld(IReadOnlyList<string> tiles)
     {
         if (tiles == null || tiles.Count < 3)

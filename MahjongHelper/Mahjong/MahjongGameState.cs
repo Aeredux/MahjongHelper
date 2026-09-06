@@ -386,6 +386,8 @@ public static class MahjongGameStateBuilder
             melds.AddRange(MeldClassifier.SplitIntoMelds(tiles, acceptPairRemainder: true));
         }
 
+        melds = MeldClassifier.CollapseDuplicatePairPons(melds).ToList();
+
         if (melds.Count == 0)
         {
             if (previous is { Value: not null } prev && prev.Value.Count > 0)

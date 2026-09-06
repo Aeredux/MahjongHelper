@@ -447,12 +447,14 @@ public class OpponentAreaClassifierTests
             Area(26, 0, 0, 1480, 1139, 40, 52, parent: 90, "M9", nodeType: 2),
             Area(27, 0, 0, 1520, 1139, 40, 52, parent: 90, "P5", nodeType: 2),
         };
+        // Live Abs tiles need live-scale 1022/1023/1024 centroids. Toy ponds
+        // at X≈90/820 would nearest-pond the across CHI (AbsX≈1074) to Right.
         var ponds = new[]
         {
-            new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.PlayerDiscard, 400, 760),
-            new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.OppositeDiscard, 420, 180),
-            new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.RightDiscard, 820, 400),
-            new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.LeftDiscard, 90, 380),
+            new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.PlayerDiscard, 1200, 1100),
+            new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.OppositeDiscard, 1100, 400),
+            new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.RightDiscard, 1600, 550),
+            new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.LeftDiscard, 900, 850),
         };
         var trays = new[] { new IconNodeScan.Tray(1525, 972, 140, 55) };
 
@@ -532,6 +534,105 @@ public class OpponentAreaClassifierTests
             t => t.TileCode);
         Assert.Equal("CHI", MeldClassifier.InferMeld(faces.Select(t => t.TileCode!).ToList())!.Type);
     }
+
+    [Fact]
+    public void Live_azpc_south_p8_kamicha_is_left_not_across()
+    {
+        // Player SOUTH. Kamicha/EAST PON P8 is mid-left of the screen;
+        // shimocha S1 is mid-right. Across keeps a separate M5 aka pon.
+        var leftovers = new List<OpponentAreaClassifier.Tile>
+        {
+            Area(0, 0, 0, 962, 889, 40, 52, parent: 201, "P8", nodeType: 2),
+            Area(1, 0, 0, 996, 858, 40, 52, parent: 201, "P8", nodeType: 2),
+            Area(2, 0, 0, 1022, 889, 40, 52, parent: 201, "P8", nodeType: 2),
+            Area(3, 0, 0, 1555, 547, 40, 52, parent: 202, "S1", nodeType: 2),
+            Area(4, 0, 0, 1585, 547, 40, 52, parent: 202, "S1", nodeType: 2),
+            Area(5, 0, 0, 1615, 547, 40, 52, parent: 202, "S1", nodeType: 2),
+            Area(6, 0, 0, 1040, 400, 40, 52, parent: 200, "M5", nodeType: 2),
+            Area(7, 0, 0, 1080, 414, 52, 40, parent: 200, "M5", nodeType: 2),
+            Area(8, 0, 0, 1120, 400, 40, 52, parent: 200, "M0", nodeType: 2),
+        };
+        var ponds = LiveSouthPonds();
+
+        var assignments = OpponentAreaClassifier.Classify(leftovers, ponds, playerStripAbsY: 972);
+
+        var left = Assert.Single(assignments, a => a.Kind == SmallTileClassifier.Kind.LeftMeld);
+        Assert.Equal([0, 1, 2], left.TileIds);
+        var leftCodes = left.TileIds.Select(id => leftovers[id].TileCode!).ToList();
+        Assert.Equal("PON", MeldClassifier.InferMeld(leftCodes)!.Type);
+        Assert.All(leftCodes, c => Assert.Equal("P8", c));
+
+        var right = Assert.Single(assignments, a => a.Kind == SmallTileClassifier.Kind.RightMeld);
+        Assert.Equal([3, 4, 5], right.TileIds);
+
+        var across = Assert.Single(assignments, a => a.Kind == SmallTileClassifier.Kind.OppositeMeld);
+        Assert.Equal([6, 7, 8], across.TileIds);
+        Assert.DoesNotContain(across.TileIds, id => leftovers[id].TileCode == "P8");
+        Assert.DoesNotContain(right.TileIds, id => leftovers[id].TileCode == "P8");
+
+        var summary = SolverJson.BuildSnapSummary(new SuggestMoveRequest
+        {
+            Hand = ["M4", "M6", "M7"],
+            DrawnTile = "M4",
+            SeatWind = "SOUTH",
+            RoundWind = "EAST",
+            Opponents =
+            [
+                new OpponentInfo
+                {
+                    Wind = "WEST",
+                    Melds = [new MeldInfo { Type = "PON", Tiles = ["S1", "S1", "S1"] }],
+                },
+                new OpponentInfo
+                {
+                    Wind = "NORTH",
+                    Melds = [new MeldInfo { Type = "PON", Tiles = ["M5", "M5", "M0"] }],
+                },
+                new OpponentInfo
+                {
+                    Wind = "EAST",
+                    Melds = [new MeldInfo { Type = "PON", Tiles = ["P8", "P8", "P8"] }],
+                },
+            ],
+        });
+        Assert.Contains("seat=SOUTH", summary);
+        Assert.Contains("oppMelds=3", summary);
+    }
+
+    [Fact]
+    public void Live_azpc_south_p8_stays_left_when_side_ponds_empty()
+    {
+        // Sidecar had left=0 right=0; only 1024 + 1021 centroids exist.
+        var leftovers = new List<OpponentAreaClassifier.Tile>
+        {
+            Area(0, 0, 0, 962, 889, 40, 52, parent: 201, "P8", nodeType: 2),
+            Area(1, 0, 0, 996, 858, 40, 52, parent: 201, "P8", nodeType: 2),
+            Area(2, 0, 0, 1022, 889, 40, 52, parent: 201, "P8", nodeType: 2),
+            Area(3, 0, 0, 1555, 547, 40, 52, parent: 202, "S1", nodeType: 2),
+            Area(4, 0, 0, 1585, 547, 40, 52, parent: 202, "S1", nodeType: 2),
+            Area(5, 0, 0, 1615, 547, 40, 52, parent: 202, "S1", nodeType: 2),
+        };
+        var ponds = new[]
+        {
+            new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.PlayerDiscard, 1200, 1100),
+            new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.OppositeDiscard, 1100, 400),
+        };
+
+        var assignments = OpponentAreaClassifier.Classify(leftovers, ponds, playerStripAbsY: 972);
+        var left = Assert.Single(assignments, a => a.Kind == SmallTileClassifier.Kind.LeftMeld);
+        Assert.Equal([0, 1, 2], left.TileIds);
+        var right = Assert.Single(assignments, a => a.Kind == SmallTileClassifier.Kind.RightMeld);
+        Assert.Equal([3, 4, 5], right.TileIds);
+        Assert.DoesNotContain(assignments, a => a.Kind == SmallTileClassifier.Kind.OppositeMeld);
+    }
+
+    private static OpponentAreaClassifier.PondHint[] LiveSouthPonds() =>
+    [
+        new(SmallTileClassifier.Kind.PlayerDiscard, 1200, 1100),
+        new(SmallTileClassifier.Kind.OppositeDiscard, 1100, 400),
+        new(SmallTileClassifier.Kind.RightDiscard, 1600, 550),
+        new(SmallTileClassifier.Kind.LeftDiscard, 900, 850),
+    ];
 
     private static OpponentAreaClassifier.Tile Area(
         int id, float x, float y, float absX, float absY, int width, int height,

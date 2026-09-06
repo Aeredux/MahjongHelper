@@ -11,7 +11,8 @@ namespace MahjongHelper.Mahjong;
 /// Pond leftovers (1021–1024) stay with <see cref="SmallTileClassifier"/>.
 /// The live 7-tile type-1045 34×45 hand-echo is dropped by
 /// <see cref="IconNodeScan.IsType1045PondEcho"/>. Other 2–4 tile InferMeld
-/// groups are seated by table region.
+/// groups are seated from 1022/1023/1024 pond centroids (kamicha / shimocha /
+/// toimen), not "anything above the hand strip".
 /// </summary>
 public static class OpponentAreaClassifier
 {
@@ -58,7 +59,7 @@ public static class OpponentAreaClassifier
         if (usable.Count == 0)
             return result;
 
-        var tableCenterX = TableCenterX(usable, pondHints);
+        var tableCenterX = TableCenterX(pondHints);
         var tableCenterY = TableCenterY(pondHints, playerStripAbsY);
         var denseY = DenseAbsYBands(usable, playerStripAbsY);
 
@@ -229,58 +230,135 @@ public static class OpponentAreaClassifier
     {
         var gx = group.Average(t => HasAbs(t) ? t.AbsX : t.X);
         var gy = group.Average(t => HasAbs(t) ? t.AbsY : t.Y);
+        return SeatLeftoverFuuro(gx, gy, pondHints, playerStripAbsY, tableCenterX, tableCenterY);
+    }
 
+    /// <summary>
+    /// Seats leftover face-up fuuro from 1022/1023/1024 pond centroids.
+    /// Mid-left kamicha (live SOUTH P8 at Abs≈993,868) is LeftMeld, not
+    /// Opposite — "above the hand strip" is not toimen. Mid-right shimocha
+    /// (S1 at Abs≈1585,547) is RightMeld even when side ponds are empty.
+    /// </summary>
+    public static SmallTileClassifier.Kind SeatLeftoverFuuro(
+        float gx,
+        float gy,
+        IReadOnlyList<PondHint>? pondHints,
+        float? playerStripAbsY,
+        float tableCenterX = 400f,
+        float tableCenterY = 400f)
+    {
         if (playerStripAbsY is float stripY && Math.Abs(gy - stripY) <= PlayerStripBandPx)
             return SmallTileClassifier.Kind.PlayerMeld;
 
-        var xSpan = group.Max(t => HasAbs(t) ? t.AbsX : t.X) - group.Min(t => HasAbs(t) ? t.AbsX : t.X);
-        var ySpan = group.Max(t => HasAbs(t) ? t.AbsY : t.Y) - group.Min(t => HasAbs(t) ? t.AbsY : t.Y);
-        var horizontal = xSpan >= ySpan;
+        var cx = TableCenterX(pondHints, tableCenterX);
+        var cy = TableCenterY(pondHints, playerStripAbsY, tableCenterY);
+        var nearest = NearestOpponentPondKind(gx, gy, pondHints);
+        var topStrength = cy - gy;
+        var sideStrength = Math.Abs(gx - cx);
 
-        // Toimen fuuro is a horizontal row at the top of the table, including
-        // the top-right (live 7ad3d5d CHI at AbsX≈1040, AbsY≈410). Shimocha
-        // is a vertical stack on the right edge — don't steal those.
-        if (playerStripAbsY is float handY && gy + RegionMarginPx < handY && horizontal)
-            return SmallTileClassifier.Kind.OppositeMeld;
+        if (nearest != null)
+        {
+            // A lone opposite pond must not steal mid-side fuuro (sidecar
+            // left=0/right=0 still has a 1024 centroid).
+            if (nearest == SmallTileClassifier.Kind.OppositeMeld
+                && sideStrength > topStrength
+                && sideStrength > RegionMarginPx)
+            {
+                return gx < cx
+                    ? SmallTileClassifier.Kind.LeftMeld
+                    : SmallTileClassifier.Kind.RightMeld;
+            }
 
-        // Table regions beat nearest-pond (live AZPC: a mid-Y 1045 strip
-        // sat closer to the left pond than the visible shimocha CHI).
-        if (gy + RegionMarginPx < tableCenterY)
+            // A side pond must not steal a clearly-top toimen row.
+            if (nearest is SmallTileClassifier.Kind.LeftMeld or SmallTileClassifier.Kind.RightMeld
+                && topStrength > sideStrength
+                && topStrength > RegionMarginPx)
+            {
+                return SmallTileClassifier.Kind.OppositeMeld;
+            }
+
+            return nearest.Value;
+        }
+
+        if (topStrength > sideStrength && topStrength > 0)
             return SmallTileClassifier.Kind.OppositeMeld;
-        if (gx + RegionMarginPx < tableCenterX)
+        if (gx + RegionMarginPx < cx)
             return SmallTileClassifier.Kind.LeftMeld;
-        if (gx > tableCenterX + RegionMarginPx)
+        if (gx > cx + RegionMarginPx)
             return SmallTileClassifier.Kind.RightMeld;
-
-        var upright = group.Count(t => t.Width <= t.Height);
-        if (upright * 2 >= group.Count)
+        if (topStrength > 0)
             return SmallTileClassifier.Kind.OppositeMeld;
-
-        return gx < tableCenterX
+        return gx < cx
             ? SmallTileClassifier.Kind.LeftMeld
             : SmallTileClassifier.Kind.RightMeld;
     }
 
-    private static float TableCenterX(List<Tile> leftovers, IReadOnlyList<PondHint>? pondHints)
+    private static SmallTileClassifier.Kind? NearestOpponentPondKind(
+        float gx, float gy, IReadOnlyList<PondHint>? pondHints)
     {
-        if (pondHints is { Count: > 0 })
-            return pondHints.Average(h => h.AbsX);
+        if (pondHints == null || pondHints.Count == 0)
+            return null;
 
-        var xs = leftovers.Select(t => HasAbs(t) ? t.AbsX : t.X).ToList();
-        var distinctParents = leftovers.Select(t => t.ParentNodeId).Distinct().Count();
-        if (distinctParents >= 2 && xs.Count >= 2)
-            return xs.Average();
+        SmallTileClassifier.Kind? best = null;
+        var bestScore = float.MaxValue;
+        foreach (var hint in pondHints)
+        {
+            if (hint.PondKind is not (
+                SmallTileClassifier.Kind.LeftDiscard
+                or SmallTileClassifier.Kind.RightDiscard
+                or SmallTileClassifier.Kind.OppositeDiscard))
+            {
+                continue;
+            }
 
-        return 400f;
+            var dx = Math.Abs(gx - hint.AbsX);
+            var dy = Math.Abs(gy - hint.AbsY);
+            // Side ponds are an X column; toimen is a Y row.
+            var score = hint.PondKind == SmallTileClassifier.Kind.OppositeDiscard
+                ? 0.4f * dx + dy
+                : dx + 0.4f * dy;
+            if (score < bestScore)
+            {
+                bestScore = score;
+                best = hint.PondKind;
+            }
+        }
+
+        return best == null ? null : SmallTileClassifier.MeldKindForPond(best.Value);
     }
 
-    private static float TableCenterY(IReadOnlyList<PondHint>? pondHints, float? playerStripAbsY)
+    private static float TableCenterX(IReadOnlyList<PondHint>? pondHints, float fallback = 400f)
+    {
+        if (pondHints is not { Count: > 0 })
+            return fallback;
+
+        var left = pondHints.Where(h => h.PondKind == SmallTileClassifier.Kind.LeftDiscard).ToList();
+        var right = pondHints.Where(h => h.PondKind == SmallTileClassifier.Kind.RightDiscard).ToList();
+        if (left.Count > 0 && right.Count > 0)
+            return (left.Average(h => h.AbsX) + right.Average(h => h.AbsX)) / 2f;
+        if (pondHints.Count >= 2)
+            return pondHints.Average(h => h.AbsX);
+        return fallback;
+    }
+
+    private static float TableCenterY(
+        IReadOnlyList<PondHint>? pondHints, float? playerStripAbsY, float fallback = 400f)
     {
         if (pondHints is { Count: > 0 })
-            return pondHints.Average(h => h.AbsY);
-        if (playerStripAbsY is float stripY and > 0)
-            return stripY * 0.5f;
-        return 400f;
+        {
+            var opposite = pondHints.Where(h => h.PondKind == SmallTileClassifier.Kind.OppositeDiscard).ToList();
+            var player = pondHints.Where(h => h.PondKind == SmallTileClassifier.Kind.PlayerDiscard).ToList();
+            if (opposite.Count > 0 && player.Count > 0)
+                return (opposite.Average(h => h.AbsY) + player.Average(h => h.AbsY)) / 2f;
+            if (opposite.Count > 0 && playerStripAbsY is float stripY and > 0)
+                return (opposite.Average(h => h.AbsY) + stripY) / 2f;
+            if (pondHints.Count >= 2)
+                return pondHints.Average(h => h.AbsY);
+        }
+
+        if (playerStripAbsY is float handY and > 0)
+            return handY * 0.5f;
+        return fallback;
     }
 
     internal static List<List<Tile>> Cluster(List<Tile> tiles, float gapPx)

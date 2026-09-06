@@ -228,6 +228,29 @@ public class SmallTileClassifierTests
         Assert.All(meld, c => Assert.Equal("EAST", c.Tile.TileCode));
     }
 
+    [Fact]
+    public void Type2_p8_leftover_near_left_is_left_meld_not_opposite()
+    {
+        // Same Abs layout as the SOUTH snap: type-2 P8 leftovers with only
+        // a 1024 pond (sidecar left=0) must still seat kamicha, not toimen.
+        var tiles = new List<SmallTileClassifier.Tile>
+        {
+            Pond(0, 1024, 50, 0, 0, "M3", absX: 1100, absY: 400),
+            Pond(1, 1024, 50, 34, 0, "P3", absX: 1134, absY: 400),
+            Pond(2, 1021, 10, 0, 0, "S4", absX: 1200, absY: 1100),
+            Pond(3, 2, 201, 0, 0, "P8", absX: 962, absY: 889, width: 40, height: 52),
+            Pond(4, 2, 201, 34, 0, "P8", absX: 996, absY: 858, width: 40, height: 52),
+            Pond(5, 2, 201, 68, 0, "P8", absX: 1022, absY: 889, width: 40, height: 52),
+        };
+
+        var classified = SmallTileClassifier.Classify(tiles);
+        var meld = classified.Where(c => c.Kind == SmallTileClassifier.Kind.LeftMeld).ToList();
+        Assert.Equal(3, meld.Count);
+        Assert.All(meld, c => Assert.Equal("P8", c.Tile.TileCode));
+        Assert.DoesNotContain(classified, c => c.Kind == SmallTileClassifier.Kind.OppositeMeld);
+        Assert.Equal(2, classified.Count(c => c.Kind == SmallTileClassifier.Kind.OppositeDiscard));
+    }
+
     private static SmallTileClassifier.Tile Pond(
         int id, ushort type, uint parent, float x, float y, string code,
         bool tsumogiri = false, int width = 34, int height = 45,
