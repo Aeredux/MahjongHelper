@@ -81,8 +81,9 @@ public static class OpponentAreaClassifier
                 if (!onPlayerStrip && kind == SmallTileClassifier.Kind.LeftMeld && group.Count >= 5)
                     continue;
                 // 61610b9 only gated type-2. Live West-seat NORTH ghosts are
-                // 42×55 / 55×42 / 1055 (and 1031) Right leftover — those
-                // skipped LeftoverNeedsLiveFuuroSlot and never asked for 1062.
+                // 42×55 / 55×42 / 1055 Right leftover. Empty 86×35 chrome
+                // without a tile is not a slot; a 86×35 1062 that carries
+                // M4 (live SOUTH-seat WEST CHI) is populated.
                 if (kind is SmallTileClassifier.Kind.LeftMeld
                         or SmallTileClassifier.Kind.RightMeld
                         or SmallTileClassifier.Kind.OppositeMeld

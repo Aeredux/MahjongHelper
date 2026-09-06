@@ -785,6 +785,77 @@ public class OpponentAreaClassifierTests
     }
 
     [Fact]
+    public void Live_azpc_south_west_chi_m4_is_right_on_tiled_1062_chrome()
+    {
+        // Player SOUTH → WEST is Right (+1), type 1062. Live tray stays 86×35
+        // with TileCode M4 (snap-20260906-230911020). Size-only long≥100
+        // rejected that tray; empty chrome is the same size without a tile.
+        var leftovers = new List<OpponentAreaClassifier.Tile>
+        {
+            Area(0, 0, 0, 1560, 492, 40, 52, parent: 200, "M4", nodeType: 2),
+            Area(1, 0, 0, 1595, 456, 40, 52, parent: 200, "M5", nodeType: 2),
+            Area(2, 0, 0, 1621, 456, 40, 52, parent: 200, "M6", nodeType: 2),
+            Area(3, 0, 0, 1580, 420, 52, 40, parent: 90, "WHITE", nodeType: 1055),
+            Area(4, 0, 40, 1580, 460, 52, 40, parent: 90, "WHITE", nodeType: 1055),
+            Area(5, 0, 80, 1580, 500, 52, 40, parent: 90, "WHITE", nodeType: 1055),
+        };
+        var emptyChrome = new[]
+        {
+            new IconNodeScan.Tray(1525, 972, 140, 55, 1060),
+            new IconNodeScan.Tray(200, 200, 86, 35, 1061),
+            new IconNodeScan.Tray(1562, 459, 86, 35, 1062),
+            new IconNodeScan.Tray(1040, 40, 86, 35, 1063),
+        };
+        Assert.Empty(OpponentAreaClassifier.Classify(
+            leftovers, LiveSouthPonds(), playerStripAbsY: 972, trays: emptyChrome));
+
+        var tiled = new[]
+        {
+            new IconNodeScan.Tray(1525, 972, 140, 55, 1060),
+            new IconNodeScan.Tray(200, 200, 86, 35, 1061),
+            new IconNodeScan.Tray(1562, 459, 86, 35, 1062, 76044, "M4"),
+            new IconNodeScan.Tray(1562, 545, 86, 35, 1062, 76065, "S5"),
+            new IconNodeScan.Tray(1040, 40, 86, 35, 1063),
+        };
+        var assignments = OpponentAreaClassifier.Classify(
+            leftovers.Take(3).ToList(), LiveSouthPonds(), playerStripAbsY: 972, trays: tiled);
+        var right = Assert.Single(assignments);
+        Assert.Equal(SmallTileClassifier.Kind.RightMeld, right.Kind);
+        Assert.Equal([0, 1, 2], right.TileIds);
+        Assert.Equal("CHI", MeldClassifier.InferMeld(
+            right.TileIds.Select(id => leftovers[id].TileCode!).ToList())!.Type);
+
+        var lines = SolverJson.BuildSnapSummaryLines(new SuggestMoveRequest
+        {
+            Hand = ["M1", "M2", "M3", "M7", "M8", "M9", "P1", "P2", "P3", "S1", "S2", "S3", "S4"],
+            DrawnTile = "SOUTH",
+            Dora = ["S4"],
+            SeatWind = "SOUTH",
+            RoundWind = "EAST",
+            Melds =
+            [
+                new MeldInfo { Type = "PON", Tiles = ["RED", "RED", "RED"] },
+                new MeldInfo { Type = "PON", Tiles = ["WEST", "WEST", "WEST"] },
+            ],
+            Opponents =
+            [
+                new OpponentInfo
+                {
+                    Wind = "WEST",
+                    Melds = [new MeldInfo { Type = "CHI", Tiles = ["M4", "M5", "M6"] }],
+                },
+                new OpponentInfo { Wind = "NORTH" },
+                new OpponentInfo { Wind = "EAST" },
+            ],
+        });
+        Assert.Contains("ownMelds=2", lines[0]);
+        Assert.Contains("oppMelds=1", lines[0]);
+        Assert.Equal(
+            "own=PON RED×3, PON WEST×3 | WEST=CHI M4-M5-M6 | NORTH=none | EAST=none",
+            lines[1]);
+    }
+
+    [Fact]
     public void Empty_table_type2_leftovers_without_slots_are_none()
     {
         // West-seat empty fuuro: previous North-seat own CHIs and Right

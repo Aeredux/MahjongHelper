@@ -407,7 +407,8 @@ public static unsafe class EmjUiReader
             slots.Add(doraSlots[di] with { SlotIndex = di });
 
         // Scan before pond classification so extra 1023 parent / peel can
-        // see populated 1060–1063 slots. Empty 86×35 1062 chrome is not a tray.
+        // see populated 1060–1063 slots. Empty 86×35 chrome is not a tray;
+        // a 86×35 slot that carries a tile (live 1062 M4) is.
         var scanned = ScanAddonNodes(addon, iconCapture, iconMap);
         var fuuroTrays = CollectVisibleFuuroTrays(scanned.IconNodes);
 
@@ -463,8 +464,10 @@ public static unsafe class EmjUiReader
         static float AbsX(UiSlot s) => s.AbsX != 0 || s.AbsY != 0 ? s.AbsX : s.X;
         static float AbsY(UiSlot s) => s.AbsX != 0 || s.AbsY != 0 ? s.AbsY : s.Y;
         return (nodes ?? [])
-            .Where(s => s.Visible && IconNodeScan.IsFuuroSlot(s.NodeType, s.Width, s.Height))
-            .Select(s => new IconNodeScan.Tray(AbsX(s), AbsY(s), s.Width, s.Height, s.NodeType))
+            .Where(s => s.Visible && IconNodeScan.IsPopulatedFuuroSlot(
+                s.NodeType, s.Width, s.Height, s.IconId, s.TileCode))
+            .Select(s => new IconNodeScan.Tray(
+                AbsX(s), AbsY(s), s.Width, s.Height, s.NodeType, s.IconId, s.TileCode))
             .ToList();
     }
 
@@ -600,8 +603,10 @@ public static unsafe class EmjUiReader
             ? strip.Max(s => s.AbsX != 0 || s.AbsY != 0 ? s.AbsX : s.X)
             : null;
         var trays = (allIconNodes ?? [])
-            .Where(s => s.Visible && IconNodeScan.IsFuuroTray(s.NodeType, s.Width, s.Height))
-            .Select(s => new IconNodeScan.Tray(AbsOfX(s), AbsOfY(s), s.Width, s.Height, s.NodeType))
+            .Where(s => s.Visible && IconNodeScan.IsPopulatedFuuroSlot(
+                s.NodeType, s.Width, s.Height, s.IconId, s.TileCode))
+            .Select(s => new IconNodeScan.Tray(
+                AbsOfX(s), AbsOfY(s), s.Width, s.Height, s.NodeType, s.IconId, s.TileCode))
             .ToList();
 
         var classified = OpponentAreaClassifier.Classify(
@@ -2015,10 +2020,9 @@ public static unsafe class EmjUiReader
     /// Deep-walk every addon NodeList, nested component UldManager, RootNode
     /// sibling chain, and ChildNode list. Records:
     ///   IconNodes — mahjong tile icons, plus type 1060–1063 fuuro slots
-    ///               (no icon required). Slot <see cref="UiSlot.Visible"/> is
-    ///               the live presence: empty-table dumps show all four
-    ///               arrays hidden. Leftover type-2 / 1056 siblings can stay
-    ///               self-visible after deal reset.
+    ///               (no icon required, including 86×35 chrome). Slot
+    ///               <see cref="UiSlot.Visible"/> is ancestor-AND. Empty
+    ///               chrome without a tile is not leftover presence.
     ///   TileSizedNodes — on-screen 16–80px nodes, even when icon id is 0
     /// </summary>
     public static AddonNodeScan ScanAddonNodes(AtkUnitBase* addon, IconIdCapture? iconCapture, MahjongIconMap? iconMap)
@@ -2127,7 +2131,7 @@ public static unsafe class EmjUiReader
             depth);
 
         if (IconNodeScan.IsMahjongTileIcon(iconId)
-            || IconNodeScan.IsFuuroSlot((ushort)node->Type, node->Width, node->Height))
+            || IconNodeScan.IsFuuroSlotType((ushort)node->Type))
             icons.Add(slot);
         if (visible && IconNodeScan.IsTileSized(node->Width, node->Height))
             tileSized.Add(slot);

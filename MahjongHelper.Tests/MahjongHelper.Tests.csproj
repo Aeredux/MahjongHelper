@@ -20,6 +20,12 @@
     <Compile Include="..\MahjongHelper\Mahjong\PondTsumogiriTracker.cs" Link="PondTsumogiriTracker.cs" />
     <Compile Include="..\MahjongHelper\Mahjong\ServerModels.cs" Link="ServerModels.cs" />
     <Compile Include="..\MahjongHelper\Mahjong\SolverJson.cs" Link="SolverJson.cs" />
+    <Compile Include="..\MahjongHelper\Mahjong\UiDump.cs" Link="UiDump.cs" />
+    <Compile Include="..\MahjongHelper\Mahjong\UiDumpReplay.cs" Link="UiDumpReplay.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Fixtures\ui\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

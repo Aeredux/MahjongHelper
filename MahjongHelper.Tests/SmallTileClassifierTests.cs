@@ -335,6 +335,30 @@ public class SmallTileClassifierTests
         Assert.Equal(2, classified.Count(c => c.Kind == SmallTileClassifier.Kind.OppositeDiscard));
     }
 
+    [Fact]
+    public void Type2_shimocha_chi_m4_is_right_on_tiled_1062_chrome()
+    {
+        var tiles = new List<SmallTileClassifier.Tile>
+        {
+            Pond(0, 1024, 50, 0, 0, "P3", absX: 1100, absY: 400),
+            Pond(1, 1021, 10, 0, 0, "S4", absX: 1200, absY: 1100),
+            Pond(2, 1023, 20, 0, 0, "P8", absX: 1600, absY: 550),
+            Pond(3, 2, 200, 0, 0, "M4", absX: 1560, absY: 492, width: 40, height: 52),
+            Pond(4, 2, 200, 35, 0, "M5", absX: 1595, absY: 456, width: 40, height: 52),
+            Pond(5, 2, 200, 61, 0, "M6", absX: 1621, absY: 456, width: 40, height: 52),
+        };
+        var empty = new[] { new IconNodeScan.Tray(1562, 459, 86, 35, 1062) };
+        Assert.DoesNotContain(
+            SmallTileClassifier.Classify(tiles, empty),
+            c => c.Kind == SmallTileClassifier.Kind.RightMeld);
+
+        var tiled = new[] { new IconNodeScan.Tray(1562, 459, 86, 35, 1062, 76044, "M4") };
+        var classified = SmallTileClassifier.Classify(tiles, tiled);
+        var meld = classified.Where(c => c.Kind == SmallTileClassifier.Kind.RightMeld).ToList();
+        Assert.Equal(3, meld.Count);
+        Assert.Equal(["M4", "M5", "M6"], meld.Select(c => c.Tile.TileCode).ToList());
+    }
+
     private static SmallTileClassifier.Tile Pond(
         int id, ushort type, uint parent, float x, float y, string code,
         bool tsumogiri = false, int width = 34, int height = 45,

@@ -21,7 +21,26 @@ public static class SolverJson
 
     public static string Serialize<T>(T value) => JsonSerializer.Serialize(value, Options);
 
-    private static readonly string[] SeatWinds = ["EAST", "SOUTH", "WEST", "NORTH"];
+    public static readonly string[] SeatWinds = ["EAST", "SOUTH", "WEST", "NORTH"];
+
+    public static int WindIndex(string? wind)
+    {
+        if (string.IsNullOrWhiteSpace(wind))
+            return -1;
+        return Array.FindIndex(SeatWinds, w =>
+            string.Equals(w, wind, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public static string? RelativeWind(string? seat, int offset)
+    {
+        var seatIndex = WindIndex(seat);
+        if (seatIndex < 0)
+            return null;
+        return SeatWinds[(seatIndex + offset) % 4];
+    }
+
+    public static string? WindName(int? index)
+        => index is >= 0 and <= 3 ? SeatWinds[index.Value] : null;
 
     /// <summary>
     /// Chat / log lines for <c>/mj snap</c>. Stats stay on line 1; line 2 lists
@@ -84,8 +103,7 @@ public static class SolverJson
 
     private static IEnumerable<string> OpponentWinds(SuggestMoveRequest request)
     {
-        var seat = Array.FindIndex(SeatWinds, w =>
-            string.Equals(w, request.SeatWind, StringComparison.OrdinalIgnoreCase));
+        var seat = WindIndex(request.SeatWind);
         if (seat >= 0)
             return Enumerable.Range(1, 3).Select(off => SeatWinds[(seat + off) % 4]);
 

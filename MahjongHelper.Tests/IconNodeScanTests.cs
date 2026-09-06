@@ -137,6 +137,15 @@ public class IconNodeScanTests
         Assert.False(IconNodeScan.SeatHasLiveFuuroSlot(
             SmallTileClassifier.Kind.RightMeld, [new IconNodeScan.Tray(1525, 972, 140, 55)]));
         Assert.False(IconNodeScan.SeatHasLiveFuuroSlot(SmallTileClassifier.Kind.LeftMeld, []));
+        Assert.True(IconNodeScan.IsFuuroSlotType(1062));
+        Assert.True(IconNodeScan.IsPopulatedFuuroSlot(1062, 86, 35, 76044, "M4"));
+        Assert.False(IconNodeScan.IsPopulatedFuuroSlot(1062, 86, 35));
+        Assert.True(IconNodeScan.SeatHasLiveFuuroSlot(
+            SmallTileClassifier.Kind.RightMeld,
+            [new IconNodeScan.Tray(1562, 459, 86, 35, 1062, 76044, "M4")]));
+        Assert.False(IconNodeScan.SeatHasLiveFuuroSlot(
+            SmallTileClassifier.Kind.RightMeld,
+            [new IconNodeScan.Tray(1562, 459, 86, 35, 1062)]));
         // Doman CHI: only the called tile is sideways. Two upright 40×52
         // in-hand leaves plus the 1056 cue are enough — M1/M3 must not be 52×40.
         Assert.True(IconNodeScan.IsFaceLeaf(2, 40, 52));
@@ -225,6 +234,17 @@ public class IconNodeScanTests
         };
         Assert.False(IconNodeScan.IsPlausibleOppositeLeftoverFuuro(
             dora, trays: null, t => t.Type, t => t.W, t => t.H, t => t.Rot, t => t.X, t => t.Y, t => t.Code));
+
+        var chi = new (ushort Type, float X, float Y, int W, int H, float Rot, string Code)[]
+        {
+            (2, 1041, 80, 40, 52, 0, "M4"),
+            (2, 1078, 66, 40, 52, 0, "M5"),
+            (2, 1114, 80, 40, 52, 0, "M6"),
+        };
+        Assert.True(IconNodeScan.IsPlausibleOppositeLeftoverFuuro(
+            chi, trays: null, t => t.Type, t => t.W, t => t.H, t => t.Rot, t => t.X, t => t.Y, t => t.Code));
+        Assert.False(IconNodeScan.SeatHasLiveFuuroSlot(
+            SmallTileClassifier.Kind.OppositeMeld, [new IconNodeScan.Tray(1040, 40, 86, 35, 1063)]));
     }
 
     [Fact]

@@ -92,13 +92,21 @@ public static class IconNodeScan
     /// <summary>
     /// Dedicated per-seat fuuro slot arrays. Empty-table dump: four of each.
     /// 1060 140×55 is the own tile tray (hidden when empty — that fixed own CHIs).
-    /// 1061/1062/1063 at 86×35 are empty-slot chrome, not tile trays. They can
-    /// stay Visible during a hand and must not unlock leftover. Only a
-    /// populated opponent slot (long side ≥100px, short ≥40px) is presence.
-    /// West-seat NORTH is Right (+1) → 1062 was the false-positive.
+    /// 1061/1062/1063 stay 86×35 even when that seat has a live call
+    /// (SOUTH-seat WEST CHI sits on type-1062 86×35 with TileCode M4).
+    /// Empty chrome is the same size and can stay Visible — populate only
+    /// when the slot carries a mahjong icon/tile, or has grown (long ≥100).
+    /// Size-only <see cref="IsFuuroSlot"/> is the grown fallback.
     /// </summary>
     public static bool IsFuuroTray(ushort nodeType, int width, int height)
         => IsFuuroSlot(nodeType, width, height);
+
+    public static bool IsFuuroSlotType(ushort nodeType)
+        => nodeType is FuuroTrayNodeType or LeftFuuroSlotType
+            or RightFuuroSlotType or OppositeFuuroSlotType;
+
+    public static bool SlotCarriesTile(uint iconId, string? tileCode)
+        => IsMahjongTileIcon(iconId) || MeldClassifier.IsUsableTile(tileCode);
 
     public static bool IsFuuroSlot(ushort nodeType, int width, int height)
     {
@@ -111,6 +119,24 @@ public static class IconNodeScan
                 => min >= 40 && max >= 100 && max <= 220,
             _ => false,
         };
+    }
+
+    /// <summary>
+    /// Live opponent trays stay 86×35. Distinguish empty chrome from a real
+    /// call by icon/tile on the slot, not by demanding long ≥100.
+    /// </summary>
+    public static bool IsPopulatedFuuroSlot(
+        ushort nodeType, int width, int height, uint iconId = 0, string? tileCode = null)
+    {
+        if (!IsFuuroSlotType(nodeType))
+            return false;
+        if (IsFuuroSlot(nodeType, width, height))
+            return true;
+        if (!SlotCarriesTile(iconId, tileCode))
+            return false;
+        var min = Math.Min(width, height);
+        var max = Math.Max(width, height);
+        return min >= 20 && max <= 100;
     }
 
     public static SmallTileClassifier.Kind? FuuroSlotOwner(ushort nodeType)
@@ -132,7 +158,8 @@ public static class IconNodeScan
         {
             var tray = trays[i];
             if (FuuroSlotOwner(tray.NodeType) == kind
-                && IsFuuroSlot(tray.NodeType, tray.Width, tray.Height))
+                && IsPopulatedFuuroSlot(
+                    tray.NodeType, tray.Width, tray.Height, tray.IconId, tray.TileCode))
                 return true;
         }
 
@@ -140,7 +167,10 @@ public static class IconNodeScan
     }
 
     public readonly record struct Tray(
-        float AbsX, float AbsY, int Width, int Height, ushort NodeType = FuuroTrayNodeType);
+        float AbsX, float AbsY, int Width, int Height,
+        ushort NodeType = FuuroTrayNodeType,
+        uint IconId = 0,
+        string? TileCode = null);
 
     public static bool CenterInTray(float absX, float absY, int width, int height, Tray tray)
     {
@@ -254,11 +284,13 @@ public static class IconNodeScan
     }
 
     /// <summary>
-    /// Toimen leftover type-2 40×52 faces are a called set only with a
-    /// type-1056 cue, a sideways discarded tile, a type-1060 tray, or a
-    /// 3-face honor PON (live North-seat SOUTH PON EAST). All-upright
-    /// suited leaves in the dora band (M5/M0 at AbsY≈396–430) stay rejected.
-    /// 42×55 / 1045 / 1055 toimen rows are not face-leaves and stay allowed.
+    /// Toimen leftover type-2 40×52 faces are a called set with a type-1056
+    /// cue, a sideways discarded tile, a covering tray, a 3-face honor PON
+    /// (live North-seat SOUTH PON EAST), or InferMeld CHI (live SOUTH-seat
+    /// WEST M4-M5-M6). All-upright suited PON in the dora band (M5/M0 at
+    /// AbsY≈396–430) stays rejected. 42×55 / 1045 / 1055 toimen rows are
+    /// not face-leaves and stay allowed. 1063 never grows, so tray coverage
+    /// is optional here.
     /// </summary>
     public static bool IsPlausibleOppositeLeftoverFuuro<T>(
         IReadOnlyList<T> tiles,
@@ -287,7 +319,9 @@ public static class IconNodeScan
             return true;
         if (ClusterCoveredByTray(faces, trays, absX, absY, width, height))
             return true;
-        return tileCode != null && IsHonorPonFaces(faces, tileCode);
+        if (tileCode == null)
+            return false;
+        return IsHonorPonFaces(faces, tileCode) || IsSequenceChiFaces(faces, tileCode);
     }
 
     private static bool IsHonorPonFaces<T>(IReadOnlyList<T> faces, Func<T, string?> tileCode)
@@ -304,6 +338,26 @@ public static class IconNodeScan
         return keys.Count >= 3
                && MeldClassifier.IsHonor(keys[0])
                && keys.TrueForAll(k => k == keys[0]);
+    }
+
+    /// <summary>
+    /// Live toimen CHI is often three upright type-2 faces with no 1056 cue
+    /// and no grown 1063. InferMeld CHI is enough; suited PON (dora M5/M0)
+    /// is not.
+    /// </summary>
+    private static bool IsSequenceChiFaces<T>(IReadOnlyList<T> faces, Func<T, string?> tileCode)
+    {
+        var codes = new List<string>();
+        foreach (var face in faces)
+        {
+            var code = tileCode(face);
+            if (!MeldClassifier.IsUsableTile(code))
+                continue;
+            codes.Add(code!);
+        }
+
+        var meld = MeldClassifier.InferMeld(codes);
+        return meld != null && meld.Type.Equals("CHI", StringComparison.Ordinal);
     }
 
     /// <summary>
