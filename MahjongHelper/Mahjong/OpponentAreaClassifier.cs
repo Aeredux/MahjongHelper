@@ -80,7 +80,12 @@ public static class OpponentAreaClassifier
                 var kind = GuessOwner(group, pondHints, playerStripAbsY, tableCenterX, tableCenterY);
                 if (!onPlayerStrip && kind == SmallTileClassifier.Kind.LeftMeld && group.Count >= 5)
                     continue;
-                if (LeftoverNeedsLiveFuuroSlot(group)
+                // 61610b9 only gated type-2. Live West-seat NORTH ghosts are
+                // 42×55 / 55×42 / 1055 (and 1031) Right leftover — those
+                // skipped LeftoverNeedsLiveFuuroSlot and never asked for 1062.
+                if (kind is SmallTileClassifier.Kind.LeftMeld
+                        or SmallTileClassifier.Kind.RightMeld
+                        or SmallTileClassifier.Kind.OppositeMeld
                     && !IconNodeScan.SeatHasLiveFuuroSlot(kind, trays))
                     continue;
                 if (kind == SmallTileClassifier.Kind.OppositeMeld
@@ -467,23 +472,6 @@ public static class OpponentAreaClassifier
     private static float AbsYOf(Tile tile) => HasAbs(tile) ? tile.AbsY : tile.Y;
 
     private static int BandY(Tile tile) => (int)MathF.Round(AbsYOf(tile) / 20f) * 20;
-
-    /// <summary>
-    /// Type-2 leftover (any size) is scavenged from nodes that survive deal
-    /// reset. 42×55 / 1055 / 1045 rows are the official sized faces and do
-    /// not need a 1060–1063 slot.
-    /// </summary>
-    private static bool LeftoverNeedsLiveFuuroSlot(IReadOnlyList<Tile> group)
-    {
-        var type2 = 0;
-        for (var i = 0; i < group.Count; i++)
-        {
-            if (group[i].NodeType == IconNodeScan.ImageNodeType)
-                type2++;
-        }
-
-        return type2 >= 2;
-    }
 
     private static bool OppositeLeftoverFuuroAllowed(
         IReadOnlyList<Tile> group, IReadOnlyList<IconNodeScan.Tray>? trays)
