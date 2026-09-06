@@ -48,7 +48,9 @@ public static class OpponentAreaClassifier
 
         var usable = leftovers
             .Where(t => MeldClassifier.IsUsableTile(t.TileCode))
-            .Where(t => t.NodeType is not (1009 or 1006 or 1021 or 1022 or 1023 or 1024))
+            .Where(t => t.NodeType is not (1009 or 1006 or 1021 or 1022 or 1023 or 1024 or 1038))
+            .Where(t => IconNodeScan.IsTileSized(t.Width, t.Height)
+                        || IconNodeScan.IsFaceLeaf(t.NodeType, t.Width, t.Height))
             .Where(t => !IconNodeScan.IsType1045PondEcho(t.NodeType, t.Width, t.Height))
             .ToList();
         if (usable.Count == 0)
@@ -56,21 +58,93 @@ public static class OpponentAreaClassifier
 
         var tableCenterX = TableCenterX(usable, pondHints);
         var tableCenterY = TableCenterY(pondHints, playerStripAbsY);
+        var denseY = DenseAbsYBands(usable, playerStripAbsY);
 
         foreach (var cluster in Cluster(usable, ClusterGapPx))
         {
-            if (cluster.Count is < 2 or > 4)
+            var onPlayerStrip = playerStripAbsY is float stripY
+                                && cluster.All(t => Math.Abs(AbsYOf(t) - stripY) <= PlayerStripBandPx);
+
+            if (!onPlayerStrip && cluster.Any(t => denseY.Contains(BandY(t))))
                 continue;
 
-            var asSmall = cluster.Select(ToSmall).ToList();
-            if (!SmallTileClassifier.LooksLikeOpenMeld(asSmall))
-                continue;
-
-            var kind = GuessOwner(cluster, pondHints, playerStripAbsY, tableCenterX, tableCenterY);
-            result.Add(new Assignment(kind, cluster.Select(t => t.Id).ToList()));
+            foreach (var group in SplitFuuroGroups(cluster, allowSplit: onPlayerStrip))
+            {
+                var kind = GuessOwner(group, pondHints, playerStripAbsY, tableCenterX, tableCenterY);
+                if (!onPlayerStrip && kind == SmallTileClassifier.Kind.LeftMeld && group.Count >= 5)
+                    continue;
+                result.Add(new Assignment(kind, group.Select(t => t.Id).ToList()));
+            }
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Y-bands with 7+ leftover faces are the mid-table hand-echo / pond rows.
+    /// Never split those into left/opposite CHI. The player strip is exempt so
+    /// adjacent own fuuro (PON+CHI) can still be peeled.
+    /// </summary>
+    internal static HashSet<int> DenseAbsYBands(IReadOnlyList<Tile> tiles, float? playerStripAbsY)
+    {
+        var dense = new HashSet<int>();
+        foreach (var band in tiles.GroupBy(BandY))
+        {
+            if (band.Count() < 7)
+                continue;
+            if (playerStripAbsY is float stripY
+                && Math.Abs(band.Average(AbsYOf) - stripY) <= PlayerStripBandPx)
+                continue;
+            dense.Add(band.Key);
+        }
+
+        return dense;
+    }
+
+    internal static List<List<Tile>> SplitFuuroGroups(List<Tile> cluster, bool allowSplit)
+    {
+        if (cluster.Count is >= 2 and <= 4
+            && SmallTileClassifier.LooksLikeOpenMeld(cluster.Select(ToSmall).ToList()))
+            return [cluster];
+
+        if (!allowSplit || cluster.Count < 3)
+            return [];
+
+        var ordered = cluster
+            .OrderBy(t => HasAbs(t) ? t.AbsX : t.X)
+            .ThenBy(t => t.Id)
+            .ToList();
+        var groups = new List<List<Tile>>();
+        var i = 0;
+        while (i < ordered.Count)
+        {
+            if (ordered.Count - i >= 4)
+            {
+                var four = ordered.GetRange(i, 4);
+                var meld4 = MeldClassifier.InferMeld(four.Select(t => t.TileCode!).ToList());
+                if (meld4 != null && meld4.Type.StartsWith("KAN", StringComparison.Ordinal))
+                {
+                    groups.Add(four);
+                    i += 4;
+                    continue;
+                }
+            }
+
+            if (ordered.Count - i >= 3)
+            {
+                var three = ordered.GetRange(i, 3);
+                if (MeldClassifier.InferMeld(three.Select(t => t.TileCode!).ToList()) != null)
+                {
+                    groups.Add(three);
+                    i += 3;
+                    continue;
+                }
+            }
+
+            i++;
+        }
+
+        return groups;
     }
 
     internal static SmallTileClassifier.Kind GuessOwner(
@@ -85,6 +159,16 @@ public static class OpponentAreaClassifier
 
         if (playerStripAbsY is float stripY && Math.Abs(gy - stripY) <= PlayerStripBandPx)
             return SmallTileClassifier.Kind.PlayerMeld;
+
+        var xSpan = group.Max(t => HasAbs(t) ? t.AbsX : t.X) - group.Min(t => HasAbs(t) ? t.AbsX : t.X);
+        var ySpan = group.Max(t => HasAbs(t) ? t.AbsY : t.Y) - group.Min(t => HasAbs(t) ? t.AbsY : t.Y);
+        var horizontal = xSpan >= ySpan;
+
+        // Toimen fuuro is a horizontal row at the top of the table, including
+        // the top-right (live 7ad3d5d CHI at AbsX≈1040, AbsY≈410). Shimocha
+        // is a vertical stack on the right edge — don't steal those.
+        if (playerStripAbsY is float handY && gy + RegionMarginPx < handY && horizontal)
+            return SmallTileClassifier.Kind.OppositeMeld;
 
         // Table regions beat nearest-pond (live AZPC: a mid-Y 1045 strip
         // sat closer to the left pond than the visible shimocha CHI).
@@ -149,7 +233,11 @@ public static class OpponentAreaClassifier
                 }
             }
 
-            clusters.Add(cluster.OrderBy(t => t.X).ThenBy(t => t.Y).ThenBy(t => t.Id).ToList());
+            clusters.Add(cluster
+                .OrderBy(t => HasAbs(t) ? t.AbsX : t.X)
+                .ThenBy(t => HasAbs(t) ? t.AbsY : t.Y)
+                .ThenBy(t => t.Id)
+                .ToList());
         }
 
         return clusters;
@@ -168,4 +256,8 @@ public static class OpponentAreaClassifier
     }
 
     private static bool HasAbs(Tile tile) => tile.AbsX != 0 || tile.AbsY != 0;
+
+    private static float AbsYOf(Tile tile) => HasAbs(tile) ? tile.AbsY : tile.Y;
+
+    private static int BandY(Tile tile) => (int)MathF.Round(AbsYOf(tile) / 20f) * 20;
 }

@@ -433,13 +433,10 @@ public static unsafe class EmjUiReader
         }
 
         // Called sets sit on the same 42×55 Y=0 strip as the closed hand. Peel them out
-        // so they become PlayerMeld instead of CanonicalPlayerHand.
-        ApplyHandStripMeldSplit(slots, rawHand, extraStrip);
-
-        // Live AZPC after 78fd2f1: visible fuuro was not 42×55 / 55×42 / 34×45.
-        // Deep-walk every UldManager / child list for icon-bearing nodes and
-        // classify leftovers that InferMeld. Keep the 34×45 type-1045 echo out.
+        // so they become PlayerMeld instead of CanonicalPlayerHand. Live AZPC after
+        // 7ad3d5d: own fuuro is nested type-2 40×52 leaves, not 1055/1045.
         var scanned = ScanAddonNodes(addon, iconCapture, iconMap);
+        ApplyHandStripMeldSplit(slots, rawHand, extraStrip, scanned.IconNodes);
         var opponentMeldCandidates = ClassifyOpponentAreaMelds(slots, extraStrip, smallTiles, scanned.IconNodes);
 
         var gameInfo = ReadGameInfo(addon, iconCapture, iconMap);
@@ -517,7 +514,10 @@ public static unsafe class EmjUiReader
                 return;
             if (claimed.Contains(slot.NodeIndex) || claimedPos.Contains(SnapPos(slot)))
                 return;
-            if (slot.NodeType is 1009 or 1006 or 1021 or 1022 or 1023 or 1024)
+            if (slot.NodeType is 1009 or 1006 or 1021 or 1022 or 1023 or 1024 or 1038)
+                return;
+            if (!IconNodeScan.IsTileSized(slot.Width, slot.Height)
+                && !IconNodeScan.IsFaceLeaf(slot.NodeType, slot.Width, slot.Height))
                 return;
             if (IconNodeScan.IsType1045PondEcho(slot.NodeType, slot.Width, slot.Height))
                 return;
@@ -1668,18 +1668,28 @@ public static unsafe class EmjUiReader
     }
 
     /// <summary>
-    /// Reclassifies 42×55 / 55×42 tiles on the local hand strip so open calls
-    /// become <see cref="SlotKind.PlayerMeld"/> and drop out of the closed hand.
+    /// Reclassifies tiles on the local hand strip so open calls become
+    /// <see cref="SlotKind.PlayerMeld"/> and drop out of the closed hand.
+    /// Includes unclaimed type-2 40×52 leaves on the same AbsY band.
     /// </summary>
-    private static void ApplyHandStripMeldSplit(List<UiSlot> slots, List<UiSlot> rawHand, List<UiSlot> extraStrip)
+    private static void ApplyHandStripMeldSplit(
+        List<UiSlot> slots, List<UiSlot> rawHand, List<UiSlot> extraStrip, List<UiSlot>? allIconNodes)
     {
         var byNode = new Dictionary<int, UiSlot>();
 
+        static float AbsOfX(UiSlot s) => s.AbsX != 0 || s.AbsY != 0 ? s.AbsX : s.X;
+        static float AbsOfY(UiSlot s) => s.AbsX != 0 || s.AbsY != 0 ? s.AbsY : s.Y;
+        static (int X, int Y) SnapPos(UiSlot s)
+            => ((int)MathF.Round(AbsOfX(s) / IconNodeScan.LeafSnapPx),
+                (int)MathF.Round(AbsOfY(s) / IconNodeScan.LeafSnapPx));
+
         void Consider(UiSlot slot)
         {
-            if (!slot.Visible || slot.IconId == 0 || slot.X < 0)
+            if (!slot.Visible || slot.IconId == 0)
                 return;
             if (slot.NodeIndex is >= 55 and <= 58)
+                return;
+            if (slot.X < 0 && !IconNodeScan.IsFaceLeaf(slot.NodeType, slot.Width, slot.Height))
                 return;
 
             if (byNode.TryGetValue(slot.NodeIndex, out var existing))
@@ -1705,6 +1715,7 @@ public static unsafe class EmjUiReader
         float? stripAbsY = stripAnchors.Count > 0
             ? stripAnchors.Average(s => s.AbsY != 0 || s.AbsX != 0 ? s.AbsY : s.Y)
             : null;
+        var packPos = stripAnchors.Select(SnapPos).ToHashSet();
 
         bool OnPlayerStrip(UiSlot slot)
         {
@@ -1728,10 +1739,34 @@ public static unsafe class EmjUiReader
                 Consider(slot);
         }
 
+        if (allIconNodes != null && stripAbsY is float)
+        {
+            var faces = allIconNodes
+                .Where(s => s.Visible && IconNodeScan.IsFaceLeaf(s.NodeType, s.Width, s.Height))
+                .Where(s => MeldClassifier.IsUsableTile(s.TileCode))
+                .Where(OnPlayerStrip)
+                .Where(s => !packPos.Contains(SnapPos(s)))
+                .ToList();
+            faces = IconNodeScan.PreferLeafTiles(
+                    faces,
+                    s => s.IconId,
+                    AbsOfX,
+                    AbsOfY,
+                    s => s.Width,
+                    s => s.Height)
+                .ToList();
+            foreach (var face in faces)
+            {
+                if (byNode.Values.Any(s => SnapPos(s) == SnapPos(face)))
+                    continue;
+                Consider(face);
+            }
+        }
+
         if (byNode.Count == 0)
             return;
 
-        var list = byNode.Values.OrderBy(s => s.X).ThenBy(s => s.NodeIndex).ToList();
+        var list = byNode.Values.OrderBy(AbsOfX).ThenBy(s => s.NodeIndex).ToList();
         var tiles = list.Select((s, i) => ToStripTile(i, s)).ToList();
         var split = HandStripClassifier.Split(tiles);
         if (split.ClosedIds.Count == 0 && split.MeldGroups.Count == 0 && split.DrawId == null)

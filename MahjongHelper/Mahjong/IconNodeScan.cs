@@ -17,6 +17,9 @@ public static class IconNodeScan
     public const int MinTilePx = 16;
     public const int MaxTilePx = 80;
     public const float LeafSnapPx = 8f;
+    public const ushort ImageNodeType = 2;
+    public const int FaceLeafShortPx = 40;
+    public const int FaceLeafLongPx = 52;
 
     public static bool IsMahjongTileIcon(uint iconId)
         => iconId >= MinMahjongIcon && iconId <= MaxMahjongIcon;
@@ -31,6 +34,15 @@ public static class IconNodeScan
         var max = Math.Max(width, height);
         return min >= MinTilePx && max <= MaxTilePx;
     }
+
+    /// <summary>
+    /// Live AZPC after 7ad3d5d: own and across fuuro faces are AtkImageNode
+    /// type 2 at 40×52 (or 52×40 when the called tile is sideways).
+    /// </summary>
+    public static bool IsFaceLeaf(ushort nodeType, int width, int height)
+        => nodeType == ImageNodeType
+           && ((width == FaceLeafShortPx && height == FaceLeafLongPx)
+               || (width == FaceLeafLongPx && height == FaceLeafShortPx));
 
     /// <summary>
     /// Live parent-60 strip: seven type-1045 34×45 tiles at AbsY≈512 that

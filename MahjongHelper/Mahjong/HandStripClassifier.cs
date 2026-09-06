@@ -122,10 +122,10 @@ public static class HandStripClassifier
             ? remaining.Where(t => t.NodeIndex == DrawNodeIndex).OrderBy(LayoutX).Last().Id
             : FindDrawTile(remaining)?.Id;
 
-        var closed = remaining
-            .Where(t => t.Id != drawId)
-            .Select(t => t.Id)
-            .ToList();
+        var reservedPack = ReservedClosedPack(row);
+        var closed = reservedPack.Count >= 7
+            ? reservedPack.Where(t => t.Id != drawId && !melded.Contains(t.Id)).Select(t => t.Id).ToList()
+            : remaining.Where(t => t.Id != drawId).Select(t => t.Id).ToList();
         if (closed.Count > 14)
             closed = closed.Take(14).ToList();
 

@@ -410,6 +410,92 @@ public class OpponentAreaClassifierTests
         Assert.Equal([10, 11, 12], across.TileIds);
     }
 
+    [Fact]
+    public void Live_7ad3d5d_type2_faces_seat_own_and_across_without_echo_or_tray()
+    {
+        // snap-20260906-081032563: type-2 40×52 leaves. Across CHI P2/P3/P4.
+        // Own PON WEST + CHI M1-M3 on the player band. AbsY≈500 echo and the
+        // 192×52 type-1038 tray must not become opposite/left melds.
+        var leftovers = new List<OpponentAreaClassifier.Tile>
+        {
+            Area(0, 0, 0, 1041, 410, 40, 52, parent: 300, "P2", nodeType: 2),
+            Area(1, 0, 0, 1078, 396, 40, 52, parent: 300, "P3", nodeType: 2),
+            Area(2, 0, 0, 1104, 430, 52, 40, parent: 300, "P4", nodeType: 2),
+            Area(3, 0, 0, 1040, 396, 192, 52, parent: 300, "P2", nodeType: 1038),
+            Area(4, 0, 0, 300, 500, 40, 52, parent: 60, "P6", nodeType: 2),
+            Area(5, 0, 0, 340, 500, 40, 52, parent: 60, "M4", nodeType: 2),
+            Area(6, 0, 0, 380, 500, 40, 52, parent: 60, "M5", nodeType: 2),
+            Area(7, 0, 0, 420, 500, 40, 52, parent: 60, "P6", nodeType: 2),
+            Area(8, 0, 0, 460, 500, 40, 52, parent: 60, "S5", nodeType: 2),
+            Area(9, 0, 0, 500, 500, 40, 52, parent: 60, "S6", nodeType: 2),
+            Area(10, 0, 0, 540, 500, 40, 52, parent: 60, "S7", nodeType: 2),
+            Area(11, 0, 0, 580, 500, 40, 52, parent: 60, "WEST", nodeType: 2),
+            Area(12, 0, 0, 620, 500, 40, 52, parent: 60, "WEST", nodeType: 2),
+            Area(13, 0, 0, 660, 500, 40, 52, parent: 60, "GREEN", nodeType: 2),
+            Area(14, 0, 0, 700, 500, 40, 52, parent: 60, "GREEN", nodeType: 2),
+            Area(15, 0, 0, 740, 500, 40, 52, parent: 60, "M3", nodeType: 2),
+            Area(16, 0, 0, 1391, 980, 40, 52, parent: 80, "WEST", nodeType: 2),
+            Area(17, 0, 0, 1442, 980, 40, 52, parent: 80, "WEST", nodeType: 2),
+            Area(18, 0, 0, 1484, 980, 40, 52, parent: 80, "WEST", nodeType: 2),
+            Area(19, 0, 0, 1531, 980, 40, 52, parent: 81, "M2", nodeType: 2),
+            Area(20, 0, 0, 1582, 980, 40, 52, parent: 81, "M1", nodeType: 2),
+            Area(21, 0, 0, 1624, 980, 52, 40, parent: 81, "M3", nodeType: 2),
+            Area(22, 0, 0, 1400, 1139, 40, 52, parent: 90, "WEST", nodeType: 2),
+            Area(23, 0, 0, 1440, 1139, 40, 52, parent: 90, "WEST", nodeType: 2),
+            Area(24, 0, 0, 1480, 1139, 40, 52, parent: 90, "M9", nodeType: 2),
+            Area(25, 0, 0, 1520, 1139, 40, 52, parent: 90, "P5", nodeType: 2),
+        };
+        var ponds = new[]
+        {
+            new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.PlayerDiscard, 400, 760),
+            new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.OppositeDiscard, 420, 180),
+            new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.RightDiscard, 820, 400),
+            new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.LeftDiscard, 90, 380),
+        };
+
+        var assignments = OpponentAreaClassifier.Classify(leftovers, ponds, playerStripAbsY: 972);
+        Assert.DoesNotContain(assignments, a => a.Kind == SmallTileClassifier.Kind.LeftMeld);
+        Assert.DoesNotContain(assignments, a => a.TileIds.Contains(3));
+        Assert.DoesNotContain(assignments, a => a.TileIds.Any(id => id is >= 4 and <= 15));
+        Assert.DoesNotContain(assignments, a => a.TileIds.Any(id => id is >= 22 and <= 25));
+
+        var across = Assert.Single(assignments, a => a.Kind == SmallTileClassifier.Kind.OppositeMeld);
+        Assert.Equal([0, 1, 2], across.TileIds);
+        var acrossCodes = across.TileIds.Select(id => leftovers[id].TileCode!).ToList();
+        Assert.Equal("CHI", MeldClassifier.InferMeld(acrossCodes)!.Type);
+
+        var own = assignments.Where(a => a.Kind == SmallTileClassifier.Kind.PlayerMeld).ToList();
+        Assert.Equal(2, own.Count);
+        var ownCodes = own.Select(a => a.TileIds.Select(id => leftovers[id].TileCode!).ToList()).ToList();
+        Assert.Contains(ownCodes, g => MeldClassifier.InferMeld(g)?.Type == "PON" && g.All(c => c == "WEST"));
+        Assert.Contains(ownCodes, g => MeldClassifier.InferMeld(g)?.Type == "CHI");
+
+        var summary = SolverJson.BuildSnapSummary(new SuggestMoveRequest
+        {
+            Hand = ["M4", "M6", "M7"],
+            DrawnTile = "M4",
+            SeatWind = "EAST",
+            RoundWind = "EAST",
+            Melds =
+            [
+                new MeldInfo { Type = "PON", Tiles = ["WEST", "WEST", "WEST"] },
+                new MeldInfo { Type = "CHI", Tiles = ["M2", "M1", "M3"] },
+            ],
+            Opponents =
+            [
+                new OpponentInfo { Wind = "SOUTH" },
+                new OpponentInfo
+                {
+                    Wind = "WEST",
+                    Melds = [new MeldInfo { Type = "CHI", Tiles = ["P2", "P3", "P4"] }],
+                },
+                new OpponentInfo { Wind = "NORTH" },
+            ],
+        });
+        Assert.Contains("ownMelds=2", summary);
+        Assert.Contains("oppMelds=1", summary);
+    }
+
     private static OpponentAreaClassifier.Tile Area(
         int id, float x, float y, float absX, float absY, int width, int height,
         uint parent, string code, ushort nodeType = 1055)

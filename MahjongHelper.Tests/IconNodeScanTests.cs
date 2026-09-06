@@ -50,6 +50,17 @@ public class IconNodeScanTests
         Assert.False(IconNodeScan.IsTileSized(200, 80));
         Assert.False(IconNodeScan.IsTileSized(8, 8));
         Assert.False(IconNodeScan.IsTileSized(42, 200));
+        Assert.False(IconNodeScan.IsTileSized(192, 52));
+    }
+
+    [Fact]
+    public void FaceLeaf_is_type2_40x52_or_52x40()
+    {
+        Assert.True(IconNodeScan.IsFaceLeaf(2, 40, 52));
+        Assert.True(IconNodeScan.IsFaceLeaf(2, 52, 40));
+        Assert.False(IconNodeScan.IsFaceLeaf(2, 42, 55));
+        Assert.False(IconNodeScan.IsFaceLeaf(1055, 40, 52));
+        Assert.False(IconNodeScan.IsFaceLeaf(1038, 192, 52));
     }
 
     [Fact]

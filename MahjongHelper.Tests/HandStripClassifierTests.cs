@@ -257,6 +257,48 @@ public class HandStripClassifierTests
     }
 
     [Fact]
+    public void Type2_40x52_leaves_right_of_1055_pack_are_own_fuuro()
+    {
+        // snap-20260906-081032563: closed type-1055 at AbsY≈972, unclaimed
+        // type-2 40×52 faces on the same band (WEST PON + M1-M3 CHI).
+        var tiles = new List<HandStripClassifier.Tile>();
+        var closed = new[] { "M4", "M6", "M7", "M8", "M8", "M9", "P1", "P2", "P9", "S1", "S1", "S8", "S6" };
+        for (var i = 0; i < closed.Length; i++)
+        {
+            var x = 907 + i * 42;
+            tiles.Add(T(i, x, closed[i], nodeIndex: 59 + i, nodeType: 1055, width: 42, height: 55,
+                absX: x, absY: 972, parent: 10));
+        }
+
+        tiles.Add(T(13, 0, "WEST", parent: 80, nodeIndex: 200, width: 40, height: 52,
+            nodeType: 2, absX: 1391, absY: 980));
+        tiles.Add(T(14, 0, "WEST", parent: 80, nodeIndex: 201, width: 40, height: 52,
+            nodeType: 2, absX: 1442, absY: 980));
+        tiles.Add(T(15, 0, "WEST", parent: 80, nodeIndex: 202, width: 40, height: 52,
+            nodeType: 2, absX: 1484, absY: 980));
+        tiles.Add(T(16, 0, "M2", parent: 81, nodeIndex: 203, width: 40, height: 52,
+            nodeType: 2, absX: 1531, absY: 980));
+        tiles.Add(T(17, 0, "M1", parent: 81, nodeIndex: 204, width: 40, height: 52,
+            nodeType: 2, absX: 1582, absY: 980));
+        tiles.Add(T(18, 0, "M3", parent: 81, nodeIndex: 205, width: 52, height: 40,
+            nodeType: 2, absX: 1624, absY: 980));
+
+        var split = HandStripClassifier.Split(tiles);
+
+        Assert.Equal(13, split.ClosedIds.Count);
+        Assert.All(split.ClosedIds, id => Assert.True(id <= 12));
+        Assert.Equal(2, split.MeldGroups.Count);
+        var codes = split.MeldGroups.Select(g => Codes(tiles, g)).ToList();
+        Assert.Contains(codes, g => MeldClassifier.InferMeld(g)?.Type == "PON" && g.All(c => c == "WEST"));
+        Assert.Contains(codes, g => MeldClassifier.InferMeld(g)?.Type == "CHI");
+        var chi = codes.Single(g => MeldClassifier.InferMeld(g)?.Type == "CHI");
+        Assert.Equal(3, chi.Count);
+        Assert.Contains("M1", chi);
+        Assert.Contains("M2", chi);
+        Assert.Contains("M3", chi);
+    }
+
+    [Fact]
     public void Overlapping_suited_tiles_at_same_x_are_not_a_meld_cue()
     {
         // dump/uistate: P2 and P3 both at X=168 (placeholder + live).

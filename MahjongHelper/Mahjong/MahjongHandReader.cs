@@ -180,6 +180,7 @@ public static unsafe class MahjongHandReader
         float? stripAbsY = anchors.Count > 0
             ? anchors.Average(t => t.AbsY != 0 || t.AbsX != 0 ? t.AbsY : t.Y)
             : null;
+        AppendFaceLeavesOnStrip(addon, capture, iconMap, stripTiles, anchors, stripAbsY);
         var stripForSplit = stripTiles
             .Where(t => t.NodeIndex is < 55 or > 58)
             .Where(t =>
@@ -338,6 +339,72 @@ public static unsafe class MahjongHandReader
         catch
         {
             return false;
+        }
+    }
+
+    private static void AppendFaceLeavesOnStrip(
+        AtkUnitBase* addon,
+        IconIdCapture capture,
+        MahjongIconMap? iconMap,
+        List<MahjongTileObservation> stripTiles,
+        List<MahjongTileObservation> anchors,
+        float? stripAbsY)
+    {
+        if (addon == null || stripAbsY is not float band || anchors.Count == 0)
+            return;
+
+        try
+        {
+            var scanned = EmjUiReader.ScanAddonNodes(addon, capture, iconMap);
+            static float AbsXOf(MahjongTileObservation t) => t.AbsX != 0 || t.AbsY != 0 ? t.AbsX : t.X;
+            static float AbsYOf(MahjongTileObservation t) => t.AbsX != 0 || t.AbsY != 0 ? t.AbsY : t.Y;
+            static (int X, int Y) Snap(MahjongTileObservation t)
+                => ((int)MathF.Round(AbsXOf(t) / IconNodeScan.LeafSnapPx),
+                    (int)MathF.Round(AbsYOf(t) / IconNodeScan.LeafSnapPx));
+
+            var packPos = anchors.Select(Snap).ToHashSet();
+            var existing = stripTiles.Select(Snap).ToHashSet();
+
+            var faces = scanned.IconNodes
+                .Where(s => s.Visible && IconNodeScan.IsFaceLeaf(s.NodeType, s.Width, s.Height))
+                .Where(s => MeldClassifier.IsUsableTile(s.TileCode))
+                .Where(s => Math.Abs((s.AbsX != 0 || s.AbsY != 0 ? s.AbsY : s.Y) - band)
+                            <= OpponentAreaClassifier.PlayerStripBandPx)
+                .ToList();
+            faces = IconNodeScan.PreferLeafTiles(
+                    faces,
+                    s => s.IconId,
+                    s => s.AbsX != 0 || s.AbsY != 0 ? s.AbsX : s.X,
+                    s => s.AbsX != 0 || s.AbsY != 0 ? s.AbsY : s.Y,
+                    s => s.Width,
+                    s => s.Height)
+                .ToList();
+
+            foreach (var face in faces)
+            {
+                var obs = new MahjongTileObservation(
+                    face.NodeIndex,
+                    face.NodeId,
+                    face.NodeType,
+                    face.X,
+                    face.Y,
+                    face.IconId,
+                    face.TileCode,
+                    face.Rotation,
+                    face.Width,
+                    face.Height,
+                    face.ParentNodeId,
+                    face.AbsX,
+                    face.AbsY);
+                var key = Snap(obs);
+                if (packPos.Contains(key) || existing.Contains(key))
+                    continue;
+                existing.Add(key);
+                stripTiles.Add(obs);
+            }
+        }
+        catch
+        {
         }
     }
 
