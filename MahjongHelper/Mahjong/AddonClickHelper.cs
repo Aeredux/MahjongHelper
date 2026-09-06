@@ -95,7 +95,8 @@ public static unsafe class AddonClickHelper
     /// <summary>
     /// Discards the drawn tile (tsumogiri) via FireCallback(2, [8, 0], true).
     /// At atk0=6 this same callback is skip/pass, not a discard — refuse it.
-    /// Auto-play discards must use callback 7 instead.
+    /// Auto-play must not call this: even at discard-ready atk0=6, callback 8
+    /// is skip. Tsumogiri is FireCallback 7 at the mapped draw pos (KAN-59).
     /// </summary>
     public static bool TryDiscardDrawnTile(AtkUnitBase* addon)
     {

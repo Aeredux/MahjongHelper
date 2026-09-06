@@ -1,5 +1,15 @@
 # Dev Journey
 
+## 2026-09-06: KAN-59 Autoplay tsumogiri via mapped callback 7
+
+**What:** Live AZPC 2026-09-06. Hint/suggestion `Discard NORTH` icon 76071. NORTH was only on draw node 54 (type 1055 in snap; autoplay.log still said “type-1022”). Closed nodes 59–71 had no NORTH. `WaitingForDiscard` `atk0=6`. AutoPlayManager logged that the hint matches the draw but the icon is not in eligible 0–13, refused callback 8, and looped `discard:NORTH`. Same pattern earlier with drawn P6. Manual click of the separated draw tile worked.
+
+**Why:** After KAN-54 strip split, node 54 is the drawn 1055 and is removed from `HandTiles`. `ClosedTilesForCallback7` therefore has only 59–71. The post-callback-8-misuse guard then blocked every draw-only hint, including legitimate tsumogiri. Callback 8 at atk0=6 is still skip/pass (ATK unchanged) — not a discard.
+
+**Fix:** `HintedDiscardPlanner` maps a real draw (node 54 / type 1055) that is not in eligible 0–13 to FireCallback 7 at the X-sorted 14th slot (13 closed → pos 13). Type-1022 visuals stay unmapped. Never FireCallback 8 as a discard. If the hint is not in the closed hand and not the draw, fail that pending hint instead of looping. Unit tests cover the live NORTH/P6 cases, RED-at-13, type-1022 refusal, and stale M6.
+
+**Result:** Needs AZPC reload + `/mj auto`. Expect `[DISCARD] FireCallback 7 handPos=13` with `hint-tsumogiri via mapped draw` when the suggestion is the separated draw tile, and ATK change. A hint tile that is neither closed nor draw should log `Failing pending hint` once and stop.
+
 ## 2026-09-06: KAN-55 `/mj screenshot` prefers CaptureFallback (no 5s wait)
 
 **What:** AZPC confirmed the game writer is dead and the ~5s `ScheduleScreenShot` wait made every `/mj screenshot` slow.

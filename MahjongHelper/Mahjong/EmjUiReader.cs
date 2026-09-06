@@ -1600,7 +1600,7 @@ public static unsafe class EmjUiReader
     /// 15 = opponent turn or incoming call (not discard-ready). 22 = draw animation.
     /// 25 = chi/pon choice. 29/32 = score.
     /// </summary>
-    public static bool IsDiscardReadyAtk(int atk0) => atk0 is 2 or 6 or 30;
+    public static bool IsDiscardReadyAtk(int atk0) => HintedDiscardPlanner.IsDiscardReadyAtk(atk0);
 
     /// <summary>
     /// Infers the current game phase from available signals:

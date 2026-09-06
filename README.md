@@ -28,7 +28,7 @@ The in-game **suggestion overlay** and **settings window** are KamiToolKit Nativ
   - auto-discard when it is your discard phase
   - auto call accept/pass decisions during call prompts
   - pause/resume and randomized action delays
-  - safety fallbacks for stuck phases (retry the live hint via FireCallback 7; never callback 8 as a discard)
+  - safety fallbacks for stuck phases (retry the live hint via FireCallback 7, including tsumogiri of a drawn 1055 mapped to the 14th callback-7 slot; never callback 8 as a discard — atk0=6 is skip)
 - Provides a debug window with live diagnostics, normalized state, mapping/status text, transition history, and export/copy helpers.
 
 ## Slash Commands
