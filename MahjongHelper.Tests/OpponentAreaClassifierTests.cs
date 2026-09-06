@@ -706,6 +706,55 @@ public class OpponentAreaClassifierTests
         Assert.Empty(OpponentAreaClassifier.SplitFuuroGroups(pair, allowSplit: false));
     }
 
+    [Fact]
+    public void Live_azpc_north_south_pon_east_is_opposite_not_right()
+    {
+        // Player NORTH. Live toimen/SOUTH is PON EAST (upright type-2, no
+        // 1056/1060). Previous-round Right leftover (S9 / WHITE) is not in
+        // this set — those nodes are gated out by ancestor-AND presence.
+        var leftovers = new List<OpponentAreaClassifier.Tile>
+        {
+            Area(0, 0, 0, 1040, 410, 40, 52, parent: 300, "EAST", nodeType: 2),
+            Area(1, 0, 0, 1078, 396, 40, 52, parent: 300, "EAST", nodeType: 2),
+            Area(2, 0, 0, 1114, 430, 40, 52, parent: 300, "EAST", nodeType: 2),
+        };
+        var ponds = LiveSouthPonds();
+
+        var assignments = OpponentAreaClassifier.Classify(leftovers, ponds, playerStripAbsY: 972);
+
+        var opposite = Assert.Single(assignments);
+        Assert.Equal(SmallTileClassifier.Kind.OppositeMeld, opposite.Kind);
+        Assert.Equal([0, 1, 2], opposite.TileIds);
+        Assert.Equal("PON", MeldClassifier.InferMeld(
+            opposite.TileIds.Select(id => leftovers[id].TileCode!).ToList())!.Type);
+
+        var lines = SolverJson.BuildSnapSummaryLines(new SuggestMoveRequest
+        {
+            Hand = ["P1", "P2", "P3"],
+            DrawnTile = "P4",
+            SeatWind = "NORTH",
+            RoundWind = "EAST",
+            Melds =
+            [
+                new MeldInfo { Type = "CHI", Tiles = ["M1", "M2", "M3"] },
+                new MeldInfo { Type = "CHI", Tiles = ["M4", "M5", "M6"] },
+            ],
+            Opponents =
+            [
+                new OpponentInfo { Wind = "EAST" },
+                new OpponentInfo
+                {
+                    Wind = "SOUTH",
+                    Melds = [new MeldInfo { Type = "PON", Tiles = ["EAST", "EAST", "EAST"] }],
+                },
+                new OpponentInfo { Wind = "WEST" },
+            ],
+        });
+        Assert.Equal(
+            "own=CHI M1-M2-M3, CHI M4-M5-M6 | EAST=none | SOUTH=PON EAST×3 | WEST=none",
+            lines[1]);
+    }
+
     private static OpponentAreaClassifier.PondHint[] LiveSouthPonds() =>
     [
         new(SmallTileClassifier.Kind.PlayerDiscard, 1200, 1100),

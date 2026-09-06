@@ -128,8 +128,9 @@ public static class SmallTileClassifier
                         t => t.Width,
                         t => t.Height,
                         t => t.Rotation,
-                        t => t.AbsX != 0 || t.AbsY != 0 ? t.AbsX : t.X,
-                        t => t.AbsX != 0 || t.AbsY != 0 ? t.AbsY : t.Y))
+                    t => t.AbsX != 0 || t.AbsY != 0 ? t.AbsX : t.X,
+                    t => t.AbsX != 0 || t.AbsY != 0 ? t.AbsY : t.Y,
+                    t => t.TileCode))
                     continue;
 
                 var existing = result.Count(s => s.Kind == owner);

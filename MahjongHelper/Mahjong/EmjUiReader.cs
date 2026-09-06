@@ -282,9 +282,11 @@ public static unsafe class EmjUiReader
             if (type < 1000)
                 continue;
 
-            bool visible;
-            try { visible = node->IsVisible(); }
-            catch { visible = false; }
+            bool selfVisible;
+            try { selfVisible = node->IsVisible(); }
+            catch { selfVisible = false; }
+            var extras = ReadNodeExtras(node);
+            var visible = MeldPresence.IsOnScreen(selfVisible, extras.AncestorVisible);
             if (!visible)
                 continue;
 
@@ -293,7 +295,6 @@ public static unsafe class EmjUiReader
             {
                 uint iconId = 0;
                 TryFindIcon(node, iconCapture, out iconId);
-                var extras = ReadNodeExtras(node);
 
                 var candidate = new UiSlot(
                     SlotKind.VisibleTileCandidate,
@@ -326,7 +327,6 @@ public static unsafe class EmjUiReader
                 TryFindIcon(node, iconCapture, out rotatedIcon);
                 if (rotatedIcon > 0)
                 {
-                    var extras = ReadNodeExtras(node);
                     extraStrip.Add(new UiSlot(
                         SlotKind.PlayerMeld,
                         extraStrip.Count,
@@ -353,7 +353,6 @@ public static unsafe class EmjUiReader
             {
                 uint iconId = 0;
                 TryFindIcon(node, iconCapture, out iconId);
-                var extras = ReadNodeExtras(node);
 
                 smallTiles.Add(new UiSlot(
                     SlotKind.PlayerDiscard, // placeholder kind, will be reclassified
@@ -510,6 +509,8 @@ public static unsafe class EmjUiReader
         var candidates = new List<UiSlot>();
         void Consider(UiSlot slot)
         {
+            // Visible is ancestor-AND (see ReadNodeExtras). Self-only IsVisible
+            // is how previous-round leftover type-2 / 1056 survive deal reset.
             if (!slot.Visible || slot.IconId == 0 || !IconNodeScan.IsMahjongTileIcon(slot.IconId))
                 return;
             if (claimed.Contains(slot.NodeIndex) || claimedPos.Contains(SnapPos(slot)))
@@ -638,12 +639,26 @@ public static unsafe class EmjUiReader
         _ => SmallTileClassifier.Kind.PlayerDiscard,
     };
 
-    private static (float Rotation, uint ParentNodeId, float AbsX, float AbsY) ReadNodeExtras(AtkResNode* node)
+    private readonly record struct NodeWalkExtras(
+        float Rotation,
+        uint ParentNodeId,
+        float AbsX,
+        float AbsY,
+        IReadOnlyList<bool> AncestorVisible);
+
+    /// <summary>
+    /// Walks up to 32 ancestors. A leftover type-2 / 1056 icon can keep
+    /// <c>IsVisible() == true</c> after deal reset while its fuuro container
+    /// is hidden — that is the previous-round ghost source. Same ancestor
+    /// gate as stale call-button text.
+    /// </summary>
+    private static NodeWalkExtras ReadNodeExtras(AtkResNode* node)
     {
         float rotation = 0;
         uint parentId = 0;
         float absX = 0;
         float absY = 0;
+        var ancestorVisible = new List<bool>();
         try { rotation = node->Rotation; } catch { }
         try
         {
@@ -655,11 +670,20 @@ public static unsafe class EmjUiReader
                 absY += walk->Y;
                 if (steps == 1 && walk->ParentNode != null)
                     parentId = walk->ParentNode->NodeId;
+                var parent = walk->ParentNode;
+                if (parent != null)
+                {
+                    bool parentVisible;
+                    try { parentVisible = parent->IsVisible(); }
+                    catch { parentVisible = false; }
+                    ancestorVisible.Add(parentVisible);
+                }
+
                 walk = walk->ParentNode;
             }
         }
         catch { }
-        return (rotation, parentId, absX, absY);
+        return new NodeWalkExtras(rotation, parentId, absX, absY, ancestorVisible);
     }
 
     /// <summary>
@@ -1939,13 +1963,14 @@ public static unsafe class EmjUiReader
         if (node == null)
             return false;
 
-        bool visible;
-        try { visible = node->IsVisible(); }
-        catch { visible = false; }
+        bool selfVisible;
+        try { selfVisible = node->IsVisible(); }
+        catch { selfVisible = false; }
 
         uint iconId = 0;
         TryFindIcon(node, iconCapture, out iconId);
         var extras = ReadNodeExtras(node);
+        var visible = MeldPresence.IsOnScreen(selfVisible, extras.AncestorVisible);
 
         slot = new UiSlot(
             kind,
@@ -1975,8 +2000,10 @@ public static unsafe class EmjUiReader
     /// Deep-walk every addon NodeList, nested component UldManager, RootNode
     /// sibling chain, and ChildNode list. Records:
     ///   IconNodes — any node whose texture resolves to a mahjong tile icon
-    ///               (no type/size filter; includes hidden nodes)
-    ///   TileSizedNodes — visible 16–80px nodes, even when icon id is 0
+    ///               (no type/size filter). <see cref="UiSlot.Visible"/> is
+    ///               ancestor-AND so leftover type-2 / 1056 under a hidden
+    ///               fuuro container is not scavenged as this-round meld.
+    ///   TileSizedNodes — on-screen 16–80px nodes, even when icon id is 0
     /// so /mj snap can show where live fuuro actually lives.
     /// </summary>
     public static AddonNodeScan ScanAddonNodes(AtkUnitBase* addon, IconIdCapture? iconCapture, MahjongIconMap? iconMap)
@@ -2058,11 +2085,12 @@ public static unsafe class EmjUiReader
         try { TryFindIcon(node, iconCapture, out iconId); }
         catch { iconId = 0; }
 
-        bool visible;
-        try { visible = node->IsVisible(); }
-        catch { visible = false; }
+        bool selfVisible;
+        try { selfVisible = node->IsVisible(); }
+        catch { selfVisible = false; }
 
         var extras = ReadNodeExtras(node);
+        var visible = MeldPresence.IsOnScreen(selfVisible, extras.AncestorVisible);
         var slot = new UiSlot(
             SlotKind.VisibleTileCandidate,
             icons.Count + tileSized.Count,

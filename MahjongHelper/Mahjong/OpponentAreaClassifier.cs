@@ -475,7 +475,8 @@ public static class OpponentAreaClassifier
             t => t.Height,
             t => t.Rotation,
             t => HasAbs(t) ? t.AbsX : t.X,
-            t => HasAbs(t) ? t.AbsY : t.Y);
+            t => HasAbs(t) ? t.AbsY : t.Y,
+            t => t.TileCode);
 
     private static bool OwnLeftoverFuuroAllowed(
         IReadOnlyList<Tile> group, float? packMaxAbsX, IReadOnlyList<IconNodeScan.Tray>? trays)

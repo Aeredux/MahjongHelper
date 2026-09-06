@@ -257,10 +257,10 @@ public static class MahjongGameStateBuilder
             PondTsumogiriTracker.Left, nodeState, EmjUiReader.SlotKind.LeftDiscard,
             mergedLeftDiscards, null, previous?.LeftTsumogiri);
 
-        var mergedPlayerMelds = MergeMeldField(nodeState, EmjUiReader.SlotKind.PlayerMeld, previous?.PlayerMelds);
-        var mergedRightMelds = MergeMeldField(nodeState, EmjUiReader.SlotKind.RightMeld, previous?.RightMelds);
-        var mergedOppositeMelds = MergeMeldField(nodeState, EmjUiReader.SlotKind.OppositeMeld, previous?.OppositeMelds);
-        var mergedLeftMelds = MergeMeldField(nodeState, EmjUiReader.SlotKind.LeftMeld, previous?.LeftMelds);
+        var mergedPlayerMelds = MergeMeldField(nodeState, EmjUiReader.SlotKind.PlayerMeld, previous?.PlayerMelds, allowCache: true);
+        var mergedRightMelds = MergeMeldField(nodeState, EmjUiReader.SlotKind.RightMeld, previous?.RightMelds, allowCache: false);
+        var mergedOppositeMelds = MergeMeldField(nodeState, EmjUiReader.SlotKind.OppositeMeld, previous?.OppositeMelds, allowCache: false);
+        var mergedLeftMelds = MergeMeldField(nodeState, EmjUiReader.SlotKind.LeftMeld, previous?.LeftMelds, allowCache: false);
 
         return new MahjongGameState(
             now,
@@ -354,48 +354,43 @@ public static class MahjongGameStateBuilder
     private static StateField<IReadOnlyList<ObservedMeld>> MergeMeldField(
         EmjUiReader.UiState nodeState,
         EmjUiReader.SlotKind kind,
-        StateField<IReadOnlyList<ObservedMeld>>? previous)
+        StateField<IReadOnlyList<ObservedMeld>>? previous,
+        bool allowCache)
     {
         var slots = nodeState.Slots
             .Where(s => s.Kind == kind)
             .OrderBy(s => s.SlotIndex)
             .ToArray();
 
-        if (slots.Length == 0)
+        var observed = new List<ObservedMeld>();
+        if (slots.Length > 0)
         {
-            if (previous is { Value: not null } prev && prev.Value.Count > 0)
-                return prev with { Source = MahjongStateSource.Cached, IsAuthoritative = false, IsFallback = true };
+            var byParent = slots
+                .GroupBy(s => s.ParentNodeId)
+                .OrderBy(g => g.Min(s => s.SlotIndex))
+                .ToList();
+
+            foreach (var group in byParent)
+            {
+                var tiles = group
+                    .OrderBy(s => s.SlotIndex)
+                    .Select(s => s.TileCode ?? (s.IconId > 0 ? $"ICON_{s.IconId}" : "?"))
+                    .Where(MeldClassifier.IsUsableTile)
+                    .ToArray();
+                // Pair remainder: called set whose sideways tile was a 55×42 / leftover
+                // the 42×55 strip never collected (live AZPC Green pon showed 2 uprights).
+                observed.AddRange(MeldClassifier.SplitIntoMelds(tiles, acceptPairRemainder: true));
+            }
+
+            observed = MeldClassifier.CollapseDuplicatePairPons(observed).ToList();
+        }
+
+        var resolved = MeldPresence.Resolve(observed, previous?.Value, allowCache);
+        if (resolved == null)
             return StateField<IReadOnlyList<ObservedMeld>>.Missing();
-        }
-
-        var byParent = slots
-            .GroupBy(s => s.ParentNodeId)
-            .OrderBy(g => g.Min(s => s.SlotIndex))
-            .ToList();
-
-        var melds = new List<ObservedMeld>();
-        foreach (var group in byParent)
-        {
-            var tiles = group
-                .OrderBy(s => s.SlotIndex)
-                .Select(s => s.TileCode ?? (s.IconId > 0 ? $"ICON_{s.IconId}" : "?"))
-                .Where(MeldClassifier.IsUsableTile)
-                .ToArray();
-            // Pair remainder: called set whose sideways tile was a 55×42 / leftover
-            // the 42×55 strip never collected (live AZPC Green pon showed 2 uprights).
-            melds.AddRange(MeldClassifier.SplitIntoMelds(tiles, acceptPairRemainder: true));
-        }
-
-        melds = MeldClassifier.CollapseDuplicatePairPons(melds).ToList();
-
-        if (melds.Count == 0)
-        {
-            if (previous is { Value: not null } prev && prev.Value.Count > 0)
-                return prev with { Source = MahjongStateSource.Cached, IsAuthoritative = false, IsFallback = true };
-            return StateField<IReadOnlyList<ObservedMeld>>.Missing();
-        }
-
-        return new StateField<IReadOnlyList<ObservedMeld>>(melds, MahjongStateSource.Node, IsAuthoritative: true, IsFallback: false);
+        if (observed.Count > 0)
+            return new StateField<IReadOnlyList<ObservedMeld>>(resolved, MahjongStateSource.Node, IsAuthoritative: true, IsFallback: false);
+        return previous! with { Source = MahjongStateSource.Cached, IsAuthoritative = false, IsFallback = true };
     }
 
     private static string BuildHandDescription(EmjUiReader.UiState nodeState)

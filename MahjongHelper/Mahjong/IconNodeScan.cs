@@ -203,9 +203,9 @@ public static class IconNodeScan
 
     /// <summary>
     /// Toimen leftover type-2 40×52 faces are a called set only with a
-    /// type-1056 cue, a sideways discarded tile, or a type-1060 tray.
-    /// All-upright leaves in the top / dora-indicator band (live SOUTH
-    /// M5/M0 at Abs≈1043/1069/1092, AbsY≈396–430) are panel ghosts.
+    /// type-1056 cue, a sideways discarded tile, a type-1060 tray, or a
+    /// 3-face honor PON (live North-seat SOUTH PON EAST). All-upright
+    /// suited leaves in the dora band (M5/M0 at AbsY≈396–430) stay rejected.
     /// 42×55 / 1045 / 1055 toimen rows are not face-leaves and stay allowed.
     /// </summary>
     public static bool IsPlausibleOppositeLeftoverFuuro<T>(
@@ -216,7 +216,8 @@ public static class IconNodeScan
         Func<T, int> height,
         Func<T, float> rotation,
         Func<T, float> absX,
-        Func<T, float> absY)
+        Func<T, float> absY,
+        Func<T, string?>? tileCode = null)
     {
         if (tiles == null || tiles.Count == 0)
             return false;
@@ -232,7 +233,25 @@ public static class IconNodeScan
             return true;
         if (faces.Any(t => IsCallCueNode(nodeType(t), width(t), height(t), rotation(t))))
             return true;
-        return ClusterCoveredByTray(faces, trays, absX, absY, width, height);
+        if (ClusterCoveredByTray(faces, trays, absX, absY, width, height))
+            return true;
+        return tileCode != null && IsHonorPonFaces(faces, tileCode);
+    }
+
+    private static bool IsHonorPonFaces<T>(IReadOnlyList<T> faces, Func<T, string?> tileCode)
+    {
+        var keys = new List<string>();
+        foreach (var face in faces)
+        {
+            var code = tileCode(face);
+            if (!MeldClassifier.IsUsableTile(code))
+                continue;
+            keys.Add(MeldClassifier.CanonicalKey(code!));
+        }
+
+        return keys.Count >= 3
+               && MeldClassifier.IsHonor(keys[0])
+               && keys.TrueForAll(k => k == keys[0]);
     }
 
     /// <summary>

@@ -124,6 +124,9 @@ public static class MeldClassifier
     public static bool IsUsableTile(string? tile)
         => !string.IsNullOrWhiteSpace(tile) && tile != "?" && !tile.StartsWith("ICON_", StringComparison.Ordinal);
 
+    public static bool IsHonor(string? tile)
+        => tile is "EAST" or "SOUTH" or "WEST" or "NORTH" or "WHITE" or "GREEN" or "RED";
+
     /// <summary>
     /// Aka-aware equality key: M0/P0/S0 compare as the matching 5, but only for grouping.
     /// </summary>
