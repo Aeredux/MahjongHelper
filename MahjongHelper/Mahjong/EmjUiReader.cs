@@ -149,7 +149,8 @@ public static unsafe class EmjUiReader
         IReadOnlyList<UiSlot> Slots,
         UiGameInfo GameInfo,
         DateTime UtcCapturedAt,
-        IReadOnlyList<UiSlot>? OpponentMeldCandidates = null)
+        IReadOnlyList<UiSlot>? OpponentMeldCandidates = null,
+        IReadOnlyList<UiSlot>? AllIconNodes = null)
     {
         public string ToDisplayText()
         {
@@ -433,13 +434,15 @@ public static unsafe class EmjUiReader
         // so they become PlayerMeld instead of CanonicalPlayerHand.
         ApplyHandStripMeldSplit(slots, rawHand, extraStrip);
 
-        // Toimen/kamicha/shimocha fuuro are hand-sized tiles next to those
-        // players' face-down hands — not on the local strip and often not 34×45.
-        var opponentMeldCandidates = ClassifyOpponentAreaMelds(slots, extraStrip, smallTiles);
+        // Live AZPC after 78fd2f1: visible fuuro was not 42×55 / 55×42 / 34×45.
+        // Walk every icon-bearing node (any type/size, plus component children)
+        // and classify leftovers that InferMeld.
+        var allIconNodes = ScanAllIconNodes(addon, iconCapture, iconMap);
+        var opponentMeldCandidates = ClassifyOpponentAreaMelds(slots, extraStrip, smallTiles, allIconNodes);
 
         var gameInfo = ReadGameInfo(addon, iconCapture, iconMap);
 
-        return new UiState(slots, gameInfo, DateTime.UtcNow, opponentMeldCandidates);
+        return new UiState(slots, gameInfo, DateTime.UtcNow, opponentMeldCandidates, allIconNodes);
     }
 
     /// <summary>
@@ -482,7 +485,8 @@ public static unsafe class EmjUiReader
         }
     }
 
-    private static List<UiSlot> ClassifyOpponentAreaMelds(List<UiSlot> slots, List<UiSlot> extraStrip, List<UiSlot> smallTiles)
+    private static List<UiSlot> ClassifyOpponentAreaMelds(
+        List<UiSlot> slots, List<UiSlot> extraStrip, List<UiSlot> smallTiles, List<UiSlot>? allIconNodes = null)
     {
         var claimed = new HashSet<int>();
         foreach (var slot in slots)
@@ -497,17 +501,14 @@ public static unsafe class EmjUiReader
         var candidates = new List<UiSlot>();
         void Consider(UiSlot slot)
         {
-            if (!slot.Visible || slot.IconId == 0)
+            if (!slot.Visible || slot.IconId == 0 || !IconNodeScan.IsMahjongTileIcon(slot.IconId))
                 return;
             if (claimed.Contains(slot.NodeIndex))
                 return;
             if (slot.NodeType is 1009 or 1006 or 1021 or 1022 or 1023 or 1024)
                 return;
-            var handSized = (slot.Width == 42 && slot.Height == 55) || (slot.Width == 55 && slot.Height == 42);
-            var pondSized = (slot.Width == 34 && slot.Height == 45) || (slot.Width == 45 && slot.Height == 34);
-            if (!handSized && !pondSized)
-                return;
-            if (candidates.Any(c => c.NodeIndex == slot.NodeIndex))
+            if (candidates.Any(c => c.NodeIndex == slot.NodeIndex && c.IconId == slot.IconId
+                                    && Math.Abs(c.AbsX - slot.AbsX) < 1 && Math.Abs(c.AbsY - slot.AbsY) < 1))
                 return;
             candidates.Add(slot);
         }
@@ -518,6 +519,11 @@ public static unsafe class EmjUiReader
             Consider(slot);
         foreach (var slot in smallTiles)
             Consider(slot);
+        if (allIconNodes != null)
+        {
+            foreach (var slot in allIconNodes)
+                Consider(slot);
+        }
 
         var pondHints = new List<OpponentAreaClassifier.PondHint>();
         foreach (var pondKind in new[] { SlotKind.PlayerDiscard, SlotKind.RightDiscard, SlotKind.OppositeDiscard, SlotKind.LeftDiscard })
@@ -1841,6 +1847,91 @@ public static unsafe class EmjUiReader
             extras.AbsY);
 
         return true;
+    }
+
+    /// <summary>
+    /// Every NodeList entry (and component child images) that currently carries
+    /// a mahjong tile icon. No type or size filter — used by /mj snap so live
+    /// fuuro nodes can be identified instead of guessed.
+    /// </summary>
+    public static List<UiSlot> ScanAllIconNodes(AtkUnitBase* addon, IconIdCapture? iconCapture, MahjongIconMap? iconMap)
+    {
+        var result = new List<UiSlot>();
+        if (addon == null)
+            return result;
+
+        var seen = new HashSet<nint>();
+        var uld = addon->UldManager;
+        for (int i = 0; i < uld.NodeListCount; i++)
+        {
+            var node = uld.NodeList[i];
+            if (node == null)
+                continue;
+            TryCollectIconNode(node, i, iconCapture, iconMap, result, seen);
+            if ((int)node->Type < 1000)
+                continue;
+            try
+            {
+                var comp = (AtkComponentNode*)node;
+                if (comp->Component == null)
+                    continue;
+                var childUld = comp->Component->UldManager;
+                for (int j = 0; j < childUld.NodeListCount && j < 64; j++)
+                {
+                    var child = childUld.NodeList[j];
+                    if (child == null)
+                        continue;
+                    TryCollectIconNode(child, 100_000 + i * 64 + j, iconCapture, iconMap, result, seen);
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        return result;
+    }
+
+    private static void TryCollectIconNode(
+        AtkResNode* node,
+        int nodeIndex,
+        IconIdCapture? iconCapture,
+        MahjongIconMap? iconMap,
+        List<UiSlot> output,
+        HashSet<nint> seen)
+    {
+        if (node == null || !seen.Add((nint)node))
+            return;
+
+        uint iconId = 0;
+        try { TryFindIcon(node, iconCapture, out iconId); }
+        catch { return; }
+        if (!IconNodeScan.IsMahjongTileIcon(iconId))
+            return;
+
+        bool visible;
+        try { visible = node->IsVisible(); }
+        catch { visible = false; }
+
+        var extras = ReadNodeExtras(node);
+        output.Add(new UiSlot(
+            SlotKind.VisibleTileCandidate,
+            output.Count,
+            nodeIndex,
+            node->NodeId,
+            (ushort)node->Type,
+            visible,
+            node->X,
+            node->Y,
+            node->Width,
+            node->Height,
+            iconId,
+            iconMap?.Resolve(iconId),
+            extras.Rotation,
+            extras.ParentNodeId,
+            false,
+            extras.AbsX,
+            extras.AbsY));
     }
 
     private static bool TryFindIcon(AtkResNode* root, IconIdCapture? capture, out uint iconId)

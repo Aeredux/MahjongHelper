@@ -5,14 +5,13 @@ using System.Linq;
 namespace MahjongHelper.Mahjong;
 
 /// <summary>
-/// Assigns leftover hand-sized face-up tiles (42×55 / 55×42) that are not on
-/// the local Y=0 strip to opponent (or leftover own) fuuro.
+/// Assigns leftover face-up tile nodes (any size that carries a mahjong icon)
+/// that are not on the local closed-hand pack to opponent or leftover own fuuro.
 ///
-/// Live Doman: toimen CHI is upright beside that player's face-down hand.
-/// Shimocha/kamicha CHI is a sideways stack (often one 55×42 called tile).
 /// Pond leftovers (1021–1024) stay with <see cref="SmallTileClassifier"/>.
-/// Type 1045 is allowed when a 2–4 tile group InferMelds; a 5+ tile 1045
-/// hand-echo strip is rejected by the cluster size check.
+/// The live 7-tile type-1045 34×45 hand-echo is dropped by
+/// <see cref="IconNodeScan.IsType1045PondEcho"/>. Other 2–4 tile InferMeld
+/// groups are seated by table region.
 /// </summary>
 public static class OpponentAreaClassifier
 {
@@ -50,6 +49,7 @@ public static class OpponentAreaClassifier
         var usable = leftovers
             .Where(t => MeldClassifier.IsUsableTile(t.TileCode))
             .Where(t => t.NodeType is not (1009 or 1006 or 1021 or 1022 or 1023 or 1024))
+            .Where(t => !IconNodeScan.IsType1045PondEcho(t.NodeType, t.Width, t.Height))
             .ToList();
         if (usable.Count == 0)
             return result;

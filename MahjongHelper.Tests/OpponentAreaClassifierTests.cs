@@ -119,6 +119,61 @@ public class OpponentAreaClassifierTests
     }
 
     [Fact]
+    public void Type_1045_34x45_hand_echo_is_never_fuuro()
+    {
+        var leftovers = new List<OpponentAreaClassifier.Tile>
+        {
+            Area(0, 0, 0, 200, 512, 34, 45, parent: 60, "M4", nodeType: 1045),
+            Area(1, 34, 0, 234, 512, 34, 45, parent: 60, "M5", nodeType: 1045),
+            Area(2, 68, 0, 268, 512, 34, 45, parent: 60, "P6", nodeType: 1045),
+            Area(3, 102, 0, 302, 512, 34, 45, parent: 60, "P6", nodeType: 1045),
+            Area(4, 136, 0, 336, 512, 34, 45, parent: 60, "S5", nodeType: 1045),
+            Area(5, 170, 0, 370, 512, 34, 45, parent: 60, "S6", nodeType: 1045),
+            Area(6, 204, 0, 404, 512, 34, 45, parent: 60, "S7", nodeType: 1045),
+            Area(7, 0, 0, 520, 46, 40, 52, parent: 200, "S2", nodeType: 1031),
+            Area(8, 40, 0, 560, 60, 52, 40, parent: 200, "S2", nodeType: 1031),
+            Area(9, 80, 0, 600, 46, 40, 52, parent: 200, "S2", nodeType: 1031),
+        };
+
+        var assignments = OpponentAreaClassifier.Classify(leftovers, pondHints: null, playerStripAbsY: 972);
+        Assert.DoesNotContain(assignments, a => a.Kind == SmallTileClassifier.Kind.LeftMeld);
+        Assert.DoesNotContain(assignments, a => a.TileIds.Any(id => id <= 6));
+        var pon = Assert.Single(assignments);
+        Assert.Equal(SmallTileClassifier.Kind.OppositeMeld, pon.Kind);
+        Assert.Equal([7, 8, 9], pon.TileIds);
+    }
+
+    [Fact]
+    public void Leftover_icon_nodes_any_size_that_infermeld_are_fuuro()
+    {
+        // snap after 78fd2f1: no 42×55 / 55×42 leftovers. Fuuro must still
+        // classify if icon-bearing nodes of another size are collected.
+        var leftovers = new List<OpponentAreaClassifier.Tile>
+        {
+            Area(0, 0, 0, 820, 972, 40, 52, parent: 80, "S2", nodeType: 1031),
+            Area(1, 40, 0, 860, 972, 40, 52, parent: 80, "S3", nodeType: 1031),
+            Area(2, 80, 0, 900, 972, 40, 52, parent: 80, "S4", nodeType: 1031),
+            Area(3, 0, 0, 520, 48, 40, 52, parent: 200, "S2", nodeType: 1031),
+            Area(4, 40, 0, 560, 62, 52, 40, parent: 200, "S2", nodeType: 1031),
+            Area(5, 80, 0, 600, 48, 40, 52, parent: 200, "S2", nodeType: 1031),
+        };
+        var ponds = new[]
+        {
+            new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.PlayerDiscard, 400, 972),
+            new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.OppositeDiscard, 420, 180),
+            new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.RightDiscard, 820, 400),
+            new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.LeftDiscard, 90, 380),
+        };
+
+        var assignments = OpponentAreaClassifier.Classify(leftovers, ponds, playerStripAbsY: 972);
+        var own = Assert.Single(assignments, a => a.Kind == SmallTileClassifier.Kind.PlayerMeld);
+        var across = Assert.Single(assignments, a => a.Kind == SmallTileClassifier.Kind.OppositeMeld);
+        Assert.Equal([0, 1, 2], own.TileIds);
+        Assert.Equal([3, 4, 5], across.TileIds);
+        Assert.DoesNotContain(assignments, a => a.Kind == SmallTileClassifier.Kind.LeftMeld);
+    }
+
+    [Fact]
     public void Chi_choice_type_1009_is_ignored()
     {
         var leftovers = new List<OpponentAreaClassifier.Tile>

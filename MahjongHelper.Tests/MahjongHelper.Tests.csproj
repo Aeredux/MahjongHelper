@@ -15,6 +15,7 @@
     <Compile Include="..\MahjongHelper\Mahjong\HandStripClassifier.cs" Link="HandStripClassifier.cs" />
     <Compile Include="..\MahjongHelper\Mahjong\SmallTileClassifier.cs" Link="SmallTileClassifier.cs" />
     <Compile Include="..\MahjongHelper\Mahjong\OpponentAreaClassifier.cs" Link="OpponentAreaClassifier.cs" />
+    <Compile Include="..\MahjongHelper\Mahjong\IconNodeScan.cs" Link="IconNodeScan.cs" />
     <Compile Include="..\MahjongHelper\Mahjong\PondTsumogiriTracker.cs" Link="PondTsumogiriTracker.cs" />
     <Compile Include="..\MahjongHelper\Mahjong\ServerModels.cs" Link="ServerModels.cs" />
     <Compile Include="..\MahjongHelper\Mahjong\SolverJson.cs" Link="SolverJson.cs" />

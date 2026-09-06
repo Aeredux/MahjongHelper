@@ -291,8 +291,8 @@ public sealed unsafe class MahjongIconMap
             _iconIdToTileCode[pair.Key] = pair.Value;
     }
 
-    private static bool IsLikelyMahjongIconId(uint iconId)
-        => iconId >= 76041 && iconId <= 76150;
+    public static bool IsLikelyMahjongIconId(uint iconId)
+        => IconNodeScan.IsMahjongTileIcon(iconId);
 
     private static bool IsSuitTileCode(string tileCode)
         => tileCode.Length == 2 && (tileCode[0] == 'M' || tileCode[0] == 'P' || tileCode[0] == 'S') && tileCode[1] >= '1' && tileCode[1] <= '9';

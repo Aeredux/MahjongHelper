@@ -1273,6 +1273,7 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
             object[] oppositeMeldSlots = Array.Empty<object>();
             object[] leftMeldSlots = Array.Empty<object>();
             object[] opponentMeldCandidates = Array.Empty<object>();
+            object[] allIconNodes = Array.Empty<object>();
 
             unsafe
             {
@@ -1309,6 +1310,9 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
                 oppositeMeldSlots = DumpMeldSlots(_lastUiState, EmjUiReader.SlotKind.OppositeMeld);
                 leftMeldSlots = DumpMeldSlots(_lastUiState, EmjUiReader.SlotKind.LeftMeld);
                 opponentMeldCandidates = (_lastUiState.OpponentMeldCandidates ?? Array.Empty<EmjUiReader.UiSlot>())
+                    .Select(DumpUiSlot)
+                    .ToArray();
+                allIconNodes = (_lastUiState.AllIconNodes ?? Array.Empty<EmjUiReader.UiSlot>())
                     .Select(DumpUiSlot)
                     .ToArray();
             }
@@ -1366,10 +1370,11 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
                     left = leftMeldSlots,
                 },
                 opponentMeldCandidates,
+                allIconNodes,
             };
 
             var path = SnapCapture.WriteJson(payload);
-            var msg = $"[SNAP] wrote {path} phase={payload.phase} sug={suggestion?.Type}:{suggestion?.TileName} icon={suggestion?.TileIconId} pending={_autoPlayManager.PendingAction} atk0={rawAtk0}";
+            var msg = $"[SNAP] wrote {path} phase={payload.phase} sug={suggestion?.Type}:{suggestion?.TileName} icon={suggestion?.TileIconId} pending={_autoPlayManager.PendingAction} atk0={rawAtk0} icons={allIconNodes.Length}";
             LogToFile("autoplay.log", msg);
             Log.Information(msg);
         }
