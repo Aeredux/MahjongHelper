@@ -538,19 +538,17 @@ public class OpponentAreaClassifierTests
     [Fact]
     public void Live_azpc_south_p8_kamicha_is_left_not_across()
     {
-        // Player SOUTH. Kamicha/EAST PON P8 is mid-left of the screen;
-        // shimocha S1 is mid-right. Across keeps a separate M5 aka pon.
+        // Player SOUTH, across empty. Kamicha PON P8 is mid-left. Upright
+        // type-2 M5/M0 at AbsY≈396–430 is the dora / indicator band, not
+        // toimen fuuro (no 1056 / 1060 / sideways called tile).
         var leftovers = new List<OpponentAreaClassifier.Tile>
         {
             Area(0, 0, 0, 962, 889, 40, 52, parent: 201, "P8", nodeType: 2),
             Area(1, 0, 0, 996, 858, 40, 52, parent: 201, "P8", nodeType: 2),
             Area(2, 0, 0, 1022, 889, 40, 52, parent: 201, "P8", nodeType: 2),
-            Area(3, 0, 0, 1555, 547, 40, 52, parent: 202, "S1", nodeType: 2),
-            Area(4, 0, 0, 1585, 547, 40, 52, parent: 202, "S1", nodeType: 2),
-            Area(5, 0, 0, 1615, 547, 40, 52, parent: 202, "S1", nodeType: 2),
-            Area(6, 0, 0, 1040, 400, 40, 52, parent: 200, "M5", nodeType: 2),
-            Area(7, 0, 0, 1080, 414, 52, 40, parent: 200, "M5", nodeType: 2),
-            Area(8, 0, 0, 1120, 400, 40, 52, parent: 200, "M0", nodeType: 2),
+            Area(3, 0, 0, 1043, 396, 40, 52, parent: 200, "M5", nodeType: 2),
+            Area(4, 0, 0, 1069, 396, 40, 52, parent: 200, "M5", nodeType: 2),
+            Area(5, 0, 0, 1092, 430, 40, 52, parent: 200, "M0", nodeType: 2),
         };
         var ponds = LiveSouthPonds();
 
@@ -562,13 +560,9 @@ public class OpponentAreaClassifierTests
         Assert.Equal("PON", MeldClassifier.InferMeld(leftCodes)!.Type);
         Assert.All(leftCodes, c => Assert.Equal("P8", c));
 
-        var right = Assert.Single(assignments, a => a.Kind == SmallTileClassifier.Kind.RightMeld);
-        Assert.Equal([3, 4, 5], right.TileIds);
-
-        var across = Assert.Single(assignments, a => a.Kind == SmallTileClassifier.Kind.OppositeMeld);
-        Assert.Equal([6, 7, 8], across.TileIds);
-        Assert.DoesNotContain(across.TileIds, id => leftovers[id].TileCode == "P8");
-        Assert.DoesNotContain(right.TileIds, id => leftovers[id].TileCode == "P8");
+        Assert.DoesNotContain(assignments, a => a.Kind == SmallTileClassifier.Kind.OppositeMeld);
+        Assert.DoesNotContain(assignments, a => a.Kind == SmallTileClassifier.Kind.RightMeld);
+        Assert.DoesNotContain(assignments, a => a.TileIds.Any(id => id >= 3));
 
         var summary = SolverJson.BuildSnapSummary(new SuggestMoveRequest
         {
@@ -578,16 +572,8 @@ public class OpponentAreaClassifierTests
             RoundWind = "EAST",
             Opponents =
             [
-                new OpponentInfo
-                {
-                    Wind = "WEST",
-                    Melds = [new MeldInfo { Type = "PON", Tiles = ["S1", "S1", "S1"] }],
-                },
-                new OpponentInfo
-                {
-                    Wind = "NORTH",
-                    Melds = [new MeldInfo { Type = "PON", Tiles = ["M5", "M5", "M0"] }],
-                },
+                new OpponentInfo { Wind = "WEST" },
+                new OpponentInfo { Wind = "NORTH" },
                 new OpponentInfo
                 {
                     Wind = "EAST",
@@ -596,7 +582,8 @@ public class OpponentAreaClassifierTests
             ],
         });
         Assert.Contains("seat=SOUTH", summary);
-        Assert.Contains("oppMelds=3", summary);
+        Assert.Contains("oppMelds=1", summary);
+        Assert.Contains("ownMelds=0", summary);
     }
 
     [Fact]

@@ -80,6 +80,9 @@ public static class OpponentAreaClassifier
                 var kind = GuessOwner(group, pondHints, playerStripAbsY, tableCenterX, tableCenterY);
                 if (!onPlayerStrip && kind == SmallTileClassifier.Kind.LeftMeld && group.Count >= 5)
                     continue;
+                if (kind == SmallTileClassifier.Kind.OppositeMeld
+                    && !OppositeLeftoverFuuroAllowed(group, trays))
+                    continue;
                 if (kind == SmallTileClassifier.Kind.PlayerMeld)
                 {
                     var withCues = group
@@ -413,6 +416,18 @@ public static class OpponentAreaClassifier
     private static float AbsYOf(Tile tile) => HasAbs(tile) ? tile.AbsY : tile.Y;
 
     private static int BandY(Tile tile) => (int)MathF.Round(AbsYOf(tile) / 20f) * 20;
+
+    private static bool OppositeLeftoverFuuroAllowed(
+        IReadOnlyList<Tile> group, IReadOnlyList<IconNodeScan.Tray>? trays)
+        => IconNodeScan.IsPlausibleOppositeLeftoverFuuro(
+            group,
+            trays,
+            t => t.NodeType,
+            t => t.Width,
+            t => t.Height,
+            t => t.Rotation,
+            t => HasAbs(t) ? t.AbsX : t.X,
+            t => HasAbs(t) ? t.AbsY : t.Y);
 
     private static bool OwnLeftoverFuuroAllowed(
         IReadOnlyList<Tile> group, float? packMaxAbsX, IReadOnlyList<IconNodeScan.Tray>? trays)

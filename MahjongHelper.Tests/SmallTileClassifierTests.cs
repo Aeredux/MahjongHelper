@@ -251,6 +251,23 @@ public class SmallTileClassifierTests
         Assert.Equal(2, classified.Count(c => c.Kind == SmallTileClassifier.Kind.OppositeDiscard));
     }
 
+    [Fact]
+    public void Type2_upright_m5_m0_dora_band_is_not_opposite_meld()
+    {
+        var tiles = new List<SmallTileClassifier.Tile>
+        {
+            Pond(0, 1024, 50, 0, 0, "P3", absX: 1100, absY: 400),
+            Pond(1, 1024, 50, 34, 0, "P4", absX: 1134, absY: 400),
+            Pond(2, 2, 200, 0, 0, "M5", absX: 1043, absY: 396, width: 40, height: 52),
+            Pond(3, 2, 200, 26, 0, "M5", absX: 1069, absY: 396, width: 40, height: 52),
+            Pond(4, 2, 200, 49, 34, "M0", absX: 1092, absY: 430, width: 40, height: 52),
+        };
+
+        var classified = SmallTileClassifier.Classify(tiles);
+        Assert.DoesNotContain(classified, c => c.Kind == SmallTileClassifier.Kind.OppositeMeld);
+        Assert.Equal(2, classified.Count(c => c.Kind == SmallTileClassifier.Kind.OppositeDiscard));
+    }
+
     private static SmallTileClassifier.Tile Pond(
         int id, ushort type, uint parent, float x, float y, string code,
         bool tsumogiri = false, int width = 34, int height = 45,

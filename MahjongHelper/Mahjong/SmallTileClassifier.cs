@@ -113,6 +113,17 @@ public static class SmallTileClassifier
             var owner = GuessMeldOwner(ordered[0], pondParents, pondTilesByKind);
             if (owner == null)
                 continue;
+            if (owner == Kind.OppositeMeld
+                && !IconNodeScan.IsPlausibleOppositeLeftoverFuuro(
+                    ordered,
+                    trays: null,
+                    t => t.NodeType,
+                    t => t.Width,
+                    t => t.Height,
+                    t => t.Rotation,
+                    t => t.AbsX != 0 || t.AbsY != 0 ? t.AbsX : t.X,
+                    t => t.AbsX != 0 || t.AbsY != 0 ? t.AbsY : t.Y))
+                continue;
 
             var existing = result.Count(s => s.Kind == owner);
             foreach (var tile in ordered)

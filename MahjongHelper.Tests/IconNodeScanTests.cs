@@ -126,6 +126,37 @@ public class IconNodeScanTests
     }
 
     [Fact]
+    public void Upright_type2_dora_band_is_not_plausible_opposite_fuuro()
+    {
+        var dora = new (ushort Type, float X, float Y, int W, int H, float Rot)[]
+        {
+            (2, 1043, 396, 40, 52, 0),
+            (2, 1069, 396, 40, 52, 0),
+            (2, 1092, 430, 40, 52, 0),
+        };
+        Assert.False(IconNodeScan.IsPlausibleOppositeLeftoverFuuro(
+            dora, trays: null, t => t.Type, t => t.W, t => t.H, t => t.Rot, t => t.X, t => t.Y));
+
+        var chi = new (ushort Type, float X, float Y, int W, int H, float Rot)[]
+        {
+            (2, 1041, 410, 40, 52, 0),
+            (2, 1078, 396, 40, 52, 0),
+            (2, 1104, 430, 52, 40, 0),
+        };
+        Assert.True(IconNodeScan.IsPlausibleOppositeLeftoverFuuro(
+            chi, trays: null, t => t.Type, t => t.W, t => t.H, t => t.Rot, t => t.X, t => t.Y));
+
+        var handSized = new (ushort Type, float X, float Y, int W, int H, float Rot)[]
+        {
+            (1055, 480, 40, 42, 55, 0),
+            (1055, 522, 40, 42, 55, 0),
+            (1055, 564, 40, 42, 55, 0),
+        };
+        Assert.True(IconNodeScan.IsPlausibleOppositeLeftoverFuuro(
+            handSized, trays: null, t => t.Type, t => t.W, t => t.H, t => t.Rot, t => t.X, t => t.Y));
+    }
+
+    [Fact]
     public void Ghost_west_cluster_is_not_plausible_own_fuuro()
     {
         var west = new (float X, float Y, int W, int H, float Rot)[]

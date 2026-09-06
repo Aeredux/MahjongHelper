@@ -182,6 +182,40 @@ public static class IconNodeScan
     }
 
     /// <summary>
+    /// Toimen leftover type-2 40×52 faces are a called set only with a
+    /// type-1056 cue, a sideways discarded tile, or a type-1060 tray.
+    /// All-upright leaves in the top / dora-indicator band (live SOUTH
+    /// M5/M0 at Abs≈1043/1069/1092, AbsY≈396–430) are panel ghosts.
+    /// 42×55 / 1045 / 1055 toimen rows are not face-leaves and stay allowed.
+    /// </summary>
+    public static bool IsPlausibleOppositeLeftoverFuuro<T>(
+        IReadOnlyList<T> tiles,
+        IReadOnlyList<Tray>? trays,
+        Func<T, ushort> nodeType,
+        Func<T, int> width,
+        Func<T, int> height,
+        Func<T, float> rotation,
+        Func<T, float> absX,
+        Func<T, float> absY)
+    {
+        if (tiles == null || tiles.Count == 0)
+            return false;
+
+        var faces = tiles
+            .Where(t => IsFaceLeaf(nodeType(t), width(t), height(t))
+                        || nodeType(t) == CallCueNodeType)
+            .ToList();
+        if (faces.Count < 2)
+            return true;
+
+        if (ClusterHasCallCue(faces, width, height, rotation))
+            return true;
+        if (faces.Any(t => IsCallCueNode(nodeType(t), width(t), height(t), rotation(t))))
+            return true;
+        return ClusterCoveredByTray(faces, trays, absX, absY, width, height);
+    }
+
+    /// <summary>
     /// Live parent-60 strip: seven type-1045 34×45 tiles at AbsY≈512 that
     /// shadow a previous hand. Never treat these as fuuro.
     /// </summary>
