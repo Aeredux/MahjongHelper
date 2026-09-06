@@ -10,9 +10,9 @@ using FFXIVClientStructs.FFXIV.Client.UI;
 namespace MahjongHelper.Mahjong;
 
 /// <summary>
-/// KAN-55: fire FFXIV's built-in screenshot so PNG/JPG lands in the client folder.
-/// Prefers <c>ScreenShot.ScheduleScreenShot</c> (async — poll Requested/Result),
-/// then bound KEY_SCREENSHOT, then VK_SNAPSHOT. Telesto is not required.
+/// KAN-55: fire FFXIV's built-in screenshot, then CaptureFallback (Dalamud
+/// viewport / GDI) when the game writer reports Success but writes no file.
+/// Key inject is last. Telesto is not required.
 /// </summary>
 public static class GameScreenshot
 {
@@ -31,6 +31,16 @@ public static class GameScreenshot
         GameApi,
         BoundKey,
         PrintScreenFallback,
+        CaptureFallback,
+    }
+
+    public static string? LastCaptureMethod { get; private set; }
+    public static string? LastWrittenPath { get; private set; }
+
+    public static void RememberLastCapture(string? method, string? path)
+    {
+        LastCaptureMethod = method;
+        LastWrittenPath = path;
     }
 
     public readonly record struct TriggerResult(bool Fired, TriggerMethod Method, string Detail);
@@ -232,10 +242,13 @@ public static class GameScreenshot
         var phantom = ScreenshotStuckRecovery.IsPhantomSuccess(api.Result, api.Location)
             ? $" {ScreenshotStuckRecovery.FormatPhantomSuccess(api.Location)}"
             : string.Empty;
+        var lastMethod = LastCaptureMethod ?? "(none)";
+        var lastPath = LastWrittenPath ?? "(none)";
         return
             $"Instance={instance} CanTake={api.CanTake} Requested={api.Requested} Result={api.Result} " +
             $"Location={loc} LocationOnDisk={locOnDisk} Timestamp={api.Timestamp} " +
-            $"cfgScreenShotDir={configured} cfgFiles=[{cfgFiles}] resolved={resolved} candidates=[{dirs}]" +
+            $"cfgScreenShotDir={configured} cfgFiles=[{cfgFiles}] resolved={resolved} candidates=[{dirs}] " +
+            $"lastMethod={lastMethod} lastPath={lastPath}" +
             phantom;
     }
 

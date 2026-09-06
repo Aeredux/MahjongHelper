@@ -37,6 +37,7 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
 
     [PluginService] internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
     [PluginService] internal static ITextureProvider TextureProvider { get; private set; } = null!;
+    [PluginService] internal static ITextureReadbackProvider TextureReadback { get; private set; } = null!;
     [PluginService] internal static ICommandManager CommandManager { get; private set; } = null!;
     [PluginService] internal static IClientState ClientState { get; private set; } = null!;
     [PluginService] internal static IPlayerState PlayerState { get; private set; } = null!;
@@ -866,7 +867,7 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
         }
         else if (lower is "screenshot" or "printscreen")
         {
-            // KAN-55: game PNG via ScreenShot API / bound key / VK_SNAPSHOT. Snap stays JSON-only.
+            // KAN-55: game PNG via ScreenShot API, then CaptureFallback. Snap stays JSON-only.
             if (_screenshotInFlight)
             {
                 var busy = "/mj screenshot already in progress — wait for Result/Location (or stuck) before retrying";

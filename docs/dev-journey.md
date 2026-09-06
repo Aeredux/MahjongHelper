@@ -1,5 +1,18 @@
 # Dev Journey
 
+## 2026-09-06: KAN-55 CaptureFallback when game screenshot writer is dead
+
+**What:** AZPC after ReShade disabled (`dxgi.dll` → `dxgi.dll.off`) and a full relaunch: `/mj screenshot` still got `ScheduleScreenShot=true`, Location set to a new `ffxiv_…png` under `FF14Modding\Screenshots`, **file never appears**, `ScreenShotRequested` sticks until FORCE-CLEARED. Manual PrintScreen fails the same way. Game API screenshot is broken independent of ReShade.
+
+**Changes:**
+- After schedule fail / timeout / phantom Success (including after force-clear + retry), do not stop at “Not injecting PrintScreen while pending”. Force-clear Requested if needed, then **CaptureFallback**.
+- CaptureFallback first tries Dalamud `CreateFromImGuiViewportAsync` (`TakeBeforeImGuiRender` so it is the game scene + native UI, not ImGui-only) and WIC/`GetRawImageAsync` PNG save.
+- If that is unavailable, GDI `PrintWindow` (PW_RENDERFULLCONTENT) then `BitBlt` of the FFXIV HWND (`FFXIVGAME` / `MainWindowHandle`).
+- Writes `%APPDATA%\MahjongHelper\screenshots\mj-yyyyMMdd-HHmmssfff.png` and copies into cfg `ScreenShotDir` when writable. Chat names the method. `/mj screenshot status` adds `lastMethod` / `lastPath`.
+- BoundKey / VK_SNAPSHOT kept only as a last resort after CaptureFallback. `/mj snap` still JSON-only. No UI hide. No DXGI Desktop Duplication. Path-naming unit tests only (no HWND tests).
+
+**Result:** Cloud VM cannot press a live client. AZPC: reload, `/mj screenshot` on a machine with phantom ScheduleScreenShot should still produce a real PNG and log `CaptureFallback` plus the path.
+
 ## 2026-09-06: KAN-55 stuck ScreenShotRequested + phantom Location
 
 **What:** AZPC after `29aea08`: `/mj screenshot status` showed `CanTake=True Requested=True Result=Success Location=…/ffxiv_09052026_170302_038.png` but that file is not on disk. `/mj screenshot` correctly refused PrintScreen while pending. User would otherwise need a relog to clear the bit.

@@ -1,5 +1,7 @@
 using System;
+using System.IO;
 using System.Threading.Tasks;
+using Dalamud.Bindings.ImGui;
 using MahjongHelper.Mahjong;
 
 namespace MahjongHelper;
@@ -62,22 +64,60 @@ public sealed partial class Plugin
             ? $"watching cfg ScreenShotDir={configured} (plus fallbacks; resolved={folder})"
             : $"watching resolved={folder} (cfg ScreenShotDir unset; scanning all candidates)";
 
-        var forceClearUsed = false;
-        GameScreenshot.ScheduleAttempt attempt = default;
-        GameScreenshot.ApiSnapshot snap;
-
         try
         {
-            snap = GameScreenshot.CaptureApiSnapshot();
+            var snap = GameScreenshot.CaptureApiSnapshot();
             NotifyScreenshot(
                 $"/mj screenshot pre-schedule: CanTake={snap.CanTake} Requested={snap.Requested} " +
                 $"Result={snap.Result} Location={snap.Location ?? "(none)"} — {watchNote}");
         }
         catch (Exception ex)
         {
-            snap = new GameScreenshot.ApiSnapshot(false, false, false, "n/a", null, 0);
             NotifyScreenshot($"/mj screenshot pre-schedule failed: {ex.Message} — {watchNote}");
         }
+
+        var gameFile = await TryGameApiForRealFileAsync(requestedAtUtc).ConfigureAwait(false);
+        if (gameFile != null)
+        {
+            GameScreenshot.RememberLastCapture(GameScreenshot.TriggerMethod.GameApi.ToString(), gameFile);
+            NotifyScreenshot($"/mj screenshot wrote {gameFile} via GameApi.");
+            return;
+        }
+
+        if (SafeCapture().Requested)
+            await ForceClearOnFrameworkAsync().ConfigureAwait(false);
+
+        NotifyScreenshot(
+            "/mj screenshot game API did not produce a file (Success-but-missing or stuck). " +
+            "Running CaptureFallback — not stopping at PrintScreen-pending.");
+
+        var fallback = await RunCaptureFallbackAsync(configured, requestedAtUtc).ConfigureAwait(false);
+        if (fallback.Wrote)
+        {
+            GameScreenshot.RememberLastCapture(ScreenshotCaptureFallback.MethodName, fallback.PrimaryPath);
+            var extra = fallback.ExtraCopyPath == null ? string.Empty : $" extraCopy={fallback.ExtraCopyPath}";
+            NotifyScreenshot(
+                $"/mj screenshot wrote {fallback.PrimaryPath} via {fallback.Method} " +
+                $"({ScreenshotCaptureFallback.MethodName}). {fallback.Detail}{extra}");
+            return;
+        }
+
+        GameScreenshot.RememberLastCapture(ScreenshotCaptureFallback.MethodName, null);
+        NotifyScreenshot(
+            $"/mj screenshot CaptureFallback failed ({fallback.Detail}). " +
+            "Trying BoundKey / VK_SNAPSHOT last (also dead when the game writer is broken).");
+
+        await TryKeyInjectAfterFallbackAsync(requestedAtUtc, folder).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Existing ScheduleScreenShot wait + stuck recovery + Location verify.
+    /// Returns a real on-disk path, or null so the caller can CaptureFallback.
+    /// </summary>
+    private async Task<string?> TryGameApiForRealFileAsync(DateTime requestedAtUtc)
+    {
+        var forceClearUsed = false;
+        GameScreenshot.ScheduleAttempt attempt = default;
 
         // At most: natural wait retry + one force-clear retry.
         for (var pass = 0; pass < 3; pass++)
@@ -109,21 +149,22 @@ public sealed partial class Plugin
                 }
 
                 NotifyScreenshot(
-                    "/mj screenshot game API stuck: ScreenShotRequested still true. " +
-                    "Not injecting PrintScreen while a request is pending (relog also clears the bit).");
-                return;
+                    "/mj screenshot game API stuck: ScreenShotRequested still true after wait. " +
+                    "Force-clearing if needed, then CaptureFallback.");
+                return null;
             }
 
             if (attempt.Scheduled)
             {
                 NotifyScreenshot(
                     $"/mj screenshot scheduled via game API ({attempt.Detail}). " +
-                    "Waiting for ScreenShotRequested to clear — not injecting a key on this request.");
+                    "Waiting for ScreenShotRequested to clear.");
                 var done = await WaitOnFrameworkAsync(
                     () => !GameScreenshot.CaptureApiSnapshot().Requested,
                     GameScreenshot.CompletionWaitMs).ConfigureAwait(false);
                 var after = SafeCapture();
                 var newest = GameScreenshot.TryFindNewestScreenshot(requestedAtUtc.AddSeconds(-2));
+                var verified = VerifiedGameFile(after, newest);
 
                 if (!done && after.Requested)
                 {
@@ -136,11 +177,11 @@ public sealed partial class Plugin
                     NotifyScreenshot(
                         $"/mj screenshot game API timed out: ScreenShotRequested still true after {GameScreenshot.CompletionWaitMs}ms. " +
                         $"Result={after.Result} Location={after.Location ?? "(none)"} file={newest ?? "(none)"}. " +
-                        "Not injecting PrintScreen while a request is pending.");
-                    return;
+                        "Proceeding to CaptureFallback.");
+                    return null;
                 }
 
-                if (ScreenshotStuckRecovery.IsPhantomSuccess(after.Result, after.Location))
+                if (ScreenshotStuckRecovery.IsPhantomSuccess(after.Result, after.Location) && verified == null)
                 {
                     NotifyScreenshot(
                         $"/mj screenshot {ScreenshotStuckRecovery.FormatPhantomSuccess(after.Location)}.");
@@ -153,41 +194,101 @@ public sealed partial class Plugin
                     }
 
                     NotifyScreenshot(
-                        "/mj screenshot game API Result=Success but file still missing after retry. Not injecting PrintScreen.");
-                    return;
+                        "/mj screenshot game API Result=Success but file still missing after retry. CaptureFallback next.");
+                    return null;
                 }
 
-                var loc = after.Location ?? "(none)";
-                var file = newest ?? "(none)";
-                if (string.Equals(after.Result, "Success", StringComparison.OrdinalIgnoreCase) || newest != null)
-                    NotifyScreenshot($"/mj screenshot game API Result={after.Result} Location={loc} file={file}.");
-                else
-                    NotifyScreenshot($"/mj screenshot game API finished but not success: Result={after.Result} Location={loc} file={file}.");
-                return;
+                if (verified != null)
+                {
+                    NotifyScreenshot(
+                        $"/mj screenshot game API Result={after.Result} Location={after.Location ?? "(none)"} file={verified}.");
+                    return verified;
+                }
+
+                NotifyScreenshot(
+                    $"/mj screenshot game API finished but no file: Result={after.Result} " +
+                    $"Location={after.Location ?? "(none)"} file={newest ?? "(none)"}. CaptureFallback next.");
+                return null;
             }
 
-            // Requested is false and schedule failed — keys are allowed.
-            break;
+            NotifyScreenshot(
+                attempt.CanTake
+                    ? $"/mj screenshot game API did not schedule ({attempt.Detail}). CaptureFallback next."
+                    : $"/mj screenshot game API did not schedule: CanTakeScreenShot=false ({attempt.Detail}). CaptureFallback next.");
+            return null;
         }
 
-        snap = SafeCapture();
-        if (snap.Requested)
+        return VerifiedGameFile(SafeCapture(), GameScreenshot.TryFindNewestScreenshot(requestedAtUtc.AddSeconds(-2)));
+    }
+
+    private static string? VerifiedGameFile(GameScreenshot.ApiSnapshot after, string? newest)
+    {
+        if (newest != null && FileExistsSafe(newest))
+            return newest;
+        if (after.Location != null
+            && string.Equals(after.Result, "Success", StringComparison.OrdinalIgnoreCase)
+            && !ScreenshotStuckRecovery.IsLocationMissingOnDisk(after.Location))
+        {
+            return ScreenshotStuckRecovery.NormalizeGamePath(after.Location);
+        }
+
+        return null;
+    }
+
+    private static bool FileExistsSafe(string path)
+    {
+        try { return File.Exists(path); }
+        catch { return false; }
+    }
+
+    private async Task<ScreenshotCaptureFallback.Result> RunCaptureFallbackAsync(
+        string? configured,
+        DateTime utcNow)
+    {
+        var viewportId = 0u;
+        try
+        {
+            await Framework.RunOnFrameworkThread(() =>
+            {
+                try { viewportId = ImGui.GetMainViewport().ID; }
+                catch { viewportId = 0; }
+            }).ConfigureAwait(false);
+        }
+        catch
+        {
+            viewportId = 0;
+        }
+
+        try
+        {
+            return await ScreenshotCaptureFallback.TryCaptureAsync(
+                TextureProvider,
+                TextureReadback,
+                viewportId,
+                configured,
+                utcNow).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            return new ScreenshotCaptureFallback.Result(
+                false,
+                ScreenshotCaptureFallback.MethodName,
+                null,
+                null,
+                ex.Message);
+        }
+    }
+
+    private async Task TryKeyInjectAfterFallbackAsync(DateTime requestedAtUtc, string folder)
+    {
+        if (SafeCapture().Requested)
+            await ForceClearOnFrameworkAsync().ConfigureAwait(false);
+
+        if (SafeCapture().Requested)
         {
             NotifyScreenshot(
-                $"/mj screenshot game API still Requested=true after recovery. " +
-                "Not injecting PrintScreen while a request is pending.");
+                "/mj screenshot skipping key inject: ScreenShotRequested still true after force-clear.");
             return;
-        }
-
-        if (!attempt.CanTake)
-        {
-            NotifyScreenshot(
-                $"/mj screenshot game API did not schedule: CanTakeScreenShot=false ({attempt.Detail}). Falling back to key inject.");
-        }
-        else
-        {
-            NotifyScreenshot(
-                $"/mj screenshot game API did not schedule ({attempt.Detail}). Falling back to key inject.");
         }
 
         GameScreenshot.TriggerResult keys;
@@ -201,13 +302,18 @@ public sealed partial class Plugin
         }
 
         NotifyScreenshot(FormatKeyInjectMessage(keys, folder));
-
         await Task.Delay(GameScreenshot.CompletionWaitMs).ConfigureAwait(false);
         var keyFile = GameScreenshot.TryFindNewestScreenshot(requestedAtUtc.AddSeconds(-2));
-        NotifyScreenshot(
-            keyFile != null
-                ? $"/mj screenshot wrote {keyFile}"
-                : $"/mj screenshot: no new file detected after {GameScreenshot.CompletionWaitMs}ms — scanned all candidates (resolved={folder}).");
+        if (keyFile != null)
+        {
+            GameScreenshot.RememberLastCapture(keys.Method.ToString(), keyFile);
+            NotifyScreenshot($"/mj screenshot wrote {keyFile} via {keys.Method}.");
+        }
+        else
+        {
+            NotifyScreenshot(
+                $"/mj screenshot: no new file after CaptureFallback and key inject — scanned all candidates (resolved={folder}).");
+        }
     }
 
     /// <returns>true if the stuck bit was force-cleared and the caller should retry schedule.</returns>
