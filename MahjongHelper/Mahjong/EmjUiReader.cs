@@ -141,9 +141,15 @@ public static unsafe class EmjUiReader
         string? TileCode,
         float Rotation = 0,
         uint ParentNodeId = 0,
-        bool Tsumogiri = false);
+        bool Tsumogiri = false,
+        float AbsX = 0,
+        float AbsY = 0);
 
-    public sealed record UiState(IReadOnlyList<UiSlot> Slots, UiGameInfo GameInfo, DateTime UtcCapturedAt)
+    public sealed record UiState(
+        IReadOnlyList<UiSlot> Slots,
+        UiGameInfo GameInfo,
+        DateTime UtcCapturedAt,
+        IReadOnlyList<UiSlot>? OpponentMeldCandidates = null)
     {
         public string ToDisplayText()
         {
@@ -227,7 +233,7 @@ public static unsafe class EmjUiReader
         {
             var tile = slot.TileCode ?? (slot.IconId > 0 ? $"ICON_{slot.IconId}" : "(no-icon)");
             var tsumo = slot.Tsumogiri ? " tsumogiri" : "";
-            return $"  [{slot.Kind}:{slot.SlotIndex}] node={slot.NodeIndex} id={slot.NodeId} type={slot.NodeType} vis={slot.Visible} pos=({slot.X:F0},{slot.Y:F0}) size=({slot.Width},{slot.Height}) rot={slot.Rotation:F2} parent={slot.ParentNodeId} {tile}{tsumo}";
+            return $"  [{slot.Kind}:{slot.SlotIndex}] node={slot.NodeIndex} id={slot.NodeId} type={slot.NodeType} vis={slot.Visible} pos=({slot.X:F0},{slot.Y:F0}) abs=({slot.AbsX:F0},{slot.AbsY:F0}) size=({slot.Width},{slot.Height}) rot={slot.Rotation:F2} parent={slot.ParentNodeId} {tile}{tsumo}";
         }
     }
 
@@ -279,8 +285,8 @@ public static unsafe class EmjUiReader
             if (!visible)
                 continue;
 
-            // 42x55 = player hand tile candidates (existing logic)
-            if (type == 1055 && node->Width == 42 && node->Height == 55)
+            // 42×55 = local hand strip and toimen face-up fuuro (not only type 1055).
+            if (type >= 1000 && node->Width == 42 && node->Height == 55)
             {
                 uint iconId = 0;
                 TryFindIcon(node, iconCapture, out iconId);
@@ -300,13 +306,17 @@ public static unsafe class EmjUiReader
                     iconId,
                     iconId > 0 ? iconMap?.Resolve(iconId) : null,
                     extras.Rotation,
-                    extras.ParentNodeId);
+                    extras.ParentNodeId,
+                    false,
+                    extras.AbsX,
+                    extras.AbsY);
 
                 visibleCandidates.Add(candidate);
                 slots.Add(candidate);
             }
 
-            // 55x42 = called tile in the local hand strip (42x55 rotated 90°).
+            // 55x42 = called tile in the local hand strip (42x55 rotated 90°)
+            // or kamicha/shimocha open fuuro.
             if (type >= 1000 && node->Width == 55 && node->Height == 42)
             {
                 uint rotatedIcon = 0;
@@ -328,7 +338,10 @@ public static unsafe class EmjUiReader
                         rotatedIcon,
                         iconMap?.Resolve(rotatedIcon),
                         extras.Rotation,
-                        extras.ParentNodeId));
+                        extras.ParentNodeId,
+                        false,
+                        extras.AbsX,
+                        extras.AbsY));
                 }
             }
 
@@ -354,7 +367,9 @@ public static unsafe class EmjUiReader
                     iconId > 0 ? iconMap?.Resolve(iconId) : null,
                     extras.Rotation,
                     extras.ParentNodeId,
-                    IsRotatedTsumogiri(extras.Rotation, node->Width, node->Height)));
+                    IsRotatedTsumogiri(extras.Rotation, node->Width, node->Height),
+                    extras.AbsX,
+                    extras.AbsY));
             }
 
             // 50x60 type=1006 = dora indicator slots (nodeIds 28-32, up to 5 kan dora)
@@ -418,9 +433,13 @@ public static unsafe class EmjUiReader
         // so they become PlayerMeld instead of CanonicalPlayerHand.
         ApplyHandStripMeldSplit(slots, rawHand, extraStrip);
 
+        // Toimen/kamicha/shimocha fuuro are hand-sized tiles next to those
+        // players' face-down hands — not on the local strip and often not 34×45.
+        var opponentMeldCandidates = ClassifyOpponentAreaMelds(slots, extraStrip);
+
         var gameInfo = ReadGameInfo(addon, iconCapture, iconMap);
 
-        return new UiState(slots, gameInfo, DateTime.UtcNow);
+        return new UiState(slots, gameInfo, DateTime.UtcNow, opponentMeldCandidates);
     }
 
     /// <summary>
@@ -443,131 +462,148 @@ public static unsafe class EmjUiReader
         if (tilesWithIcons.Count == 0)
             return;
 
-        var pondByType = new Dictionary<ushort, SlotKind>
-        {
-            [1021] = SlotKind.PlayerDiscard,
-            [1022] = SlotKind.LeftDiscard,
-            [1023] = SlotKind.RightDiscard,
-            [1024] = SlotKind.OppositeDiscard,
-        };
-        var meldForPond = new Dictionary<SlotKind, SlotKind>
-        {
-            [SlotKind.PlayerDiscard] = SlotKind.PlayerMeld,
-            [SlotKind.LeftDiscard] = SlotKind.LeftMeld,
-            [SlotKind.RightDiscard] = SlotKind.RightMeld,
-            [SlotKind.OppositeDiscard] = SlotKind.OppositeMeld,
-        };
+        var classified = SmallTileClassifier.Classify(
+            tilesWithIcons.Select((t, i) => new SmallTileClassifier.Tile(
+                i, t.NodeType, t.X, t.Y, t.AbsX, t.AbsY, t.Width, t.Height,
+                t.Rotation, t.ParentNodeId, t.TileCode,
+                t.Tsumogiri || IsRotatedTsumogiri(t.Rotation, t.Width, t.Height))).ToList());
 
-        var pondParents = new Dictionary<SlotKind, uint>();
-        var pondTilesByKind = new Dictionary<SlotKind, List<UiSlot>>();
-
-        foreach (var (nodeType, pondKind) in pondByType)
+        foreach (var item in classified)
         {
-            var ofType = tilesWithIcons.Where(t => t.NodeType == nodeType).ToList();
-            if (ofType.Count == 0)
+            if (item.Tile.Id < 0 || item.Tile.Id >= tilesWithIcons.Count)
                 continue;
-
-            var byParent = ofType
-                .GroupBy(t => t.ParentNodeId)
-                .OrderByDescending(g => g.Count())
-                .ToList();
-
-            var pond = byParent[0].ToList();
-            pond.Reverse();
-            for (int i = 0; i < pond.Count; i++)
+            var source = tilesWithIcons[item.Tile.Id];
+            outputSlots.Add(source with
             {
-                var tile = pond[i];
-                outputSlots.Add(tile with
-                {
-                    Kind = pondKind,
-                    SlotIndex = i,
-                    Tsumogiri = tile.Tsumogiri || IsRotatedTsumogiri(tile.Rotation, tile.Width, tile.Height),
-                });
-            }
-
-            pondParents[pondKind] = byParent[0].Key;
-            pondTilesByKind[pondKind] = pond;
-
-            var meldKind = meldForPond[pondKind];
-            var meldIndex = 0;
-            for (int g = 1; g < byParent.Count; g++)
-            {
-                foreach (var tile in byParent[g].OrderBy(t => t.X).ThenBy(t => t.Y))
-                    outputSlots.Add(tile with { Kind = meldKind, SlotIndex = meldIndex++ });
-            }
-        }
-
-        var leftovers = tilesWithIcons
-            .Where(t => t.NodeType is not (1021 or 1022 or 1023 or 1024 or 1009 or 1006 or 1055))
-            .GroupBy(t => t.ParentNodeId)
-            .Where(g => g.Count() >= 3);
-
-        foreach (var group in leftovers)
-        {
-            var ordered = group.OrderBy(t => t.X).ThenBy(t => t.Y).ToList();
-            var owner = GuessMeldOwner(ordered[0], pondParents, pondTilesByKind);
-            if (owner == null)
-                continue;
-
-            var existing = outputSlots.Count(s => s.Kind == owner);
-            foreach (var tile in ordered)
-                outputSlots.Add(tile with { Kind = owner.Value, SlotIndex = existing++ });
+                Kind = ToSlotKind(item.Kind),
+                SlotIndex = item.SlotIndex,
+                Tsumogiri = item.Tile.Tsumogiri,
+            });
         }
     }
 
-    private static SlotKind? GuessMeldOwner(
-        UiSlot tile,
-        Dictionary<SlotKind, uint> pondParents,
-        Dictionary<SlotKind, List<UiSlot>> pondTiles)
+    private static List<UiSlot> ClassifyOpponentAreaMelds(List<UiSlot> slots, List<UiSlot> extraStrip)
     {
-        foreach (var (pondKind, parentId) in pondParents)
+        var claimed = new HashSet<int>();
+        foreach (var slot in slots)
         {
-            if (parentId != 0 && parentId == tile.ParentNodeId)
-                return MeldKindForPond(pondKind);
+            if (slot.Kind is SlotKind.CanonicalPlayerHand or SlotKind.CanonicalPlayerDraw
+                or SlotKind.PlayerMeld or SlotKind.RightMeld or SlotKind.OppositeMeld or SlotKind.LeftMeld
+                or SlotKind.PlayerDiscard or SlotKind.RightDiscard or SlotKind.OppositeDiscard or SlotKind.LeftDiscard
+                or SlotKind.DoraIndicator)
+                claimed.Add(slot.NodeIndex);
         }
 
-        SlotKind? nearest = null;
-        var best = float.MaxValue;
-        foreach (var (pondKind, tiles) in pondTiles)
+        var candidates = new List<UiSlot>();
+        void Consider(UiSlot slot)
         {
-            if (tiles.Count == 0)
+            if (!slot.Visible || slot.IconId == 0)
+                return;
+            if (slot.NodeIndex is >= 54 and <= 71)
+                return;
+            if (claimed.Contains(slot.NodeIndex))
+                return;
+            if (slot.NodeType is 1009 or 1006)
+                return;
+            if (!((slot.Width == 42 && slot.Height == 55) || (slot.Width == 55 && slot.Height == 42)))
+                return;
+            if (candidates.Any(c => c.NodeIndex == slot.NodeIndex))
+                return;
+            candidates.Add(slot);
+        }
+
+        foreach (var slot in extraStrip)
+            Consider(slot);
+        foreach (var slot in slots.Where(s => s.Kind == SlotKind.VisibleTileCandidate))
+            Consider(slot);
+
+        var pondHints = new List<OpponentAreaClassifier.PondHint>();
+        foreach (var pondKind in new[] { SlotKind.PlayerDiscard, SlotKind.RightDiscard, SlotKind.OppositeDiscard, SlotKind.LeftDiscard })
+        {
+            var pond = slots.Where(s => s.Kind == pondKind).ToList();
+            if (pond.Count == 0)
                 continue;
-            var cx = tiles.Average(t => t.X);
-            var cy = tiles.Average(t => t.Y);
-            var dx = tile.X - cx;
-            var dy = tile.Y - cy;
-            var dist = dx * dx + dy * dy;
-            if (dist < best)
+            pondHints.Add(new OpponentAreaClassifier.PondHint(
+                ToClassifierKind(pondKind),
+                pond.Average(s => s.AbsX != 0 || s.AbsY != 0 ? s.AbsX : s.X),
+                pond.Average(s => s.AbsX != 0 || s.AbsY != 0 ? s.AbsY : s.Y)));
+        }
+
+        var strip = slots.Where(s => s.Kind is SlotKind.CanonicalPlayerHand or SlotKind.CanonicalPlayerDraw).ToList();
+        float? stripY = strip.Count > 0
+            ? strip.Average(s => s.AbsY != 0 || s.AbsX != 0 ? s.AbsY : s.Y)
+            : null;
+
+        var classified = OpponentAreaClassifier.Classify(
+            candidates.Select((s, i) => new OpponentAreaClassifier.Tile(
+                i, s.X, s.Y, s.AbsX, s.AbsY, s.Width, s.Height, s.Rotation,
+                s.ParentNodeId, s.TileCode, s.NodeType, s.NodeIndex)).ToList(),
+            pondHints,
+            stripY);
+
+        foreach (var assignment in classified)
+        {
+            var existing = slots.Count(s => s.Kind == ToSlotKind(assignment.Kind));
+            foreach (var id in assignment.TileIds)
             {
-                best = dist;
-                nearest = pondKind;
+                if (id < 0 || id >= candidates.Count)
+                    continue;
+                var tile = candidates[id];
+                slots.Add(tile with { Kind = ToSlotKind(assignment.Kind), SlotIndex = existing++ });
             }
         }
 
-        return nearest == null ? null : MeldKindForPond(nearest.Value);
+        return candidates;
     }
 
-    private static SlotKind MeldKindForPond(SlotKind pondKind) => pondKind switch
+    private static SlotKind ToSlotKind(SmallTileClassifier.Kind kind) => kind switch
     {
-        SlotKind.PlayerDiscard => SlotKind.PlayerMeld,
-        SlotKind.LeftDiscard => SlotKind.LeftMeld,
-        SlotKind.RightDiscard => SlotKind.RightMeld,
-        SlotKind.OppositeDiscard => SlotKind.OppositeMeld,
+        SmallTileClassifier.Kind.PlayerDiscard => SlotKind.PlayerDiscard,
+        SmallTileClassifier.Kind.LeftDiscard => SlotKind.LeftDiscard,
+        SmallTileClassifier.Kind.RightDiscard => SlotKind.RightDiscard,
+        SmallTileClassifier.Kind.OppositeDiscard => SlotKind.OppositeDiscard,
+        SmallTileClassifier.Kind.PlayerMeld => SlotKind.PlayerMeld,
+        SmallTileClassifier.Kind.LeftMeld => SlotKind.LeftMeld,
+        SmallTileClassifier.Kind.RightMeld => SlotKind.RightMeld,
+        SmallTileClassifier.Kind.OppositeMeld => SlotKind.OppositeMeld,
         _ => SlotKind.PlayerMeld,
     };
 
-    private static (float Rotation, uint ParentNodeId) ReadNodeExtras(AtkResNode* node)
+    private static SmallTileClassifier.Kind ToClassifierKind(SlotKind kind) => kind switch
+    {
+        SlotKind.PlayerDiscard => SmallTileClassifier.Kind.PlayerDiscard,
+        SlotKind.LeftDiscard => SmallTileClassifier.Kind.LeftDiscard,
+        SlotKind.RightDiscard => SmallTileClassifier.Kind.RightDiscard,
+        SlotKind.OppositeDiscard => SmallTileClassifier.Kind.OppositeDiscard,
+        SlotKind.PlayerMeld => SmallTileClassifier.Kind.PlayerMeld,
+        SlotKind.LeftMeld => SmallTileClassifier.Kind.LeftMeld,
+        SlotKind.RightMeld => SmallTileClassifier.Kind.RightMeld,
+        SlotKind.OppositeMeld => SmallTileClassifier.Kind.OppositeMeld,
+        _ => SmallTileClassifier.Kind.PlayerDiscard,
+    };
+
+    private static (float Rotation, uint ParentNodeId, float AbsX, float AbsY) ReadNodeExtras(AtkResNode* node)
     {
         float rotation = 0;
         uint parentId = 0;
+        float absX = 0;
+        float absY = 0;
         try { rotation = node->Rotation; } catch { }
         try
         {
-            if (node->ParentNode != null)
-                parentId = node->ParentNode->NodeId;
+            var walk = node;
+            var steps = 0;
+            while (walk != null && steps++ < 32)
+            {
+                absX += walk->X;
+                absY += walk->Y;
+                if (steps == 1 && walk->ParentNode != null)
+                    parentId = walk->ParentNode->NodeId;
+                walk = walk->ParentNode;
+            }
         }
         catch { }
-        return (rotation, parentId);
+        return (rotation, parentId, absX, absY);
     }
 
     /// <summary>
@@ -1776,7 +1812,10 @@ public static unsafe class EmjUiReader
             iconId,
             iconId > 0 ? iconMap?.Resolve(iconId) : null,
             extras.Rotation,
-            extras.ParentNodeId);
+            extras.ParentNodeId,
+            false,
+            extras.AbsX,
+            extras.AbsY);
 
         return true;
     }

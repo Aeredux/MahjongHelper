@@ -1,5 +1,6 @@
 # KAN-11: ask a running Mahjong Helper to write a capture sidecar.
 # Telesto URL ACL is HTTP://LOCALHOST:45678/ — 127.0.0.1 returns HTTP.sys 400 Invalid Hostname.
+# Required JSON (version + id + ExecuteCommand) is documented in docs/telesto.md.
 $ErrorActionPreference = 'Stop'
 $uri = 'http://localhost:45678/'
 $body = '{"version":1,"id":1,"type":"ExecuteCommand","payload":{"command":"/mj snap"}}'

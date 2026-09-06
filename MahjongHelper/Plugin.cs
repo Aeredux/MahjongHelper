@@ -1268,6 +1268,11 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
             object[] closedHand = Array.Empty<object>();
             object? drawnTile = null;
             object[] handStripMelds = Array.Empty<object>();
+            object[] playerMeldSlots = Array.Empty<object>();
+            object[] rightMeldSlots = Array.Empty<object>();
+            object[] oppositeMeldSlots = Array.Empty<object>();
+            object[] leftMeldSlots = Array.Empty<object>();
+            object[] opponentMeldCandidates = Array.Empty<object>();
 
             unsafe
             {
@@ -1295,6 +1300,17 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
                         .Select(group => (object)group.Select(DumpStripTile).ToArray())
                         .ToArray();
                 }
+            }
+
+            if (_lastUiState != null)
+            {
+                playerMeldSlots = DumpMeldSlots(_lastUiState, EmjUiReader.SlotKind.PlayerMeld);
+                rightMeldSlots = DumpMeldSlots(_lastUiState, EmjUiReader.SlotKind.RightMeld);
+                oppositeMeldSlots = DumpMeldSlots(_lastUiState, EmjUiReader.SlotKind.OppositeMeld);
+                leftMeldSlots = DumpMeldSlots(_lastUiState, EmjUiReader.SlotKind.LeftMeld);
+                opponentMeldCandidates = (_lastUiState.OpponentMeldCandidates ?? Array.Empty<EmjUiReader.UiSlot>())
+                    .Select(DumpUiSlot)
+                    .ToArray();
             }
 
             var payload = new
@@ -1342,6 +1358,14 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
                 closedHand,
                 drawnTile,
                 handStripMelds,
+                playerMeldSlots,
+                opponentMelds = new
+                {
+                    right = rightMeldSlots,
+                    opposite = oppositeMeldSlots,
+                    left = leftMeldSlots,
+                },
+                opponentMeldCandidates,
             };
 
             var path = SnapCapture.WriteJson(payload);
@@ -1372,6 +1396,28 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
         t.ParentNodeId,
         t.IconId,
         t.TileCode,
+    };
+
+    private static object[] DumpMeldSlots(EmjUiReader.UiState state, EmjUiReader.SlotKind kind)
+        => state.Slots.Where(s => s.Kind == kind).OrderBy(s => s.SlotIndex).Select(DumpUiSlot).ToArray();
+
+    private static object DumpUiSlot(EmjUiReader.UiSlot s) => new
+    {
+        kind = s.Kind.ToString(),
+        s.SlotIndex,
+        s.NodeIndex,
+        s.NodeId,
+        s.NodeType,
+        s.X,
+        s.Y,
+        s.AbsX,
+        s.AbsY,
+        s.Width,
+        s.Height,
+        s.Rotation,
+        s.ParentNodeId,
+        s.IconId,
+        s.TileCode,
     };
 
     private void LeaveStuckMatch()
