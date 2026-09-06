@@ -28,8 +28,22 @@ jobs:
 
     - name: Download Dalamud
       run: |
-        Invoke-WebRequest -Uri https://goatcorp.github.io/dalamud-distrib/latest.zip -OutFile latest.zip
-        Expand-Archive -Force latest.zip "$env:AppData\XIVLauncher\addon\Hooks\dev"
+        $ErrorActionPreference = 'Stop'
+        $uri = 'https://goatcorp.github.io/dalamud-distrib/latest.zip'
+        $out = 'latest.zip'
+        $dest = "$env:AppData\XIVLauncher\addon\Hooks\dev"
+        foreach ($attempt in 1..5) {
+          try {
+            if (Test-Path $out) { Remove-Item $out -Force }
+            Invoke-WebRequest -Uri $uri -OutFile $out
+            Expand-Archive -Force $out $dest
+            break
+          } catch {
+            Write-Host "Dalamud download attempt $attempt failed: $_"
+            if ($attempt -eq 5) { throw }
+            Start-Sleep -Seconds ([int][math]::Pow(2, $attempt + 1))
+          }
+        }
 
     - name: Build with dotnet
       run: dotnet build --configuration Release
