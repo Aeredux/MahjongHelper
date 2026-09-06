@@ -62,6 +62,24 @@ public class UiDumpReplayTests
     }
 
     [Fact]
+    public void East_seat_own_red_west_pon_s2_fixture_snaps_own_and_opposite()
+    {
+        var dump = Load("east-seat-own-red-west-pon-s2.json");
+        var result = UiDumpReplay.Classify(dump);
+
+        Assert.Contains("ownMelds=1", result.SnapLines[0]);
+        Assert.Contains("oppMelds=1", result.SnapLines[0]);
+        Assert.Contains("seat=EAST", result.SnapLines[0]);
+        Assert.Equal(
+            "own=PON RED×3 | SOUTH=none | WEST=PON S2×3 | NORTH=none",
+            result.SnapLines[1]);
+        Assert.Equal(dump.Expected?.SnapLine, result.SnapLines[1]);
+        var west = Assert.Single(result.Request.Opponents!, o => o.Wind == "WEST");
+        Assert.Equal("PON", Assert.Single(west.Melds!).Type);
+        Assert.All(west.Melds![0].Tiles, t => Assert.Equal("S2", t));
+    }
+
+    [Fact]
     public void West_seat_empty_table_fixture_is_all_none()
     {
         var dump = Load("west-seat-empty-table.json");
