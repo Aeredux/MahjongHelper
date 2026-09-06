@@ -259,9 +259,10 @@ public class HandStripClassifierTests
     [Fact]
     public void Type2_upright_west_ghosts_are_not_own_pon()
     {
-        // Frozen table + user: own fuuro is only CHI M1-M2-M3 (one 52×40 call
-        // tile). Three upright type-2 WEST leaves at AbsX≈1391/1442/1484 are
-        // UI ghosts, not a PON.
+        // snap-20260906-083929732: cue is type-1056 Rotation=4.712, not type-2
+        // 52×40. Ghost WEST 1056@1385 + type-2@1391–1484 is not felt fuuro.
+        // Real CHI uses 1056 M2@1525 and a 1060 140×55 tray.
+        const float Rot270 = 4.712f;
         var tiles = new List<HandStripClassifier.Tile>();
         var closed = new[] { "M4", "M6", "M7", "M8", "M8", "M9", "S1", "S1", "S8", "S8", "M4" };
         for (var i = 0; i < closed.Length; i++)
@@ -271,26 +272,34 @@ public class HandStripClassifierTests
                 absX: x, absY: 972, parent: 10));
         }
 
-        tiles.Add(T(11, 0, "WEST", parent: 80, nodeIndex: 200, width: 40, height: 52,
+        tiles.Add(T(11, 0, "WEST", Rot270, parent: 80, nodeIndex: 190, width: 42, height: 55,
+            nodeType: 1056, absX: 1385, absY: 980));
+        tiles.Add(T(12, 0, "WEST", parent: 80, nodeIndex: 200, width: 40, height: 52,
             nodeType: 2, absX: 1391, absY: 980));
-        tiles.Add(T(12, 0, "WEST", parent: 80, nodeIndex: 201, width: 40, height: 52,
+        tiles.Add(T(13, 0, "WEST", parent: 80, nodeIndex: 201, width: 40, height: 52,
             nodeType: 2, absX: 1442, absY: 980));
-        tiles.Add(T(13, 0, "WEST", parent: 80, nodeIndex: 202, width: 40, height: 52,
+        tiles.Add(T(14, 0, "WEST", parent: 80, nodeIndex: 202, width: 40, height: 52,
             nodeType: 2, absX: 1484, absY: 980));
-        tiles.Add(T(14, 0, "M2", parent: 81, nodeIndex: 203, width: 40, height: 52,
+        tiles.Add(T(15, 0, "M2", Rot270, parent: 81, nodeIndex: 191, width: 42, height: 55,
+            nodeType: 1056, absX: 1525, absY: 980));
+        tiles.Add(T(16, 0, "M2", parent: 81, nodeIndex: 203, width: 40, height: 52,
             nodeType: 2, absX: 1531, absY: 980));
-        tiles.Add(T(15, 0, "M1", parent: 81, nodeIndex: 204, width: 40, height: 52,
+        tiles.Add(T(17, 0, "M1", parent: 81, nodeIndex: 204, width: 40, height: 52,
             nodeType: 2, absX: 1582, absY: 980));
-        tiles.Add(T(16, 0, "M3", parent: 81, nodeIndex: 205, width: 52, height: 40,
+        tiles.Add(T(18, 0, "M3", parent: 81, nodeIndex: 205, width: 40, height: 52,
             nodeType: 2, absX: 1624, absY: 980));
 
-        var split = HandStripClassifier.Split(tiles);
+        var trays = new[] { new IconNodeScan.Tray(1520, 972, 140, 55) };
+        var split = HandStripClassifier.Split(tiles, trays);
 
         Assert.Equal(11, split.ClosedIds.Count);
         var chi = Assert.Single(split.MeldGroups);
-        Assert.Equal(["M2", "M1", "M3"], Codes(tiles, chi));
+        var chiCodes = Codes(tiles, chi);
+        Assert.Equal(3, chiCodes.Count);
+        Assert.Contains("M1", chiCodes);
+        Assert.Contains("M2", chiCodes);
+        Assert.Contains("M3", chiCodes);
         Assert.DoesNotContain(split.MeldGroups, g => Codes(tiles, g).All(c => c == "WEST"));
-        Assert.DoesNotContain(11, split.ClosedIds);
     }
 
     [Fact]

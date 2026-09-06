@@ -81,6 +81,43 @@ public class IconNodeScanTests
             (2, 52, 40, 0),
         };
         Assert.True(IconNodeScan.FaceLeafGroupHasCallCue(chi, t => t.Type, t => t.W, t => t.H, t => t.Rot));
+
+        var with1056 = new (ushort Type, int W, int H, float Rot)[]
+        {
+            (2, 40, 52, 0),
+            (2, 40, 52, 0),
+            (1056, 42, 55, 4.712f),
+        };
+        Assert.True(IconNodeScan.ClusterHasCallCue(with1056, t => t.W, t => t.H, t => t.Rot));
+        Assert.True(IconNodeScan.IsCallCueNode(1056, 42, 55, 4.712f));
+        Assert.True(IconNodeScan.IsFuuroTray(1060, 140, 55));
+    }
+
+    [Fact]
+    public void Ghost_west_cluster_is_not_plausible_own_fuuro()
+    {
+        var west = new (float X, float Y, int W, int H, float Rot)[]
+        {
+            (1385, 980, 42, 55, 4.712f),
+            (1391, 980, 40, 52, 0),
+            (1442, 980, 40, 52, 0),
+            (1484, 980, 40, 52, 0),
+        };
+        var chi = new (float X, float Y, int W, int H, float Rot)[]
+        {
+            (1525, 980, 42, 55, 4.712f),
+            (1531, 980, 40, 52, 0),
+            (1582, 980, 40, 52, 0),
+            (1624, 980, 40, 52, 0),
+        };
+        var trays = new[] { new IconNodeScan.Tray(1520, 972, 140, 55) };
+
+        Assert.False(IconNodeScan.IsPlausibleOwnLeftoverFuuro(
+            west, 1327, trays, t => t.W, t => t.H, t => t.Rot, t => t.X, t => t.Y));
+        Assert.True(IconNodeScan.IsPlausibleOwnLeftoverFuuro(
+            chi, 1327, trays, t => t.W, t => t.H, t => t.Rot, t => t.X, t => t.Y));
+        Assert.True(IconNodeScan.IsPlausibleOwnLeftoverFuuro(
+            chi, 1327, trays: null, t => t.W, t => t.H, t => t.Rot, t => t.X, t => t.Y));
     }
 
     [Fact]

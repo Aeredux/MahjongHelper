@@ -554,6 +554,15 @@ public static unsafe class EmjUiReader
                 s => s.Width,
                 s => s.Height)
             .ToList();
+        if (allIconNodes != null)
+        {
+            foreach (var cue in allIconNodes)
+            {
+                if (!IconNodeScan.IsCallCueNode(cue.NodeType, cue.Width, cue.Height, cue.Rotation))
+                    continue;
+                Consider(cue);
+            }
+        }
 
         var pondHints = new List<OpponentAreaClassifier.PondHint>();
         foreach (var pondKind in new[] { SlotKind.PlayerDiscard, SlotKind.RightDiscard, SlotKind.OppositeDiscard, SlotKind.LeftDiscard })
@@ -571,13 +580,22 @@ public static unsafe class EmjUiReader
         float? stripY = strip.Count > 0
             ? strip.Average(s => s.AbsY != 0 || s.AbsX != 0 ? s.AbsY : s.Y)
             : null;
+        float? packMaxAbsX = strip.Count > 0
+            ? strip.Max(s => s.AbsX != 0 || s.AbsY != 0 ? s.AbsX : s.X)
+            : null;
+        var trays = (allIconNodes ?? [])
+            .Where(s => s.Visible && IconNodeScan.IsFuuroTray(s.NodeType, s.Width, s.Height))
+            .Select(s => new IconNodeScan.Tray(AbsOfX(s), AbsOfY(s), s.Width, s.Height))
+            .ToList();
 
         var classified = OpponentAreaClassifier.Classify(
             candidates.Select((s, i) => new OpponentAreaClassifier.Tile(
                 i, s.X, s.Y, s.AbsX, s.AbsY, s.Width, s.Height, s.Rotation,
                 s.ParentNodeId, s.TileCode, s.NodeType, s.NodeIndex)).ToList(),
             pondHints,
-            stripY);
+            stripY,
+            packMaxAbsX,
+            trays);
 
         foreach (var assignment in classified)
         {
@@ -1739,6 +1757,7 @@ public static unsafe class EmjUiReader
                 Consider(slot);
         }
 
+        var trays = new List<IconNodeScan.Tray>();
         if (allIconNodes != null && stripAbsY is float)
         {
             var faces = allIconNodes
@@ -1761,6 +1780,26 @@ public static unsafe class EmjUiReader
                     continue;
                 Consider(face);
             }
+
+            foreach (var cue in allIconNodes)
+            {
+                if (!cue.Visible || !OnPlayerStrip(cue))
+                    continue;
+                if (!IconNodeScan.IsCallCueNode(cue.NodeType, cue.Width, cue.Height, cue.Rotation))
+                    continue;
+                if (!MeldClassifier.IsUsableTile(cue.TileCode))
+                    continue;
+                Consider(cue);
+            }
+
+            foreach (var slot in allIconNodes)
+            {
+                if (!slot.Visible || !OnPlayerStrip(slot))
+                    continue;
+                if (!IconNodeScan.IsFuuroTray(slot.NodeType, slot.Width, slot.Height))
+                    continue;
+                trays.Add(new IconNodeScan.Tray(AbsOfX(slot), AbsOfY(slot), slot.Width, slot.Height));
+            }
         }
 
         if (byNode.Count == 0)
@@ -1768,7 +1807,7 @@ public static unsafe class EmjUiReader
 
         var list = byNode.Values.OrderBy(AbsOfX).ThenBy(s => s.NodeIndex).ToList();
         var tiles = list.Select((s, i) => ToStripTile(i, s)).ToList();
-        var split = HandStripClassifier.Split(tiles);
+        var split = HandStripClassifier.Split(tiles, trays);
         if (split.ClosedIds.Count == 0 && split.MeldGroups.Count == 0 && split.DrawId == null)
             return;
 

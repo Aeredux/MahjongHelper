@@ -180,7 +180,7 @@ public static unsafe class MahjongHandReader
         float? stripAbsY = anchors.Count > 0
             ? anchors.Average(t => t.AbsY != 0 || t.AbsX != 0 ? t.AbsY : t.Y)
             : null;
-        AppendFaceLeavesOnStrip(addon, capture, iconMap, stripTiles, anchors, stripAbsY);
+        var trays = AppendFaceLeavesOnStrip(addon, capture, iconMap, stripTiles, anchors, stripAbsY);
         var stripForSplit = stripTiles
             .Where(t => t.NodeIndex is < 55 or > 58)
             .Where(t =>
@@ -198,7 +198,7 @@ public static unsafe class MahjongHandReader
                 .Select((t, index) => new HandStripClassifier.Tile(
                     index, t.X, t.Y, t.Width, t.Height, t.Rotation, t.ParentNodeId, t.TileCode,
                     t.NodeIndex, t.AbsX, t.AbsY, t.NodeType))
-                .ToList());
+                .ToList(), trays);
             var closed = classified.ClosedIds
                 .Where(id => id >= 0 && id < stripForSplit.Count)
                 .Select(id => stripForSplit[id])
@@ -342,7 +342,7 @@ public static unsafe class MahjongHandReader
         }
     }
 
-    private static void AppendFaceLeavesOnStrip(
+    private static List<IconNodeScan.Tray> AppendFaceLeavesOnStrip(
         AtkUnitBase* addon,
         IconIdCapture capture,
         MahjongIconMap? iconMap,
@@ -350,8 +350,9 @@ public static unsafe class MahjongHandReader
         List<MahjongTileObservation> anchors,
         float? stripAbsY)
     {
+        var trays = new List<IconNodeScan.Tray>();
         if (addon == null || stripAbsY is not float band || anchors.Count == 0)
-            return;
+            return trays;
 
         try
         {
@@ -382,31 +383,62 @@ public static unsafe class MahjongHandReader
 
             foreach (var face in faces)
             {
-                var obs = new MahjongTileObservation(
-                    face.NodeIndex,
-                    face.NodeId,
-                    face.NodeType,
-                    face.X,
-                    face.Y,
-                    face.IconId,
-                    face.TileCode,
-                    face.Rotation,
-                    face.Width,
-                    face.Height,
-                    face.ParentNodeId,
-                    face.AbsX,
-                    face.AbsY);
+                var obs = ToObservation(face);
                 var key = Snap(obs);
                 if (packPos.Contains(key) || existing.Contains(key))
                     continue;
                 existing.Add(key);
                 stripTiles.Add(obs);
             }
+
+            foreach (var cue in scanned.IconNodes)
+            {
+                if (!cue.Visible
+                    || !IconNodeScan.IsCallCueNode(cue.NodeType, cue.Width, cue.Height, cue.Rotation)
+                    || !MeldClassifier.IsUsableTile(cue.TileCode))
+                    continue;
+                if (Math.Abs((cue.AbsX != 0 || cue.AbsY != 0 ? cue.AbsY : cue.Y) - band)
+                    > OpponentAreaClassifier.PlayerStripBandPx)
+                    continue;
+                stripTiles.Add(ToObservation(cue));
+            }
+
+            foreach (var slot in scanned.IconNodes)
+            {
+                if (!slot.Visible || !IconNodeScan.IsFuuroTray(slot.NodeType, slot.Width, slot.Height))
+                    continue;
+                if (Math.Abs((slot.AbsX != 0 || slot.AbsY != 0 ? slot.AbsY : slot.Y) - band)
+                    > OpponentAreaClassifier.PlayerStripBandPx)
+                    continue;
+                trays.Add(new IconNodeScan.Tray(
+                    slot.AbsX != 0 || slot.AbsY != 0 ? slot.AbsX : slot.X,
+                    slot.AbsX != 0 || slot.AbsY != 0 ? slot.AbsY : slot.Y,
+                    slot.Width,
+                    slot.Height));
+            }
         }
         catch
         {
         }
+
+        return trays;
     }
+
+    private static MahjongTileObservation ToObservation(EmjUiReader.UiSlot slot)
+        => new(
+            slot.NodeIndex,
+            slot.NodeId,
+            slot.NodeType,
+            slot.X,
+            slot.Y,
+            slot.IconId,
+            slot.TileCode,
+            slot.Rotation,
+            slot.Width,
+            slot.Height,
+            slot.ParentNodeId,
+            slot.AbsX,
+            slot.AbsY);
 
     private static bool TryFindCapturedIcon(AtkResNode* root, IconIdCapture capture, out uint iconId)
     {

@@ -40,7 +40,9 @@ public static class OpponentAreaClassifier
     public static IReadOnlyList<Assignment> Classify(
         IReadOnlyList<Tile> leftovers,
         IReadOnlyList<PondHint>? pondHints = null,
-        float? playerStripAbsY = null)
+        float? playerStripAbsY = null,
+        float? closedPackMaxAbsX = null,
+        IReadOnlyList<IconNodeScan.Tray>? trays = null)
     {
         var result = new List<Assignment>();
         if (leftovers == null || leftovers.Count == 0)
@@ -73,8 +75,18 @@ public static class OpponentAreaClassifier
                 var kind = GuessOwner(group, pondHints, playerStripAbsY, tableCenterX, tableCenterY);
                 if (!onPlayerStrip && kind == SmallTileClassifier.Kind.LeftMeld && group.Count >= 5)
                     continue;
-                if (kind == SmallTileClassifier.Kind.PlayerMeld && !FaceLeafGroupAllowed(group))
-                    continue;
+                if (kind == SmallTileClassifier.Kind.PlayerMeld)
+                {
+                    var withCues = group
+                        .Concat(cluster.Where(t =>
+                            IconNodeScan.IsCallCueNode(t.NodeType, t.Width, t.Height, t.Rotation)
+                            && group.Any(g => Distance(g, t) < 80f)))
+                        .Distinct()
+                        .ToList();
+                    if (!OwnLeftoverFuuroAllowed(withCues, closedPackMaxAbsX, trays))
+                        continue;
+                }
+
                 result.Add(new Assignment(kind, group.Select(t => t.Id).ToList()));
             }
         }
@@ -106,8 +118,7 @@ public static class OpponentAreaClassifier
     internal static List<List<Tile>> SplitFuuroGroups(List<Tile> cluster, bool allowSplit)
     {
         if (cluster.Count is >= 2 and <= 4
-            && SmallTileClassifier.LooksLikeOpenMeld(cluster.Select(ToSmall).ToList())
-            && (!allowSplit || FaceLeafGroupAllowed(cluster)))
+            && SmallTileClassifier.LooksLikeOpenMeld(cluster.Select(ToSmall).ToList()))
             return [cluster];
 
         if (!allowSplit || cluster.Count < 3)
@@ -125,8 +136,7 @@ public static class OpponentAreaClassifier
             {
                 var four = ordered.GetRange(i, 4);
                 var meld4 = MeldClassifier.InferMeld(four.Select(t => t.TileCode!).ToList());
-                if (meld4 != null && meld4.Type.StartsWith("KAN", StringComparison.Ordinal)
-                    && FaceLeafGroupAllowed(four))
+                if (meld4 != null && meld4.Type.StartsWith("KAN", StringComparison.Ordinal))
                 {
                     groups.Add(four);
                     i += 4;
@@ -137,8 +147,7 @@ public static class OpponentAreaClassifier
             if (ordered.Count - i >= 3)
             {
                 var three = ordered.GetRange(i, 3);
-                if (MeldClassifier.InferMeld(three.Select(t => t.TileCode!).ToList()) != null
-                    && FaceLeafGroupAllowed(three))
+                if (MeldClassifier.InferMeld(three.Select(t => t.TileCode!).ToList()) != null)
                 {
                     groups.Add(three);
                     i += 3;
@@ -266,7 +275,24 @@ public static class OpponentAreaClassifier
 
     private static int BandY(Tile tile) => (int)MathF.Round(AbsYOf(tile) / 20f) * 20;
 
-    private static bool FaceLeafGroupAllowed(IReadOnlyList<Tile> group)
-        => IconNodeScan.FaceLeafGroupHasCallCue(
-            group, t => t.NodeType, t => t.Width, t => t.Height, t => t.Rotation);
+    private static bool OwnLeftoverFuuroAllowed(
+        IReadOnlyList<Tile> group, float? packMaxAbsX, IReadOnlyList<IconNodeScan.Tray>? trays)
+    {
+        var leftover = group
+            .Where(t => IconNodeScan.IsFaceLeaf(t.NodeType, t.Width, t.Height)
+                        || t.NodeType == IconNodeScan.CallCueNodeType)
+            .ToList();
+        if (leftover.Count == 0)
+            return true;
+
+        return IconNodeScan.IsPlausibleOwnLeftoverFuuro(
+            leftover,
+            packMaxAbsX,
+            trays,
+            t => t.Width,
+            t => t.Height,
+            t => t.Rotation,
+            t => HasAbs(t) ? t.AbsX : t.X,
+            t => HasAbs(t) ? t.AbsY : t.Y);
+    }
 }

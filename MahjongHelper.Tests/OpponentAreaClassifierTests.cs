@@ -434,16 +434,18 @@ public class OpponentAreaClassifierTests
             Area(13, 0, 0, 660, 500, 40, 52, parent: 60, "GREEN", nodeType: 2),
             Area(14, 0, 0, 700, 500, 40, 52, parent: 60, "GREEN", nodeType: 2),
             Area(15, 0, 0, 740, 500, 40, 52, parent: 60, "M3", nodeType: 2),
-            Area(16, 0, 0, 1391, 980, 40, 52, parent: 80, "WEST", nodeType: 2),
-            Area(17, 0, 0, 1442, 980, 40, 52, parent: 80, "WEST", nodeType: 2),
-            Area(18, 0, 0, 1484, 980, 40, 52, parent: 80, "WEST", nodeType: 2),
-            Area(19, 0, 0, 1531, 980, 40, 52, parent: 81, "M2", nodeType: 2),
-            Area(20, 0, 0, 1582, 980, 40, 52, parent: 81, "M1", nodeType: 2),
-            Area(21, 0, 0, 1624, 980, 52, 40, parent: 81, "M3", nodeType: 2),
-            Area(22, 0, 0, 1400, 1139, 40, 52, parent: 90, "WEST", nodeType: 2),
-            Area(23, 0, 0, 1440, 1139, 40, 52, parent: 90, "WEST", nodeType: 2),
-            Area(24, 0, 0, 1480, 1139, 40, 52, parent: 90, "M9", nodeType: 2),
-            Area(25, 0, 0, 1520, 1139, 40, 52, parent: 90, "P5", nodeType: 2),
+            Area(16, 0, 0, 1385, 980, 42, 55, parent: 80, "WEST", nodeType: 1056, rotation: 4.712f),
+            Area(17, 0, 0, 1391, 980, 40, 52, parent: 80, "WEST", nodeType: 2),
+            Area(18, 0, 0, 1442, 980, 40, 52, parent: 80, "WEST", nodeType: 2),
+            Area(19, 0, 0, 1484, 980, 40, 52, parent: 80, "WEST", nodeType: 2),
+            Area(20, 0, 0, 1525, 980, 42, 55, parent: 81, "M2", nodeType: 1056, rotation: 4.712f),
+            Area(21, 0, 0, 1531, 980, 40, 52, parent: 81, "M2", nodeType: 2),
+            Area(22, 0, 0, 1582, 980, 40, 52, parent: 81, "M1", nodeType: 2),
+            Area(23, 0, 0, 1624, 980, 40, 52, parent: 81, "M3", nodeType: 2),
+            Area(24, 0, 0, 1400, 1139, 40, 52, parent: 90, "WEST", nodeType: 2),
+            Area(25, 0, 0, 1440, 1139, 40, 52, parent: 90, "WEST", nodeType: 2),
+            Area(26, 0, 0, 1480, 1139, 40, 52, parent: 90, "M9", nodeType: 2),
+            Area(27, 0, 0, 1520, 1139, 40, 52, parent: 90, "P5", nodeType: 2),
         };
         var ponds = new[]
         {
@@ -452,12 +454,15 @@ public class OpponentAreaClassifierTests
             new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.RightDiscard, 820, 400),
             new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.LeftDiscard, 90, 380),
         };
+        var trays = new[] { new IconNodeScan.Tray(1520, 972, 140, 55) };
 
-        var assignments = OpponentAreaClassifier.Classify(leftovers, ponds, playerStripAbsY: 972);
+        var assignments = OpponentAreaClassifier.Classify(
+            leftovers, ponds, playerStripAbsY: 972, closedPackMaxAbsX: 1327, trays: trays);
         Assert.DoesNotContain(assignments, a => a.Kind == SmallTileClassifier.Kind.LeftMeld);
         Assert.DoesNotContain(assignments, a => a.TileIds.Contains(3));
         Assert.DoesNotContain(assignments, a => a.TileIds.Any(id => id is >= 4 and <= 15));
-        Assert.DoesNotContain(assignments, a => a.TileIds.Any(id => id is >= 22 and <= 25));
+        Assert.DoesNotContain(assignments, a => a.TileIds.Any(id => id is >= 24 and <= 27));
+        Assert.DoesNotContain(assignments, a => a.TileIds.Any(id => id is >= 16 and <= 19));
 
         var across = Assert.Single(assignments, a => a.Kind == SmallTileClassifier.Kind.OppositeMeld);
         Assert.Equal([0, 1, 2], across.TileIds);
@@ -465,10 +470,12 @@ public class OpponentAreaClassifierTests
         Assert.Equal("CHI", MeldClassifier.InferMeld(acrossCodes)!.Type);
 
         var own = Assert.Single(assignments, a => a.Kind == SmallTileClassifier.Kind.PlayerMeld);
-        Assert.Equal([19, 20, 21], own.TileIds);
-        Assert.DoesNotContain(assignments, a => a.TileIds.Any(id => id is >= 16 and <= 18));
-        var ownCodes = own.TileIds.Select(id => leftovers[id].TileCode!).ToList();
-        Assert.Equal("CHI", MeldClassifier.InferMeld(ownCodes)!.Type);
+        var manCodes = own.TileIds.Select(id => leftovers[id].TileCode!).Where(c => c!.StartsWith('M')).Distinct().ToList();
+        Assert.Contains("M1", manCodes);
+        Assert.Contains("M2", manCodes);
+        Assert.Contains("M3", manCodes);
+        Assert.DoesNotContain(own.TileIds, id => leftovers[id].TileCode == "WEST");
+        Assert.Equal("CHI", MeldClassifier.InferMeld(manCodes)!.Type);
 
         var summary = SolverJson.BuildSnapSummary(new SuggestMoveRequest
         {
@@ -497,6 +504,6 @@ public class OpponentAreaClassifierTests
 
     private static OpponentAreaClassifier.Tile Area(
         int id, float x, float y, float absX, float absY, int width, int height,
-        uint parent, string code, ushort nodeType = 1055)
-        => new(id, x, y, absX, absY, width, height, 0, parent, code, nodeType);
+        uint parent, string code, ushort nodeType = 1055, float rotation = 0)
+        => new(id, x, y, absX, absY, width, height, rotation, parent, code, nodeType);
 }

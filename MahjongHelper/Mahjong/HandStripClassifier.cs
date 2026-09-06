@@ -36,7 +36,7 @@ public static class HandStripClassifier
         int? DrawId,
         IReadOnlyList<IReadOnlyList<int>> MeldGroups);
 
-    public static Result Split(IReadOnlyList<Tile> tiles)
+    public static Result Split(IReadOnlyList<Tile> tiles, IReadOnlyList<IconNodeScan.Tray>? trays = null)
     {
         if (tiles == null || tiles.Count == 0)
             return new Result([], null, []);
@@ -56,6 +56,9 @@ public static class HandStripClassifier
         if (row.Count == 0)
             row = usable.OrderBy(LayoutX).ThenBy(t => t.Id).ToList();
 
+        var pack = ReservedClosedPack(row);
+        float? packMaxAbsX = pack.Count >= 7 ? pack.Max(LayoutX) : null;
+
         var melded = new HashSet<int>();
         var meldGroups = new List<List<int>>();
 
@@ -63,6 +66,8 @@ public static class HandStripClassifier
         {
             var members = group.ToList();
             if (members.Count == 0)
+                return;
+            if (!OwnLeftoverFuuroAllowed(members, packMaxAbsX, trays))
                 return;
 
             foreach (var tile in members)
@@ -113,8 +118,7 @@ public static class HandStripClassifier
             for (var i = 1; i < clusters.Count; i++)
             {
                 if (clusters[i].Count >= 2
-                    && (peelDraw == null || clusters[i].All(t => t.Id != peelDraw.Value.Id))
-                    && FaceLeafGroupAllowed(clusters[i]))
+                    && (peelDraw == null || clusters[i].All(t => t.Id != peelDraw.Value.Id)))
                     AddMeld(clusters[i]);
             }
         }
@@ -161,7 +165,7 @@ public static class HandStripClassifier
         {
             if (group.Key == 0 || group.Key == primary)
                 continue;
-            if (group.Count() >= 2 && FaceLeafGroupAllowed(group))
+            if (group.Count() >= 2)
                 addMeld(group);
         }
     }
@@ -303,8 +307,7 @@ public static class HandStripClassifier
             {
                 var four = ordered.GetRange(i, 4);
                 var meld4 = MeldClassifier.InferMeld(four.Select(t => t.TileCode!).ToList());
-                if (meld4 != null && meld4.Type.StartsWith("KAN", StringComparison.Ordinal)
-                    && FaceLeafGroupAllowed(four))
+                if (meld4 != null && meld4.Type.StartsWith("KAN", StringComparison.Ordinal))
                 {
                     addMeld(four);
                     i += 4;
@@ -315,8 +318,7 @@ public static class HandStripClassifier
             if (ordered.Count - i >= 3)
             {
                 var three = ordered.GetRange(i, 3);
-                if (MeldClassifier.InferMeld(three.Select(t => t.TileCode!).ToList()) != null
-                    && FaceLeafGroupAllowed(three))
+                if (MeldClassifier.InferMeld(three.Select(t => t.TileCode!).ToList()) != null)
                 {
                     addMeld(three);
                     i += 3;
@@ -326,8 +328,7 @@ public static class HandStripClassifier
 
             if (ordered.Count - i >= 2
                 && SameKey(ordered[i], ordered[i + 1])
-                && (ordered.Count - i == 2 || !SameKey(ordered[i], ordered[i + 2]))
-                && FaceLeafGroupAllowed(ordered.GetRange(i, 2)))
+                && (ordered.Count - i == 2 || !SameKey(ordered[i], ordered[i + 2])))
             {
                 addMeld(ordered.GetRange(i, 2));
                 i += 2;
@@ -374,9 +375,10 @@ public static class HandStripClassifier
 
     private static IEnumerable<Tile> UniqueX(IEnumerable<Tile> tiles)
         => tiles
-            .GroupBy(t => (int)Math.Round(LayoutX(t) / 2f) * 2)
+            .GroupBy(t => (int)MathF.Round(LayoutX(t) / IconNodeScan.LeafSnapPx))
             .Select(g => g
-                .OrderByDescending(IsRotated)
+                .OrderByDescending(t => IconNodeScan.IsFaceLeaf(t.NodeType, t.Width, t.Height))
+                .ThenByDescending(IsRotated)
                 .ThenBy(t => t.Id)
                 .First());
 
@@ -430,7 +432,24 @@ public static class HandStripClassifier
                MeldClassifier.CanonicalKey(b.TileCode!),
                StringComparison.Ordinal);
 
-    private static bool FaceLeafGroupAllowed(IEnumerable<Tile> group)
-        => IconNodeScan.FaceLeafGroupHasCallCue(
-            group, t => t.NodeType, t => t.Width, t => t.Height, t => t.Rotation);
+    private static bool OwnLeftoverFuuroAllowed(
+        IReadOnlyList<Tile> group, float? packMaxAbsX, IReadOnlyList<IconNodeScan.Tray>? trays)
+    {
+        var leftover = group
+            .Where(t => IconNodeScan.IsFaceLeaf(t.NodeType, t.Width, t.Height)
+                        || t.NodeType == IconNodeScan.CallCueNodeType)
+            .ToList();
+        if (leftover.Count == 0)
+            return true;
+
+        return IconNodeScan.IsPlausibleOwnLeftoverFuuro(
+            leftover,
+            packMaxAbsX,
+            trays,
+            t => t.Width,
+            t => t.Height,
+            t => t.Rotation,
+            LayoutX,
+            LayoutY);
+    }
 }

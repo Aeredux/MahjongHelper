@@ -18,8 +18,12 @@ public static class IconNodeScan
     public const int MaxTilePx = 80;
     public const float LeafSnapPx = 8f;
     public const ushort ImageNodeType = 2;
+    public const ushort CallCueNodeType = 1056;
+    public const ushort FuuroTrayNodeType = 1060;
     public const int FaceLeafShortPx = 40;
     public const int FaceLeafLongPx = 52;
+    public const int ClosedTileWidthPx = 42;
+    public const float OwnFuuroPackGapPx = 40f;
 
     public static bool IsMahjongTileIcon(uint iconId)
         => iconId >= MinMahjongIcon && iconId <= MaxMahjongIcon;
@@ -45,26 +49,92 @@ public static class IconNodeScan
                || (width == FaceLeafLongPx && height == FaceLeafShortPx));
 
     /// <summary>
-    /// Open fuuro always has a sideways called tile. Live AZPC after 99e663f
-    /// invented PON WEST from three upright type-2 40×52 ghosts on the player
-    /// band (no 52×40 / 90° cue). Real own CHI had one 52×40 leaf.
+    /// Open fuuro always has a sideways called tile. Doman often puts that
+    /// flag on a type-1056 sibling (Rotation≈4.712 / 270°) instead of a
+    /// type-2 52×40 leaf.
     /// </summary>
     public static bool HasCallCue(int width, int height, float rotation = 0)
         => SmallTileClassifier.IsSideways(rotation, width, height);
 
+    public static bool IsCallCueNode(ushort nodeType, int width, int height, float rotation)
+        => nodeType == CallCueNodeType && HasCallCue(width, height, rotation);
+
+    public static bool IsFuuroTray(ushort nodeType, int width, int height)
+        => nodeType == FuuroTrayNodeType && width >= 100 && height >= 45 && height <= 80;
+
+    public readonly record struct Tray(float AbsX, float AbsY, int Width, int Height);
+
+    public static bool ClusterHasCallCue<T>(
+        IEnumerable<T> tiles,
+        Func<T, int> width,
+        Func<T, int> height,
+        Func<T, float> rotation)
+        => tiles.Any(t => HasCallCue(width(t), height(t), rotation(t)));
+
+    /// <summary>Kept for tests; now any sideways sibling counts, including type-1056.</summary>
     public static bool FaceLeafGroupHasCallCue<T>(
         IEnumerable<T> tiles,
         Func<T, ushort> nodeType,
         Func<T, int> width,
         Func<T, int> height,
         Func<T, float> rotation)
+        => ClusterHasCallCue(tiles, width, height, rotation);
+
+    public static bool ClusterCoveredByTray<T>(
+        IReadOnlyList<T> tiles,
+        IReadOnlyList<Tray>? trays,
+        Func<T, float> absX,
+        Func<T, float> absY,
+        Func<T, int> width,
+        Func<T, int> height)
     {
-        var list = tiles.ToList();
-        if (list.Count == 0)
+        if (trays == null || trays.Count == 0 || tiles.Count == 0)
             return false;
-        if (!list.All(t => IsFaceLeaf(nodeType(t), width(t), height(t))))
-            return true;
-        return list.Any(t => HasCallCue(width(t), height(t), rotation(t)));
+
+        var centers = tiles
+            .Select(t => (X: absX(t) + width(t) * 0.5f, Y: absY(t) + height(t) * 0.5f))
+            .ToList();
+        foreach (var tray in trays)
+        {
+            var covered = centers.Count(c =>
+                c.X >= tray.AbsX && c.X <= tray.AbsX + tray.Width
+                && c.Y >= tray.AbsY && c.Y <= tray.AbsY + tray.Height);
+            if (covered >= 2)
+                return true;
+        }
+
+        return false;
+    }
+
+    public static bool ClusterRightOfClosedPack<T>(
+        IReadOnlyList<T> tiles,
+        float? packMaxAbsX,
+        Func<T, float> absX)
+    {
+        if (packMaxAbsX is not float max || tiles.Count == 0)
+            return false;
+        return tiles.Min(absX) >= max + ClosedTileWidthPx + OwnFuuroPackGapPx;
+    }
+
+    /// <summary>
+    /// Own leftover type-2 / 1056 groups are real fuuro only when they have a
+    /// call cue and either sit in a type-1060 tray or start past the closed
+    /// 1055 pack. Ghost WEST 1056+type-2 at AbsX≈1385–1484 fails both.
+    /// </summary>
+    public static bool IsPlausibleOwnLeftoverFuuro<T>(
+        IReadOnlyList<T> tiles,
+        float? packMaxAbsX,
+        IReadOnlyList<Tray>? trays,
+        Func<T, int> width,
+        Func<T, int> height,
+        Func<T, float> rotation,
+        Func<T, float> absX,
+        Func<T, float> absY)
+    {
+        if (!ClusterHasCallCue(tiles, width, height, rotation))
+            return false;
+        return ClusterCoveredByTray(tiles, trays, absX, absY, width, height)
+               || ClusterRightOfClosedPack(tiles, packMaxAbsX, absX);
     }
 
     /// <summary>
