@@ -39,4 +39,49 @@ public class IconNodeScanTests
         Assert.Equal(2, kept.Count);
         Assert.DoesNotContain(kept, n => n.Type == 1045 && n.Width == 34);
     }
+
+    [Fact]
+    public void TileSized_is_a_discovery_window_not_a_fuuro_type()
+    {
+        Assert.True(IconNodeScan.IsTileSized(42, 55));
+        Assert.True(IconNodeScan.IsTileSized(34, 45));
+        Assert.True(IconNodeScan.IsTileSized(40, 52));
+        Assert.True(IconNodeScan.IsTileSized(55, 42));
+        Assert.False(IconNodeScan.IsTileSized(200, 80));
+        Assert.False(IconNodeScan.IsTileSized(8, 8));
+        Assert.False(IconNodeScan.IsTileSized(42, 200));
+    }
+
+    [Fact]
+    public void PreferLeafTiles_keeps_the_smaller_node_at_the_same_spot()
+    {
+        var nodes = new (uint Icon, float X, float Y, int W, int H)[]
+        {
+            (76050, 520, 46, 200, 80),
+            (76050, 520, 46, 40, 52),
+            (76050, 560, 46, 40, 52),
+            (76050, 600, 46, 40, 52),
+        };
+
+        var kept = IconNodeScan.PreferLeafTiles(nodes, n => n.Icon, n => n.X, n => n.Y, n => n.W, n => n.H);
+        Assert.Equal(3, kept.Count);
+        Assert.DoesNotContain(kept, n => n.W == 200);
+        Assert.All(kept, n => Assert.Equal(40, n.W));
+    }
+
+    [Fact]
+    public void DropContainers_removes_a_tray_that_covers_three_tiles()
+    {
+        var nodes = new (float X, float Y, int W, int H)[]
+        {
+            (500, 40, 200, 80),
+            (520, 46, 40, 52),
+            (560, 46, 40, 52),
+            (600, 46, 40, 52),
+        };
+
+        var kept = IconNodeScan.DropContainers(nodes, n => n.X, n => n.Y, n => n.W, n => n.H);
+        Assert.Equal(3, kept.Count);
+        Assert.DoesNotContain(kept, n => n.W == 200);
+    }
 }

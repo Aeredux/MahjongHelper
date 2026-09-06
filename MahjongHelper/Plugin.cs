@@ -1274,6 +1274,7 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
             object[] leftMeldSlots = Array.Empty<object>();
             object[] opponentMeldCandidates = Array.Empty<object>();
             object[] allIconNodes = Array.Empty<object>();
+            object[] tileSizedNodes = Array.Empty<object>();
 
             unsafe
             {
@@ -1313,6 +1314,9 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
                     .Select(DumpUiSlot)
                     .ToArray();
                 allIconNodes = (_lastUiState.AllIconNodes ?? Array.Empty<EmjUiReader.UiSlot>())
+                    .Select(DumpUiSlot)
+                    .ToArray();
+                tileSizedNodes = (_lastUiState.TileSizedNodes ?? Array.Empty<EmjUiReader.UiSlot>())
                     .Select(DumpUiSlot)
                     .ToArray();
             }
@@ -1371,10 +1375,11 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
                 },
                 opponentMeldCandidates,
                 allIconNodes,
+                tileSizedNodes,
             };
 
             var path = SnapCapture.WriteJson(payload);
-            var msg = $"[SNAP] wrote {path} phase={payload.phase} sug={suggestion?.Type}:{suggestion?.TileName} icon={suggestion?.TileIconId} pending={_autoPlayManager.PendingAction} atk0={rawAtk0} icons={allIconNodes.Length}";
+            var msg = $"[SNAP] wrote {path} phase={payload.phase} sug={suggestion?.Type}:{suggestion?.TileName} icon={suggestion?.TileIconId} pending={_autoPlayManager.PendingAction} atk0={rawAtk0} icons={allIconNodes.Length} tileSized={tileSizedNodes.Length}";
             LogToFile("autoplay.log", msg);
             Log.Information(msg);
         }
@@ -1425,6 +1430,7 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
         s.ParentNodeId,
         s.IconId,
         s.TileCode,
+        s.WalkDepth,
     };
 
     private void LeaveStuckMatch()

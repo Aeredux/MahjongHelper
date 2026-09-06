@@ -371,6 +371,45 @@ public class OpponentAreaClassifierTests
         Assert.Contains("seat=EAST", summary);
     }
 
+    [Fact]
+    public void Nested_image_nodes_any_type_still_seat_own_chi_and_across_pon()
+    {
+        // After 78fd2f1 the live sidecar had no 42×55 leftovers. Fuuro may
+        // only appear as nested Image (type 2) or other wrappers once the
+        // addon tree is deep-walked. The 7-tile type-1045 34×45 echo stays out.
+        var leftovers = new List<OpponentAreaClassifier.Tile>
+        {
+            Area(0, 0, 0, 200, 512, 34, 45, parent: 60, "M4", nodeType: 1045),
+            Area(1, 34, 0, 234, 512, 34, 45, parent: 60, "M5", nodeType: 1045),
+            Area(2, 68, 0, 268, 512, 34, 45, parent: 60, "P6", nodeType: 1045),
+            Area(3, 102, 0, 302, 512, 34, 45, parent: 60, "P6", nodeType: 1045),
+            Area(4, 136, 0, 336, 512, 34, 45, parent: 60, "S5", nodeType: 1045),
+            Area(5, 170, 0, 370, 512, 34, 45, parent: 60, "S6", nodeType: 1045),
+            Area(6, 204, 0, 404, 512, 34, 45, parent: 60, "S7", nodeType: 1045),
+            Area(7, 0, 0, 820, 972, 36, 48, parent: 80, "S2", nodeType: 2),
+            Area(8, 36, 0, 856, 972, 36, 48, parent: 80, "S3", nodeType: 2),
+            Area(9, 72, 0, 892, 972, 48, 36, parent: 80, "S4", nodeType: 2),
+            Area(10, 0, 0, 520, 48, 36, 48, parent: 200, "S2", nodeType: 2),
+            Area(11, 36, 0, 556, 62, 48, 36, parent: 200, "S2", nodeType: 2),
+            Area(12, 72, 0, 592, 48, 36, 48, parent: 200, "S2", nodeType: 2),
+        };
+        var ponds = new[]
+        {
+            new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.PlayerDiscard, 400, 972),
+            new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.OppositeDiscard, 420, 180),
+            new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.RightDiscard, 820, 400),
+            new OpponentAreaClassifier.PondHint(SmallTileClassifier.Kind.LeftDiscard, 90, 380),
+        };
+
+        var assignments = OpponentAreaClassifier.Classify(leftovers, ponds, playerStripAbsY: 972);
+        Assert.DoesNotContain(assignments, a => a.Kind == SmallTileClassifier.Kind.LeftMeld);
+        Assert.DoesNotContain(assignments, a => a.TileIds.Any(id => id <= 6));
+        var own = Assert.Single(assignments, a => a.Kind == SmallTileClassifier.Kind.PlayerMeld);
+        var across = Assert.Single(assignments, a => a.Kind == SmallTileClassifier.Kind.OppositeMeld);
+        Assert.Equal([7, 8, 9], own.TileIds);
+        Assert.Equal([10, 11, 12], across.TileIds);
+    }
+
     private static OpponentAreaClassifier.Tile Area(
         int id, float x, float y, float absX, float absY, int width, int height,
         uint parent, string code, ushort nodeType = 1055)

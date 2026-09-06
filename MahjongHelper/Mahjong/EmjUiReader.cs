@@ -143,14 +143,16 @@ public static unsafe class EmjUiReader
         uint ParentNodeId = 0,
         bool Tsumogiri = false,
         float AbsX = 0,
-        float AbsY = 0);
+        float AbsY = 0,
+        int WalkDepth = 0);
 
     public sealed record UiState(
         IReadOnlyList<UiSlot> Slots,
         UiGameInfo GameInfo,
         DateTime UtcCapturedAt,
         IReadOnlyList<UiSlot>? OpponentMeldCandidates = null,
-        IReadOnlyList<UiSlot>? AllIconNodes = null)
+        IReadOnlyList<UiSlot>? AllIconNodes = null,
+        IReadOnlyList<UiSlot>? TileSizedNodes = null)
     {
         public string ToDisplayText()
         {
@@ -435,14 +437,14 @@ public static unsafe class EmjUiReader
         ApplyHandStripMeldSplit(slots, rawHand, extraStrip);
 
         // Live AZPC after 78fd2f1: visible fuuro was not 42×55 / 55×42 / 34×45.
-        // Walk every icon-bearing node (any type/size, plus component children)
-        // and classify leftovers that InferMeld.
-        var allIconNodes = ScanAllIconNodes(addon, iconCapture, iconMap);
-        var opponentMeldCandidates = ClassifyOpponentAreaMelds(slots, extraStrip, smallTiles, allIconNodes);
+        // Deep-walk every UldManager / child list for icon-bearing nodes and
+        // classify leftovers that InferMeld. Keep the 34×45 type-1045 echo out.
+        var scanned = ScanAddonNodes(addon, iconCapture, iconMap);
+        var opponentMeldCandidates = ClassifyOpponentAreaMelds(slots, extraStrip, smallTiles, scanned.IconNodes);
 
         var gameInfo = ReadGameInfo(addon, iconCapture, iconMap);
 
-        return new UiState(slots, gameInfo, DateTime.UtcNow, opponentMeldCandidates, allIconNodes);
+        return new UiState(slots, gameInfo, DateTime.UtcNow, opponentMeldCandidates, scanned.IconNodes, scanned.TileSizedNodes);
     }
 
     /// <summary>
@@ -489,23 +491,35 @@ public static unsafe class EmjUiReader
         List<UiSlot> slots, List<UiSlot> extraStrip, List<UiSlot> smallTiles, List<UiSlot>? allIconNodes = null)
     {
         var claimed = new HashSet<int>();
+        var claimedPos = new HashSet<(int X, int Y)>();
         foreach (var slot in slots)
         {
             if (slot.Kind is SlotKind.CanonicalPlayerHand or SlotKind.CanonicalPlayerDraw
                 or SlotKind.PlayerMeld or SlotKind.RightMeld or SlotKind.OppositeMeld or SlotKind.LeftMeld
                 or SlotKind.PlayerDiscard or SlotKind.RightDiscard or SlotKind.OppositeDiscard or SlotKind.LeftDiscard
                 or SlotKind.DoraIndicator)
+            {
                 claimed.Add(slot.NodeIndex);
+                claimedPos.Add(SnapPos(slot));
+            }
         }
+
+        static float AbsOfX(UiSlot s) => s.AbsX != 0 || s.AbsY != 0 ? s.AbsX : s.X;
+        static float AbsOfY(UiSlot s) => s.AbsX != 0 || s.AbsY != 0 ? s.AbsY : s.Y;
+        static (int X, int Y) SnapPos(UiSlot s)
+            => ((int)MathF.Round(AbsOfX(s) / IconNodeScan.LeafSnapPx),
+                (int)MathF.Round(AbsOfY(s) / IconNodeScan.LeafSnapPx));
 
         var candidates = new List<UiSlot>();
         void Consider(UiSlot slot)
         {
             if (!slot.Visible || slot.IconId == 0 || !IconNodeScan.IsMahjongTileIcon(slot.IconId))
                 return;
-            if (claimed.Contains(slot.NodeIndex))
+            if (claimed.Contains(slot.NodeIndex) || claimedPos.Contains(SnapPos(slot)))
                 return;
             if (slot.NodeType is 1009 or 1006 or 1021 or 1022 or 1023 or 1024)
+                return;
+            if (IconNodeScan.IsType1045PondEcho(slot.NodeType, slot.Width, slot.Height))
                 return;
             if (candidates.Any(c => c.NodeIndex == slot.NodeIndex && c.IconId == slot.IconId
                                     && Math.Abs(c.AbsX - slot.AbsX) < 1 && Math.Abs(c.AbsY - slot.AbsY) < 1))
@@ -524,6 +538,22 @@ public static unsafe class EmjUiReader
             foreach (var slot in allIconNodes)
                 Consider(slot);
         }
+
+        candidates = IconNodeScan.DropContainers(
+                candidates,
+                AbsOfX,
+                AbsOfY,
+                s => s.Width,
+                s => s.Height)
+            .ToList();
+        candidates = IconNodeScan.PreferLeafTiles(
+                candidates,
+                s => s.IconId,
+                AbsOfX,
+                AbsOfY,
+                s => s.Width,
+                s => s.Height)
+            .ToList();
 
         var pondHints = new List<OpponentAreaClassifier.PondHint>();
         foreach (var pondKind in new[] { SlotKind.PlayerDiscard, SlotKind.RightDiscard, SlotKind.OppositeDiscard, SlotKind.LeftDiscard })
@@ -1849,74 +1879,103 @@ public static unsafe class EmjUiReader
         return true;
     }
 
+    public readonly record struct AddonNodeScan(List<UiSlot> IconNodes, List<UiSlot> TileSizedNodes);
+
     /// <summary>
-    /// Every NodeList entry (and component child images) that currently carries
-    /// a mahjong tile icon. No type or size filter — used by /mj snap so live
-    /// fuuro nodes can be identified instead of guessed.
+    /// Deep-walk every addon NodeList, nested component UldManager, RootNode
+    /// sibling chain, and ChildNode list. Records:
+    ///   IconNodes — any node whose texture resolves to a mahjong tile icon
+    ///               (no type/size filter; includes hidden nodes)
+    ///   TileSizedNodes — visible 16–80px nodes, even when icon id is 0
+    /// so /mj snap can show where live fuuro actually lives.
     /// </summary>
-    public static List<UiSlot> ScanAllIconNodes(AtkUnitBase* addon, IconIdCapture? iconCapture, MahjongIconMap? iconMap)
+    public static AddonNodeScan ScanAddonNodes(AtkUnitBase* addon, IconIdCapture? iconCapture, MahjongIconMap? iconMap)
     {
-        var result = new List<UiSlot>();
+        var icons = new List<UiSlot>();
+        var tileSized = new List<UiSlot>();
         if (addon == null)
-            return result;
+            return new AddonNodeScan(icons, tileSized);
 
         var seen = new HashSet<nint>();
-        var uld = addon->UldManager;
-        for (int i = 0; i < uld.NodeListCount; i++)
-        {
-            var node = uld.NodeList[i];
-            if (node == null)
-                continue;
-            TryCollectIconNode(node, i, iconCapture, iconMap, result, seen);
-            if ((int)node->Type < 1000)
-                continue;
-            try
-            {
-                var comp = (AtkComponentNode*)node;
-                if (comp->Component == null)
-                    continue;
-                var childUld = comp->Component->UldManager;
-                for (int j = 0; j < childUld.NodeListCount && j < 64; j++)
-                {
-                    var child = childUld.NodeList[j];
-                    if (child == null)
-                        continue;
-                    TryCollectIconNode(child, 100_000 + i * 64 + j, iconCapture, iconMap, result, seen);
-                }
-            }
-            catch
-            {
-            }
-        }
-
-        return result;
+        var nextIndex = 1_000_000;
+        WalkUld(addon->UldManager, 0, iconCapture, iconMap, icons, tileSized, seen, ref nextIndex);
+        return new AddonNodeScan(icons, tileSized);
     }
 
-    private static void TryCollectIconNode(
-        AtkResNode* node,
-        int nodeIndex,
+    /// <summary>Back-compat wrapper used by older call sites / tests.</summary>
+    public static List<UiSlot> ScanAllIconNodes(AtkUnitBase* addon, IconIdCapture? iconCapture, MahjongIconMap? iconMap)
+        => ScanAddonNodes(addon, iconCapture, iconMap).IconNodes;
+
+    private static void WalkUld(
+        AtkUldManager uld,
+        int depth,
         IconIdCapture? iconCapture,
         MahjongIconMap? iconMap,
-        List<UiSlot> output,
-        HashSet<nint> seen)
+        List<UiSlot> icons,
+        List<UiSlot> tileSized,
+        HashSet<nint> seen,
+        ref int nextIndex)
     {
-        if (node == null || !seen.Add((nint)node))
+        if (depth > 8)
+            return;
+
+        try
+        {
+            var count = uld.NodeListCount;
+            for (int i = 0; i < count; i++)
+            {
+                var node = uld.NodeList[i];
+                if (node == null)
+                    continue;
+                var index = depth == 0 ? i : nextIndex++;
+                VisitIconNode(node, index, depth, iconCapture, iconMap, icons, tileSized, seen, ref nextIndex);
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            var sibling = uld.RootNode;
+            var steps = 0;
+            while (sibling != null && steps++ < 256)
+            {
+                VisitIconNode(sibling, nextIndex++, depth, iconCapture, iconMap, icons, tileSized, seen, ref nextIndex);
+                sibling = sibling->PrevSiblingNode;
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private static void VisitIconNode(
+        AtkResNode* node,
+        int nodeIndex,
+        int depth,
+        IconIdCapture? iconCapture,
+        MahjongIconMap? iconMap,
+        List<UiSlot> icons,
+        List<UiSlot> tileSized,
+        HashSet<nint> seen,
+        ref int nextIndex)
+    {
+        if (node == null || depth > 8 || !seen.Add((nint)node))
             return;
 
         uint iconId = 0;
         try { TryFindIcon(node, iconCapture, out iconId); }
-        catch { return; }
-        if (!IconNodeScan.IsMahjongTileIcon(iconId))
-            return;
+        catch { iconId = 0; }
 
         bool visible;
         try { visible = node->IsVisible(); }
         catch { visible = false; }
 
         var extras = ReadNodeExtras(node);
-        output.Add(new UiSlot(
+        var slot = new UiSlot(
             SlotKind.VisibleTileCandidate,
-            output.Count,
+            icons.Count + tileSized.Count,
             nodeIndex,
             node->NodeId,
             (ushort)node->Type,
@@ -1926,12 +1985,53 @@ public static unsafe class EmjUiReader
             node->Width,
             node->Height,
             iconId,
-            iconMap?.Resolve(iconId),
+            iconId > 0 ? iconMap?.Resolve(iconId) : null,
             extras.Rotation,
             extras.ParentNodeId,
             false,
             extras.AbsX,
-            extras.AbsY));
+            extras.AbsY,
+            depth);
+
+        if (IconNodeScan.IsMahjongTileIcon(iconId))
+            icons.Add(slot);
+        if (visible && IconNodeScan.IsTileSized(node->Width, node->Height))
+            tileSized.Add(slot);
+
+        if ((int)node->Type >= 1000)
+        {
+            try
+            {
+                var comp = (AtkComponentNode*)node;
+                if (comp->Component != null)
+                    WalkUld(comp->Component->UldManager, depth + 1, iconCapture, iconMap, icons, tileSized, seen, ref nextIndex);
+            }
+            catch
+            {
+            }
+        }
+
+        try
+        {
+            var child = node->ChildNode;
+            var steps = 0;
+            while (child != null && steps++ < 128)
+            {
+                VisitIconNode(child, nextIndex++, depth + 1, iconCapture, iconMap, icons, tileSized, seen, ref nextIndex);
+                child = child->PrevSiblingNode;
+            }
+
+            child = node->ChildNode != null ? node->ChildNode->NextSiblingNode : null;
+            steps = 0;
+            while (child != null && steps++ < 128)
+            {
+                VisitIconNode(child, nextIndex++, depth + 1, iconCapture, iconMap, icons, tileSized, seen, ref nextIndex);
+                child = child->NextSiblingNode;
+            }
+        }
+        catch
+        {
+        }
     }
 
     private static bool TryFindIcon(AtkResNode* root, IconIdCapture? capture, out uint iconId)
