@@ -21,8 +21,8 @@ The in-game **suggestion overlay** and **settings window** are KamiToolKit Nativ
   - Server provider (uses local HTTP API responses)
 - Talks to a local Mahjong server at `http://localhost:8080`:
   - `GET /api/health`
-  - `POST /api/suggest-move` (hand, draw, opponents, seat/round wind, plus KAN-54: `dora`, aka `M0`/`P0`/`S0`, `discard_tiles` own pond, real `tsumogiri`, own+opponent `melds`)
-  - `POST /api/evaluate-call`
+  - `POST /api/suggest-move` (hand, draw, opponents, seat/round wind, plus KAN-54: `dora`, aka `M0`/`P0`/`S0`, `discard_tiles` own pond, real `tsumogiri`, own+opponent `melds`; plus KAN-91 table meta below)
+  - `POST /api/evaluate-call` (same table meta as suggest-move)
   - `POST /api/validate-move`
 - Optional auto-play behavior:
   - auto-discard when it is your discard phase
@@ -41,7 +41,7 @@ Main command: `/mj`
 - `/mj auto` toggles auto-play.
 - `/mj pause` pauses/resumes pending auto-play actions.
 - `/mj leave` withdraws and closes a stuck NPC mahjong match (FireCallback 16 then 19). Overlay **Leave** asks for confirmation first.
-- `/mj snap` writes overlay/suggestion sidecar JSON under `%APPDATA%/MahjongHelper/captures/` (plus a `request_snap` file-watch fallback). It also writes the current solver POST body (`suggest-move`) to `%APPDATA%/MahjongHelper/solver_snap.json` and prints a field summary (dora, aka, own pond, tsumogiri count, melds, winds). JSON-only — it does **not** take a PNG. `scripts/mj-snap.ps1` POSTs Telesto ExecuteCommand to `http://localhost:45678/` (Host **localhost**, not `127.0.0.1`). Required telegram shape and the missing-`id` error are documented in [`docs/telesto.md`](docs/telesto.md). The plugin keeps the last 10 capture files. Use solver_snap.json with autoplay off after a Release rebuild + plugin reload.
+- `/mj snap` writes overlay/suggestion sidecar JSON under `%APPDATA%/MahjongHelper/captures/` (plus a `request_snap` file-watch fallback). It also writes the current solver POST body (`suggest-move`) to `%APPDATA%/MahjongHelper/solver_snap.json` and prints a field summary (dora, aka, own pond, tsumogiri count, melds, winds, honba, riichi sticks, round number, seat-relative scores). JSON-only — it does **not** take a PNG. `scripts/mj-snap.ps1` POSTs Telesto ExecuteCommand to `http://localhost:45678/` (Host **localhost**, not `127.0.0.1`). Required telegram shape and the missing-`id` error are documented in [`docs/telesto.md`](docs/telesto.md). The plugin keeps the last 10 capture files. Use solver_snap.json with autoplay off after a Release rebuild + plugin reload.
 - `/mj screenshot` (alias `/mj printscreen`) writes a PNG we control via **CaptureFallback** first (Dalamud viewport/backbuffer of the game scene, then GDI `PrintWindow`/`BitBlt` of the FFXIV HWND) — it does **not** wait ~5s on `ScheduleScreenShot`. Files land in `%APPDATA%/MahjongHelper/screenshots/mj-*.png` and are copied into cfg `ScreenShotDir` when writable. Chat names the method (`CaptureFallback/DalamudViewport`, `CaptureFallback/PrintWindow`, …). `/mj screenshot game` is the optional Square-writer path (async `ScheduleScreenShot`, FORCE-CLEAR / stuck recovery, then CaptureFallback). `/mj screenshot status` dumps CanTake / Requested / Result / LocationOnDisk / lastMethod / lastPath. `/mj snap` stays JSON-only (captures sidecar + `solver_snap.json`). Telesto is not required. Hide UI / Scroll Lock is **not** toggled.
 - `/mj mark discard` records a manual discard marker in diagnostics.
 - `/mj mark call` records a manual call marker in diagnostics.
@@ -113,6 +113,22 @@ Common files include:
 - `normalized_state_history.log` (deduped normalized state history)
 - `probe_history.log`, `probe_signals.log`, `tile_candidates.log` (reverse-engineering logs)
 - `mapping_progress_report.txt` (mapping/report export)
+
+## Solver table-meta fields (KAN-91 / KAN-92)
+
+Additive snake_case keys on both `/api/suggest-move` and `/api/evaluate-call`. Existing clients can ignore them. Aka stays `M0`/`P0`/`S0`; Doman dora is still sent as-is (no Tenhou +1).
+
+| JSON field | Type | Meaning |
+|---|---|---|
+| `honba` | int | Repeat counter (本場). **0 is valid and sent** when the UI has a reading. |
+| `riichi_sticks` | int | Sticks currently on the table. **0 is valid and sent** when known. |
+| `round_number` | int | Kyoku within the current wind (typically 1–4). |
+| `player_score` | int | Caller's score. Now on suggest-move as well as evaluate-call. |
+| `right_score` | int | Score for `opponents[0]` — seat to the player's Right. |
+| `opposite_score` | int | Score for `opponents[1]` — Opposite. |
+| `left_score` | int | Score for `opponents[2]` — Left. |
+
+Scores are **flat** (not a nested `scores` object) so they stay aligned with the existing `player_score` key and with seat-relative `opponents[]` order (Right / Opposite / Left). Missing readings are omitted (`null` is not written). Normalized state (`/mj` dump) and `/mj snap` / `server_log.txt` show the same fields mid-hand.
 
 ## Notes
 

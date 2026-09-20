@@ -805,6 +805,8 @@ public sealed partial class Plugin : IAsyncDalamudPlugin
             state.SeatWind.Value.ToString(),
             state.RoundWind.Value.ToString(),
             state.RoundNumber.Value.ToString(),
+            state.Honba.Value.ToString(),
+            state.RiichiSticks.Value.ToString(),
             state.PlayerScore.Value.ToString(),
             state.RightScore.Value.ToString(),
             state.OppositeScore.Value.ToString(),
