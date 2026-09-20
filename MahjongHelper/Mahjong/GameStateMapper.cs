@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -7,7 +8,7 @@ namespace MahjongHelper.Mahjong;
 /// Converts MahjongGameState into server API request objects.
 /// Aka tiles stay as M0/P0/S0. Doman dora panel tiles are sent as-is (no Tenhou remap).
 /// </summary>
-public static class GameStateMapper
+public static partial class GameStateMapper
 {
     private static readonly Dictionary<int, string> WindNames = new()
     {
@@ -22,13 +23,13 @@ public static class GameStateMapper
     /// Server expects 13 tiles in hand + separate drawn_tile.
     /// Returns null if there isn't enough data (no hand tiles).
     /// </summary>
-    public static SuggestMoveRequest? BuildSuggestMoveRequest(MahjongGameState state, MahjongIconMap iconMap)
+    public static SuggestMoveRequest? BuildSuggestMoveRequest(MahjongGameState state, Func<uint, string?> resolveTile)
     {
-        var hand = ResolveHand(state, iconMap);
+        var hand = ResolveHand(state, resolveTile);
         if (hand == null || hand.Count == 0)
             return null;
 
-        var drawnTile = ResolveDrawnTile(state, iconMap);
+        var drawnTile = ResolveDrawnTile(state, resolveTile);
 
         // hand should be 13 tiles, drawn_tile sent separately
         // If we have 14 tiles in hand and no separate drawn tile, split the last one
@@ -42,7 +43,7 @@ public static class GameStateMapper
         var playerPond = BuildPond(state.PlayerDiscards.Value, state.PlayerTsumogiri.Value);
         var player = BuildPlayerInfo(state, playerPond, playerMelds);
 
-        return new SuggestMoveRequest
+        var request = new SuggestMoveRequest
         {
             Hand = hand,
             DrawnTile = drawnTile,
@@ -54,6 +55,8 @@ public static class GameStateMapper
             Melds = playerMelds,
             Player = player,
         };
+        TableMeta.Apply(request, state);
+        return request;
     }
 
     /// <summary>
@@ -69,9 +72,9 @@ public static class GameStateMapper
     /// callType should be UPPERCASE: "RON", "PON", "CHI", "KAN", "TSUMO", "RIICHI".
     /// </summary>
     public static EvaluateCallRequest? BuildEvaluateCallRequest(
-        MahjongGameState state, MahjongIconMap iconMap, string? callTile, string? callType)
+        MahjongGameState state, Func<uint, string?> resolveTile, string? callTile, string? callType)
     {
-        var hand = ResolveHand(state, iconMap);
+        var hand = ResolveHand(state, resolveTile);
         if (hand == null || hand.Count == 0)
             return null;
 
@@ -79,13 +82,12 @@ public static class GameStateMapper
         var playerPond = BuildPond(state.PlayerDiscards.Value, state.PlayerTsumogiri.Value);
         var hasOpenMeld = playerMelds.Exists(m => MeldClassifier.IsOpenMeld(m.Type));
 
-        return new EvaluateCallRequest
+        var request = new EvaluateCallRequest
         {
             Hand = hand,
             CallTile = MeldClassifier.IsUsableTile(callTile) ? callTile : null,
             CallType = callType?.ToUpperInvariant(),
             Menzen = !hasOpenMeld,
-            PlayerScore = state.PlayerScore.Value is int ps and > 0 ? ps : null,
             Opponents = BuildOpponents(state),
             SeatWind = state.SeatWind.Value is int sw ? WindNames.GetValueOrDefault(sw) : null,
             RoundWind = state.RoundWind.Value is int rw ? WindNames.GetValueOrDefault(rw) : null,
@@ -94,12 +96,14 @@ public static class GameStateMapper
             Melds = playerMelds,
             Player = BuildPlayerInfo(state, playerPond, playerMelds),
         };
+        TableMeta.Apply(request, state);
+        return request;
     }
 
     /// <summary>
     /// Resolves the player's hand tile codes from icon IDs, preserving aka (M0/P0/S0).
     /// </summary>
-    private static List<string>? ResolveHand(MahjongGameState state, MahjongIconMap iconMap)
+    private static List<string>? ResolveHand(MahjongGameState state, Func<uint, string?> resolveTile)
     {
         if (state.HandIconIds.Value is not { Count: > 0 } iconIds)
             return null;
@@ -107,7 +111,7 @@ public static class GameStateMapper
         var tiles = new List<string>();
         foreach (var id in iconIds)
         {
-            var code = iconMap.Resolve(id);
+            var code = resolveTile(id);
             if (code != null)
                 tiles.Add(code);
         }
@@ -118,10 +122,10 @@ public static class GameStateMapper
     /// <summary>
     /// Resolves the drawn tile code from its icon ID, preserving aka (M0/P0/S0).
     /// </summary>
-    private static string? ResolveDrawnTile(MahjongGameState state, MahjongIconMap iconMap)
+    private static string? ResolveDrawnTile(MahjongGameState state, Func<uint, string?> resolveTile)
     {
         if (state.DrawIconId.Value is uint drawId and > 0)
-            return iconMap.Resolve(drawId);
+            return resolveTile(drawId);
         return null;
     }
 

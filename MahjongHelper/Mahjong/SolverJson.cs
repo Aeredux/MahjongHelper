@@ -38,8 +38,14 @@ public static class SolverJson
         if (request.Player != null)
             tsumogiri += request.Player.Discards.Count(d => d.Tsumogiri);
         var aka = CountAka(request);
-        return $"hand={request.Hand.Count} draw={request.DrawnTile ?? "-"} dora=[{dora}] pond=[{pond}] aka={aka} tsumogiri={tsumogiri} ownMelds={ownMelds} oppMelds={oppMelds} seat={request.SeatWind ?? "-"} round={request.RoundWind ?? "-"}";
+        var honba = FormatMeta(request.Honba);
+        var sticks = FormatMeta(request.RiichiSticks);
+        var kyoku = FormatMeta(request.RoundNumber);
+        var scores = $"P{FormatMeta(request.PlayerScore)}/R{FormatMeta(request.RightScore)}/O{FormatMeta(request.OppositeScore)}/L{FormatMeta(request.LeftScore)}";
+        return $"hand={request.Hand.Count} draw={request.DrawnTile ?? "-"} dora=[{dora}] pond=[{pond}] aka={aka} tsumogiri={tsumogiri} ownMelds={ownMelds} oppMelds={oppMelds} seat={request.SeatWind ?? "-"} round={request.RoundWind ?? "-"} honba={honba} riichi_sticks={sticks} round_number={kyoku} scores={scores}";
     }
+
+    private static string FormatMeta(int? value) => value.HasValue ? value.Value.ToString() : "-";
 
     public static int CountAka(SuggestMoveRequest request)
     {

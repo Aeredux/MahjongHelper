@@ -92,5 +92,39 @@ public class SolverJsonTests
         Assert.Contains("ownMelds=1", summary);
         Assert.Contains("seat=EAST", summary);
         Assert.Contains("round=EAST", summary);
+        Assert.Contains("honba=-", summary);
+        Assert.Contains("riichi_sticks=-", summary);
+        Assert.Contains("round_number=-", summary);
+        Assert.Contains("scores=P-/R-/O-/L-", summary);
+    }
+
+    [Fact]
+    public void Serialize_evaluate_call_includes_kan91_table_meta()
+    {
+        var request = new EvaluateCallRequest
+        {
+            Hand = ["M1", "M0"],
+            CallTile = "M1",
+            CallType = "PON",
+            Honba = 1,
+            RiichiSticks = 0,
+            RoundNumber = 3,
+            PlayerScore = 21000,
+            RightScore = 30000,
+            OppositeScore = 25000,
+            LeftScore = 24000,
+        };
+
+        var json = SolverJson.Serialize(request);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        Assert.Equal("M0", root.GetProperty("hand")[1].GetString());
+        Assert.Equal(1, root.GetProperty("honba").GetInt32());
+        Assert.Equal(0, root.GetProperty("riichi_sticks").GetInt32());
+        Assert.Equal(3, root.GetProperty("round_number").GetInt32());
+        Assert.Equal(21000, root.GetProperty("player_score").GetInt32());
+        Assert.Equal(30000, root.GetProperty("right_score").GetInt32());
+        Assert.Equal(25000, root.GetProperty("opposite_score").GetInt32());
+        Assert.Equal(24000, root.GetProperty("left_score").GetInt32());
     }
 }

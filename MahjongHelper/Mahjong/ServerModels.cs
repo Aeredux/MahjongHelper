@@ -5,7 +5,23 @@ namespace MahjongHelper.Mahjong;
 
 // ─── Request Models ───
 
-public sealed class SuggestMoveRequest
+/// <summary>
+/// Additive table-meta fields shared by suggest-move and evaluate-call (KAN-91 / KAN-92).
+/// Flat seat-relative scores match <c>opponents[]</c> order: Right, Opposite, Left.
+/// 0 is a valid honba / riichi-stick count and is serialized; missing values are omitted.
+/// </summary>
+public interface ITableMetaRequest
+{
+    int? Honba { get; set; }
+    int? RiichiSticks { get; set; }
+    int? RoundNumber { get; set; }
+    int? PlayerScore { get; set; }
+    int? RightScore { get; set; }
+    int? OppositeScore { get; set; }
+    int? LeftScore { get; set; }
+}
+
+public sealed class SuggestMoveRequest : ITableMetaRequest
 {
     [JsonPropertyName("hand")]
     public List<string> Hand { get; set; } = [];
@@ -45,6 +61,33 @@ public sealed class SuggestMoveRequest
     /// </summary>
     [JsonPropertyName("player")]
     public OpponentInfo? Player { get; set; }
+
+    /// <summary>Repeat counter (本場). 0 is valid and sent when known.</summary>
+    [JsonPropertyName("honba")]
+    public int? Honba { get; set; }
+
+    /// <summary>Riichi sticks currently on the table. 0 is valid and sent when known.</summary>
+    [JsonPropertyName("riichi_sticks")]
+    public int? RiichiSticks { get; set; }
+
+    /// <summary>Kyoku index within the current wind (typically 1–4).</summary>
+    [JsonPropertyName("round_number")]
+    public int? RoundNumber { get; set; }
+
+    [JsonPropertyName("player_score")]
+    public int? PlayerScore { get; set; }
+
+    /// <summary>Score for opponents[0] (Right of the player).</summary>
+    [JsonPropertyName("right_score")]
+    public int? RightScore { get; set; }
+
+    /// <summary>Score for opponents[1] (Opposite).</summary>
+    [JsonPropertyName("opposite_score")]
+    public int? OppositeScore { get; set; }
+
+    /// <summary>Score for opponents[2] (Left of the player).</summary>
+    [JsonPropertyName("left_score")]
+    public int? LeftScore { get; set; }
 }
 
 public sealed class OpponentInfo
@@ -80,7 +123,7 @@ public sealed class DiscardedTile
     public bool Tsumogiri { get; set; }
 }
 
-public sealed class EvaluateCallRequest
+public sealed class EvaluateCallRequest : ITableMetaRequest
 {
     [JsonPropertyName("hand")]
     public List<string> Hand { get; set; } = [];
@@ -123,6 +166,30 @@ public sealed class EvaluateCallRequest
 
     [JsonPropertyName("player")]
     public OpponentInfo? Player { get; set; }
+
+    /// <summary>Repeat counter (本場). 0 is valid and sent when known.</summary>
+    [JsonPropertyName("honba")]
+    public int? Honba { get; set; }
+
+    /// <summary>Riichi sticks currently on the table. 0 is valid and sent when known.</summary>
+    [JsonPropertyName("riichi_sticks")]
+    public int? RiichiSticks { get; set; }
+
+    /// <summary>Kyoku index within the current wind (typically 1–4).</summary>
+    [JsonPropertyName("round_number")]
+    public int? RoundNumber { get; set; }
+
+    /// <summary>Score for opponents[0] (Right of the player).</summary>
+    [JsonPropertyName("right_score")]
+    public int? RightScore { get; set; }
+
+    /// <summary>Score for opponents[1] (Opposite).</summary>
+    [JsonPropertyName("opposite_score")]
+    public int? OppositeScore { get; set; }
+
+    /// <summary>Score for opponents[2] (Left of the player).</summary>
+    [JsonPropertyName("left_score")]
+    public int? LeftScore { get; set; }
 }
 
 public sealed class ValidateMoveRequest
